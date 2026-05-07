@@ -1,0 +1,20 @@
+{
+  "disable-ab": "Y",
+  "disable-account": "Y",
+  "hide-server-settings": "Y",
+  "hide-network-settings": "Y",
+  "hide-security-settings": "Y",
+  "hide-stop-service": "Y",
+  "hide-help-cards": "Y",
+  "disable-change-id": "Y",
+  "disable-change-permanent-password": "Y",
+  "remove-preset-password-warning": "Y",
+  "default-settings": {
+    "direct-server": "Y",
+    "direct-access-port": "21118"
+  },
+  "override-settings": {
+    "direct-server": "Y",
+    "direct-access-port": "21118"
+  }
+}
