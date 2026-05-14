@@ -1,0 +1,75 @@
+# 构建产物
+build/
+dist/
+output/
+
+# 发行包和运行时二进制
+Release_*/
+backup/
+
+# 二进制和大型文件
+*.dll
+*.exe
+*.so
+*.lib
+*.exp
+*.pdb
+*.dat
+*.bin
+*.png
+*.jpg
+*.jpeg
+*.ico
+*.otf
+*.ttf
+*.zip
+*.msi
+*.jar
+*.mp3
+*.wav
+*.mp4
+*.frag
+
+# 项目资料（截图等大文件）
+项目资料/
+
+# 旧客户端发行包
+VNT虚拟组网2.0客户端/
+
+# IDE
+.vscode/
+.idea/
+.claude/
+
+# 系统文件
+Thumbs.db
+Desktop.ini
+
+# 临时目录
+_tmp_*/
+项目开发计划/
+进度快照/
+
+# Rust 编译缓存
+target/
+
+# Flutter
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.pub-cache/
+.pub/
+
+# 日志
+*.log
+logs/
+
+# 配置数据（运行时生成）
+config/config.json
+
+# 嵌入式 git 仓库
+vnts2.0windows/
+vntc2.0windows/
+
+# GitHub workflow patches 中的大文件
+.github/patches/*.zip
