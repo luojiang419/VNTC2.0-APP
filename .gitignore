@@ -29,6 +29,9 @@ backup/
 *.wav
 *.mp4
 *.frag
+!VntcApp1.0/docs/
+!VntcApp1.0/docs/screenshots/
+!VntcApp1.0/docs/screenshots/*.png
 
 # 项目资料（截图等大文件）
 项目资料/
