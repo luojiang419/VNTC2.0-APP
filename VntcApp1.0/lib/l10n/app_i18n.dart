@@ -25,11 +25,24 @@ enum AppLanguage {
   final String displayName;
   final Locale locale;
 
-  static AppLanguage fromCode(String? code) {
-    return AppLanguage.values.firstWhere(
-      (language) => language.code == code,
-      orElse: () => AppLanguage.zhHans,
-    );
+  static AppLanguage? tryFromCode(String? code) {
+    if (code == null || code.trim().isEmpty) {
+      return null;
+    }
+    for (final language in AppLanguage.values) {
+      if (language.code == code) {
+        return language;
+      }
+    }
+    return null;
+  }
+
+  static AppLanguage fromSystemLocale(Locale locale) {
+    final languageCode = locale.languageCode.toLowerCase();
+    if (languageCode.startsWith('zh')) {
+      return AppLanguage.zhHans;
+    }
+    return AppLanguage.en;
   }
 }
 
@@ -40,23 +53,33 @@ class AppLanguageController extends ChangeNotifier {
 
   final DataPersistence _dataPersistence = DataPersistence();
 
-  AppLanguage _language = AppLanguage.zhHans;
+  AppLanguage? _overrideLanguage;
 
-  AppLanguage get language => _language;
-  Locale get locale => _language.locale;
-  bool get isEnglish => _language == AppLanguage.en;
+  AppLanguage get language =>
+      _overrideLanguage ?? _detectSystemLanguage();
+  Locale get locale => language.locale;
+  bool get isEnglish => language == AppLanguage.en;
+  bool get isUsingSystemLanguage => _overrideLanguage == null;
+
+  AppLanguage _detectSystemLanguage() {
+    final locales = PlatformDispatcher.instance.locales;
+    if (locales.isNotEmpty) {
+      return AppLanguage.fromSystemLocale(locales.first);
+    }
+    return AppLanguage.fromSystemLocale(PlatformDispatcher.instance.locale);
+  }
 
   Future<void> load() async {
     final savedCode = await _dataPersistence.loadAppLanguageCode();
-    _language = AppLanguage.fromCode(savedCode);
+    _overrideLanguage = AppLanguage.tryFromCode(savedCode);
     notifyListeners();
   }
 
   Future<void> setLanguage(AppLanguage language) async {
-    if (_language == language) {
+    if (_overrideLanguage == language) {
       return;
     }
-    _language = language;
+    _overrideLanguage = language;
     await _dataPersistence.saveAppLanguageCode(language.code);
     notifyListeners();
   }
