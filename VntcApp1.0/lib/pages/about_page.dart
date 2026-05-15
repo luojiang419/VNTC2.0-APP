@@ -15,7 +15,7 @@ class AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<AboutPage> {
   // 硬编码版本号
-  final String _version = '1.2.18';
+  final String _version = '1.2.19';
   final String _buildNumber = '1';
 
   @override
