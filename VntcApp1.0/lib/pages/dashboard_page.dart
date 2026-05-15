@@ -1,7 +1,8 @@
 import 'dart:async';
-import 'dart:io';
+import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/data_persistence.dart';
@@ -568,7 +569,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         SizedBox(width: context.spacing(16)),
         Text(
-          '仪表盘',
+          '仪表盘'.tr(),
           style: TextStyle(
             fontSize: context.sp(28),
             fontWeight: FontWeight.bold,
@@ -630,7 +631,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    hasConnection ? '已连接' : '未连接',
+                    (hasConnection ? '已连接' : '未连接').tr(),
                     style: TextStyle(
                       fontSize: context.sp(28),
                       fontWeight: FontWeight.bold,
@@ -640,8 +641,10 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(height: context.spacing(4)),
                   Text(
                     hasConnection
-                        ? (_configName.isNotEmpty ? _configName : '未知配置名')
-                        : (_defaultConfigName.isNotEmpty ? '$_defaultConfigName (点击连接)' : '点击新建配置'),
+                        ? (_configName.isNotEmpty ? _configName : '未知配置名'.tr())
+                        : (_defaultConfigName.isNotEmpty
+                            ? '{name} (点击连接)'.tr({'name': _defaultConfigName})
+                            : '点击新建配置'.tr()),
                     style: TextStyle(
                       fontSize: context.sp(16),
                       color: Colors.white.withOpacity(0.9),
@@ -654,7 +657,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         Icon(Icons.link, color: Colors.white.withOpacity(0.9), size: context.iconSize(16)),
                         SizedBox(width: context.spacing(4)),
                         Text(
-                          '$_connectionCount 个活动连接',
+                          '{count} 个活动连接'.tr({'count': _connectionCount}),
                           style: TextStyle(
                             fontSize: context.sp(14),
                             color: Colors.white.withOpacity(0.9),
@@ -677,7 +680,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     _showConnectionDialog(isDark);
                   },
                   icon: Icon(Icons.power_settings_new, color: Colors.white, size: context.iconSize(28)),
-                  tooltip: '断开连接',
+                  tooltip: '断开连接'.tr(),
                 ),
               )
             else
@@ -688,7 +691,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 child: IconButton(
                   onPressed: _handleConnect,
                   icon: Icon(Icons.play_arrow, color: Colors.white, size: context.iconSize(28)),
-                  tooltip: '连接',
+                  tooltip: '连接'.tr(),
                 ),
               ),
           ],
@@ -737,7 +740,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 SizedBox(height: context.spacing(24)),
                 // 标题
                 Text(
-                  '目前有 $_connectionCount 个活动连接',
+                  '目前有 {count} 个活动连接'.tr({'count': _connectionCount}),
                   style: TextStyle(
                     fontSize: context.sp(20),
                     fontWeight: FontWeight.bold,
@@ -747,7 +750,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 SizedBox(height: context.spacing(12)),
                 // 副标题
                 Text(
-                  '是否断开组网连接?',
+                  '是否断开组网连接?'.tr(),
                   style: TextStyle(
                     fontSize: context.sp(14),
                     color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -3783,7 +3786,7 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
           const SizedBox(width: 8),
           Text(
-            title,
+            title.tr(),
             style: TextStyle(
               fontSize: context.fontMedium,
               fontWeight: FontWeight.w600,
@@ -3972,15 +3975,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       _buildSectionTitle(isDark, '网络配置'),
                       _buildDeviceInfoItem(isDark, 'MTU', config.mtu.toString()),
                       _buildDeviceInfoItem(isDark, '端口', config.ports.isEmpty ? '自动' : config.ports.join(', ')),
-                      _buildDeviceInfoItem(
-                        isDark,
-                        Platform.isAndroid ? '连接模式' : '虚拟网卡名称',
-                        Platform.isAndroid
-                            ? 'Android VPN Service'
-                            : (config.virtualNetworkCardName.isEmpty
-                                ? '默认'
-                                : config.virtualNetworkCardName),
-                      ),
+                      _buildDeviceInfoItem(isDark, '虚拟网卡名称', config.virtualNetworkCardName.isEmpty ? '默认' : config.virtualNetworkCardName),
                       _buildDeviceInfoItem(isDark, 'DNS', config.dns.isEmpty ? '未设置' : config.dns.join(', ')),
 
                       const SizedBox(height: 16),

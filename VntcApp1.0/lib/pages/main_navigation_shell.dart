@@ -1,6 +1,8 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
 import 'package:vnt_app/network_config.dart';
@@ -13,6 +15,7 @@ import 'package:vnt_app/pages/settings_page.dart';
 import 'package:vnt_app/pages/about_page.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
+import 'package:vnt_app/utils/responsive_utils.dart';
 import 'dart:isolate';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/widgets/custom_title_bar.dart';
@@ -43,17 +46,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     _NavItem(
         icon: Icons.dashboard_outlined,
         activeIcon: Icons.dashboard,
-        label: '仪表盘',
-        mobileLabel: '总览'),
+        label: '仪表盘'),
     _NavItem(
         icon: Icons.meeting_room_outlined,
         activeIcon: Icons.meeting_room,
         label: '房间'),
-    _NavItem(
-        icon: Icons.link_outlined,
-        activeIcon: Icons.link,
-        label: '链接状态',
-        mobileLabel: '链接'),
+    _NavItem(icon: Icons.link_outlined, activeIcon: Icons.link, label: '链接状态'),
     _NavItem(
         icon: Icons.folder_outlined, activeIcon: Icons.folder, label: '配置'),
     _NavItem(
@@ -111,7 +109,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     if (targetKey == null || targetKey.isEmpty) {
       // 如果是从磁贴启动但没有配置，提示用户
       if (isTileStart && mounted) {
-        showTopToast(context, '请先在配置页面设置默认配置', isSuccess: false);
+        showTopToast(context, '请先在配置页面设置默认配置'.tr(), isSuccess: false);
       }
       return;
     }
@@ -120,7 +118,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final config = configs.where((c) => c.itemKey == targetKey).firstOrNull;
     if (config == null) {
       if (isTileStart && mounted) {
-        showTopToast(context, '配置不存在，请重新设置', isSuccess: false);
+        showTopToast(context, '配置不存在，请重新设置'.tr(), isSuccess: false);
       }
       return;
     }
@@ -135,14 +133,18 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   Future<void> _connectToConfigDirectly(NetworkConfig config) async {
     if (vntManager.hasConnectionItem(config.itemKey)) {
       if (mounted) {
-        showTopToast(context, '[${config.configName}] 已连接', isSuccess: true);
+        showTopToast(
+          context,
+          '[{name}] 已连接'.tr({'name': config.configName}),
+          isSuccess: true,
+        );
       }
       return;
     }
 
     if (vntManager.isConnecting()) {
       if (mounted) {
-        showTopToast(context, '正在连接中，请稍后再试', isSuccess: false);
+        showTopToast(context, '正在连接中，请稍后再试'.tr(), isSuccess: false);
       }
       return;
     }
@@ -196,7 +198,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                   CircularProgressIndicator(color: primaryColor),
                   const SizedBox(height: 20),
                   Text(
-                    '正在连接 ${config.configName} ...',
+                    '正在连接 {name} ...'.tr({'name': config.configName}),
                     style: TextStyle(
                       color: isDark
                           ? AppTheme.darkTextPrimary
@@ -213,7 +215,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                       backgroundColor: AppTheme.errorColor,
                       foregroundColor: Colors.white,
                     ),
-                    child: const Text('取消'),
+                    child: Text('取消'.tr()),
                   ),
                 ],
               ),
@@ -237,8 +239,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             setState(() {
               _selectedConfig = config;
             });
-            showTopToast(context, '[${config.configName}] 连接成功',
-                isSuccess: true);
+            showTopToast(
+              context,
+              '[{name}] 连接成功'.tr({'name': config.configName}),
+              isSuccess: true,
+            );
             // 连接成功，更新磁贴和小组件状态
             if (Platform.isAndroid) {
               VntAppCall.updateWidgetAndTile(true);
@@ -248,8 +253,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             await SystemTrayManager().updateTooltip();
           } else {
             // 重连成功（onece 已经是 false，说明之前已经连接过）
-            showTopToast(context, '[${config.configName}] 已重新连接到服务器',
-                isSuccess: true);
+            showTopToast(
+              context,
+              '[{name}] 已重新连接到服务器'.tr({'name': config.configName}),
+              isSuccess: true,
+            );
           }
         } else if (msg == 'stop') {
           vntManager.remove(config.itemKey);
@@ -258,8 +266,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             closeDialog(); // 关闭连接中对话框
           }
           // 统一显示"服务已停止"提示
-          showTopToast(context, '[${config.configName}] 服务已停止',
-              isSuccess: false);
+          showTopToast(
+            context,
+            '[{name}] 服务已停止'.tr({'name': config.configName}),
+            isSuccess: false,
+          );
           // 服务停止，更新磁贴和小组件状态
           if (Platform.isAndroid) {
             VntAppCall.updateWidgetAndTile(vntManager.hasConnection());
@@ -320,7 +331,31 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
       closeDialog(); // 关闭连接中对话框
       var msg = e.toString();
-      showTopToast(context, '连接失败 $msg', isSuccess: false);
+      showTopToast(
+        context,
+        '连接失败 {message}'.tr({'message': '$msg'}),
+        isSuccess: false,
+      );
+    }
+  }
+
+  Future<void> _attemptAutoRepairIdentityConflict(String configName) async {
+    if (!Platform.isWindows) {
+      return;
+    }
+    try {
+      final result =
+          await DataPersistence().repairWindowsRuntimeIdentityConflict();
+      if (result?.rotated != true || !mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        '[$configName] 检测到分发身份冲突，已自动生成新的设备ID，请重新连接',
+        isSuccess: true,
+      );
+    } catch (e) {
+      debugPrint('自动修复 Windows 身份冲突失败: $e');
     }
   }
 
@@ -338,7 +373,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         errorMessage = '[$configName] 地址已用尽';
         break;
       case RustErrorType.ipAlreadyExists:
-        errorMessage = '[$configName] IP已存在';
+        errorMessage = '[$configName] 检测到重复IP冲突，正在自动重置设备ID';
+        unawaited(_attemptAutoRepairIdentityConflict(configName));
         break;
       case RustErrorType.invalidIp:
         errorMessage = '[$configName] 无效的IP';
@@ -347,9 +383,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         errorMessage = '[$configName] 本地IP已存在';
         break;
       case RustErrorType.failedToCreateDevice:
-        errorMessage = Platform.isAndroid
-            ? '[$configName] VPN 启动失败'
-            : '[$configName] 虚拟网卡创建失败';
+        errorMessage = '[$configName] 虚拟网卡创建失败';
         break;
       case RustErrorType.warn:
         errorMessage = '[$configName] 警告';
@@ -392,23 +426,34 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         });
 
         if (mounted) {
-          showTopToast(context, '[${config.configName}] VPN连接成功',
-              isSuccess: true);
+          showTopToast(
+            context,
+            '[{name}] VPN连接成功'.tr({'name': config.configName}),
+            isSuccess: true,
+          );
         }
 
         debugPrint('[iOS VPN] Connection successful');
       } else {
         if (mounted) {
-          showTopToast(context, '[${config.configName}] VPN连接失败，请确认已添加VPN权限',
-              isSuccess: false);
+          showTopToast(
+            context,
+            '[{name}] VPN连接失败，请确认已添加VPN权限'
+                .tr({'name': config.configName}),
+            isSuccess: false,
+          );
         }
         debugPrint('[iOS VPN] Connection failed');
       }
     } catch (e) {
       debugPrint('[iOS VPN] Connection error: $e');
       if (mounted) {
-        showTopToast(context, '[${config.configName}] VPN连接异常: $e',
-            isSuccess: false);
+        showTopToast(
+          context,
+          '[{name}] VPN连接异常: {error}'
+              .tr({'name': config.configName, 'error': '$e'}),
+          isSuccess: false,
+        );
       }
     }
   }
@@ -419,7 +464,6 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 800;
     final isMediumScreen = screenWidth > 600 && screenWidth <= 800;
-    final useCompactBottomDock = !isWideScreen && !isMediumScreen;
 
     // 设置状态栏颜色以适配当前主题（仅移动端）
     if (Platform.isAndroid || Platform.isIOS) {
@@ -433,7 +477,6 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     }
 
     return Scaffold(
-      extendBody: useCompactBottomDock,
       backgroundColor:
           isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
       body: Column(
@@ -460,7 +503,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         ],
       ),
       // 底部导航栏（窄屏显示）
-      bottomNavigationBar: useCompactBottomDock
+      bottomNavigationBar: (!isWideScreen && !isMediumScreen)
           ? _buildBottomNavigation(isDark)
           : null,
     );
@@ -469,6 +512,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   Widget _buildSideNavigation(bool isDark, bool isExpanded) {
     final primaryColor = Theme.of(context).primaryColor;
     final screenHeight = MediaQuery.of(context).size.height;
+    final screenWidth = MediaQuery.of(context).size.width;
 
     // 根据屏幕高度自动缩放所有尺寸，避免太小或太大出现滚动
     // 基准高度：700px，高度越小缩放比例越小，高度越大缩放比例越大
@@ -620,7 +664,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                               ),
                               SizedBox(height: navItemSpacing),
                               Text(
-                                item.label,
+                                item.label.tr(),
                                 style: TextStyle(
                                   fontSize: navFontSize,
                                   fontWeight: isSelected
@@ -682,7 +726,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                         ),
                         SizedBox(height: navItemSpacing),
                         Text(
-                          isDark ? '日间' : '暗黑',
+                          (isDark ? '日间' : '暗黑').tr(),
                           style: TextStyle(
                             fontSize: navFontSize,
                             color: isDark
@@ -705,122 +749,68 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   Widget _buildBottomNavigation(bool isDark) {
     final primaryColor = Theme.of(context).primaryColor;
-    final screenWidth = MediaQuery.of(context).size.width;
-    final isCompact = screenWidth < 390;
-    final dockHorizontalPadding = isCompact ? 10.0 : 14.0;
-    final dockBottomPadding = isCompact ? 10.0 : 12.0;
-    final dockRadius = isCompact ? 24.0 : 28.0;
-    final itemRadius = isCompact ? 18.0 : 20.0;
-    final itemSpacing = isCompact ? 4.0 : 6.0;
-    final itemVerticalPadding = isCompact ? 7.0 : 9.0;
-    final iconSize = isCompact ? 20.0 : 22.0;
-    final labelSize = isCompact ? 10.0 : 11.0;
-    final inactiveColor =
-        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
-
-    return SafeArea(
-      top: false,
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          dockHorizontalPadding,
-          0,
-          dockHorizontalPadding,
-          dockBottomPadding,
-        ),
-        child: Container(
-          padding: EdgeInsets.all(isCompact ? 6.0 : 8.0),
-          decoration: BoxDecoration(
-            color: isDark
-                ? AppTheme.darkCardBackground.withOpacity(0.94)
-                : AppTheme.lightCardBackground.withOpacity(0.96),
-            borderRadius: BorderRadius.circular(dockRadius),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withOpacity(0.06)
-                  : Colors.black.withOpacity(0.06),
-            ),
-            boxShadow: [
-              BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.30 : 0.10),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
-              ),
-            ],
+    return Container(
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, -2),
           ),
+        ],
+      ),
+      child: SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           child: Row(
+            mainAxisAlignment: MainAxisAlignment.spaceAround,
             children: List.generate(_navItems.length, (index) {
               final item = _navItems[index];
               final isSelected = _selectedIndex == index;
 
               return Expanded(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: itemSpacing / 2),
-                  child: Semantics(
-                    button: true,
-                    selected: isSelected,
-                    label: item.label,
-                    child: InkWell(
-                      onTap: () => setState(() => _selectedIndex = index),
-                      borderRadius: BorderRadius.circular(itemRadius),
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOutCubic,
-                        padding: EdgeInsets.symmetric(
-                          horizontal: isCompact ? 2.0 : 4.0,
-                          vertical: itemVerticalPadding,
+                child: InkWell(
+                  onTap: () => setState(() => _selectedIndex = index),
+                  borderRadius: BorderRadius.circular(12),
+                  child: AnimatedContainer(
+                    duration: const Duration(milliseconds: 200),
+                    padding: const EdgeInsets.symmetric(vertical: 8),
+                    decoration: BoxDecoration(
+                      color: isSelected
+                          ? primaryColor.withOpacity(0.1)
+                          : Colors.transparent,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Icon(
+                          isSelected ? item.activeIcon : item.icon,
+                          color: isSelected
+                              ? primaryColor
+                              : (isDark
+                                  ? AppTheme.darkTextSecondary
+                                  : AppTheme.lightTextSecondary),
+                          size: 24,
                         ),
-                        decoration: BoxDecoration(
-                          gradient: isSelected
-                              ? LinearGradient(
-                                  colors: [
-                                    primaryColor,
-                                    primaryColor.withOpacity(0.82),
-                                  ],
-                                  begin: Alignment.topCenter,
-                                  end: Alignment.bottomCenter,
-                                )
-                              : null,
-                          color: isSelected ? null : Colors.transparent,
-                          borderRadius: BorderRadius.circular(itemRadius),
-                          boxShadow: isSelected
-                              ? [
-                                  BoxShadow(
-                                    color: primaryColor.withOpacity(0.24),
-                                    blurRadius: 12,
-                                    offset: const Offset(0, 4),
-                                  ),
-                                ]
-                              : null,
+                        const SizedBox(height: 4),
+                        Text(
+                          item.label.tr(),
+                          style: TextStyle(
+                            fontSize: context.fontXSmall,
+                            fontWeight: isSelected
+                                ? FontWeight.w600
+                                : FontWeight.normal,
+                            color: isSelected
+                                ? primaryColor
+                                : (isDark
+                                    ? AppTheme.darkTextSecondary
+                                    : AppTheme.lightTextSecondary),
+                          ),
                         ),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Icon(
-                              isSelected ? item.activeIcon : item.icon,
-                              color: isSelected ? Colors.white : inactiveColor,
-                              size: iconSize,
-                            ),
-                            SizedBox(height: isCompact ? 2.0 : 4.0),
-                            FittedBox(
-                              fit: BoxFit.scaleDown,
-                              child: Text(
-                                item.dockLabel,
-                                maxLines: 1,
-                                overflow: TextOverflow.fade,
-                                softWrap: false,
-                                style: TextStyle(
-                                  fontSize: labelSize,
-                                  fontWeight: isSelected
-                                      ? FontWeight.w700
-                                      : FontWeight.w500,
-                                  color:
-                                      isSelected ? Colors.white : inactiveColor,
-                                ),
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
+                      ],
                     ),
                   ),
                 ),
@@ -949,14 +939,10 @@ class _NavItem {
   final IconData icon;
   final IconData activeIcon;
   final String label;
-  final String? mobileLabel;
-
-  String get dockLabel => mobileLabel ?? label;
 
   const _NavItem({
     required this.icon,
     required this.activeIcon,
     required this.label,
-    this.mobileLabel,
   });
 }

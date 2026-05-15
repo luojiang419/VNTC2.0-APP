@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
@@ -14,7 +15,7 @@ class AboutPage extends StatefulWidget {
 
 class _AboutPageState extends State<AboutPage> {
   // 硬编码版本号
-  final String _version = '1.2.17';
+  final String _version = '1.2.18';
   final String _buildNumber = '1';
 
   @override
@@ -91,7 +92,7 @@ class _AboutPageState extends State<AboutPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '关于',
+                '关于'.tr(),
                 style: TextStyle(
                   fontSize: context.fontXLarge,
                   fontWeight: FontWeight.bold,
@@ -99,7 +100,7 @@ class _AboutPageState extends State<AboutPage> {
                 ),
               ),
               Text(
-                '应用信息与帮助',
+                '应用信息与帮助'.tr(),
                 style: TextStyle(
                   fontSize: context.fontBody,
                   color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -197,7 +198,7 @@ class _AboutPageState extends State<AboutPage> {
 
           // 应用描述
           Text(
-            '一个简单、高效、能快速组建虚拟局域网的工具',
+            '一个简单、高效、能快速组建虚拟局域网的工具'.tr(),
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: context.fontMedium,
@@ -238,7 +239,7 @@ class _AboutPageState extends State<AboutPage> {
               ),
               SizedBox(width: context.spacingSmall),
               Text(
-                '项目开源地址',
+                '项目开源地址'.tr(),
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
@@ -249,7 +250,7 @@ class _AboutPageState extends State<AboutPage> {
           ),
           SizedBox(height: context.spacingMedium),
           Text(
-            'VNT 是一个高性能、跨平台的虚拟组网工具',
+            'VNT 是一个高性能、跨平台的虚拟组网工具'.tr(),
             style: TextStyle(
               fontSize: context.fontBody,
               color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -336,7 +337,7 @@ class _AboutPageState extends State<AboutPage> {
               ),
               SizedBox(width: context.spacingSmall),
               Text(
-                '功能特性',
+                '功能特性'.tr(),
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
@@ -416,7 +417,7 @@ class _AboutPageState extends State<AboutPage> {
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                title,
+                title.tr(),
                 style: TextStyle(
                   fontSize: context.fontMedium,
                   fontWeight: FontWeight.w600,
@@ -425,7 +426,7 @@ class _AboutPageState extends State<AboutPage> {
               ),
               SizedBox(height: context.spacing(2)),
               Text(
-                subtitle,
+                subtitle.tr(),
                 style: TextStyle(
                   fontSize: context.fontSmall,
                   color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -467,7 +468,7 @@ class _AboutPageState extends State<AboutPage> {
               ),
               SizedBox(width: context.spacingSmall),
               Text(
-                '联系我们',
+                '联系我们'.tr(),
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
@@ -559,7 +560,7 @@ class _AboutPageState extends State<AboutPage> {
           ),
           SizedBox(height: context.spacingMedium),
           Text(
-            'VNT 项目遵循 Apache License 2.0 开源许可证',
+            'VNT 项目遵循 Apache License 2.0 开源许可证'.tr(),
             style: TextStyle(
               fontSize: context.fontBody,
               color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -612,7 +613,7 @@ class _AboutPageState extends State<AboutPage> {
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
+                    title.tr(),
                     style: TextStyle(
                       fontSize: context.buttonFontSize,
                       fontWeight: FontWeight.w600,
@@ -621,7 +622,7 @@ class _AboutPageState extends State<AboutPage> {
                   ),
                   SizedBox(height: context.spacing(2)),
                   Text(
-                    subtitle,
+                    subtitle.tr(),
                     style: TextStyle(
                       fontSize: context.fontSmall,
                       color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -648,7 +649,11 @@ class _AboutPageState extends State<AboutPage> {
       await launchUrl(Uri.parse(url), mode: LaunchMode.externalApplication);
     } catch (e) {
       if (mounted) {
-        showTopToast(context, '无法打开链接: $e', isSuccess: false);
+        showTopToast(
+          context,
+          '无法打开链接: {error}'.tr({'error': '$e'}),
+          isSuccess: false,
+        );
       }
     }
   }

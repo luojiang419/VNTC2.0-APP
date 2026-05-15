@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
@@ -117,7 +118,7 @@ class ConfigCard extends StatelessWidget {
                           Icon(Icons.edit_outlined, size: context.iconSize(20), color: primaryColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
-                            '编辑',
+                            '编辑'.tr(),
                             style: TextStyle(
                               fontSize: context.sp(14),
                               color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
@@ -133,7 +134,7 @@ class ConfigCard extends StatelessWidget {
                           Icon(Icons.copy_outlined, size: context.iconSize(20), color: AppTheme.infoColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
-                            '复制',
+                            '复制'.tr(),
                             style: TextStyle(
                               fontSize: context.sp(14),
                               color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
@@ -149,7 +150,7 @@ class ConfigCard extends StatelessWidget {
                           Icon(Icons.delete_outlined, size: context.iconSize(20), color: AppTheme.errorColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
-                            '删除',
+                            '删除'.tr(),
                             style: TextStyle(
                               fontSize: context.sp(14),
                               color: AppTheme.errorColor,
@@ -179,7 +180,9 @@ class ConfigCard extends StatelessWidget {
               isDark,
               Icons.dns_outlined,
               '服务器',
-              config.serverAddress.isNotEmpty ? config.serverAddress : '默认服务器',
+              config.serverAddress.isNotEmpty
+                  ? config.serverAddress
+                  : '默认服务器'.tr(),
             ),
             SizedBox(height: context.spacing(8)),
             _buildInfoRow(
@@ -187,7 +190,7 @@ class ConfigCard extends StatelessWidget {
               isDark,
               Icons.computer_outlined,
               '设备名',
-              config.deviceName.isNotEmpty ? config.deviceName : '自动',
+              config.deviceName.isNotEmpty ? config.deviceName : '自动'.tr(),
             ),
             if (config.virtualIPv4.isNotEmpty) ...[
               SizedBox(height: context.spacing(8)),
@@ -218,7 +221,7 @@ class ConfigCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(context.radius(20)),
                   ),
                   child: Text(
-                    isConnected ? '已连接' : '未连接',
+                    (isConnected ? '已连接' : '未连接').tr(),
                     style: TextStyle(
                       fontSize: context.fontSmall,
                       fontWeight: FontWeight.w500,
@@ -243,7 +246,7 @@ class ConfigCard extends StatelessWidget {
                     ),
                     elevation: 0,
                   ),
-                  child: Text(isConnected ? '查看' : '连接'),
+                  child: Text((isConnected ? '查看' : '连接').tr()),
                 ),
               ],
             ),
@@ -263,7 +266,7 @@ class ConfigCard extends StatelessWidget {
         ),
         SizedBox(width: context.spacing(8)),
         Text(
-          '$label: ',
+          '${label.tr()}: ',
           style: TextStyle(
             fontSize: context.fontSmall,
             color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,

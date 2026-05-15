@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
@@ -160,9 +161,9 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                     fontWeight: FontWeight.w500,
                   ),
                   indicatorSize: TabBarIndicatorSize.tab,
-                  tabs: const [
-                    Tab(text: '设备'),
-                    Tab(text: '路由'),
+                  tabs: [
+                    Tab(text: '设备'.tr()),
+                    Tab(text: '路由'.tr()),
                   ],
                 ),
               ),
@@ -228,7 +229,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '链接状态',
+                '链接状态'.tr(),
                 style: TextStyle(
                   fontSize: context.fontXLarge,
                   fontWeight: FontWeight.bold,
@@ -239,8 +240,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
               ),
               Text(
                 hasConnection
-                    ? (configName != null ? '已连接 $configName' : '已连接网络')
-                    : '未连接',
+                    ? (configName != null
+                        ? '已连接 {name}'.tr({'name': configName})
+                        : '已连接网络'.tr())
+                    : '未连接'.tr(),
                 style: TextStyle(
                   fontSize: context.fontBody,
                   color: isDark
@@ -261,7 +264,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
               color:
                   isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
-            tooltip: '当前设备信息',
+            tooltip: '当前设备信息'.tr(),
           ),
           // 网络配置详情图标
           IconButton(
@@ -1685,7 +1688,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
         ),
         SizedBox(width: isLandscape ? 5 : (isMobile ? 6 : 8)),
         Text(
-          title,
+          title.tr(),
           style: TextStyle(
             fontSize: isLandscape ? 12 : (isMobile ? 13 : 15),
             fontWeight: FontWeight.w600,
@@ -1705,7 +1708,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
       mainAxisAlignment: MainAxisAlignment.spaceBetween,
       children: [
         Text(
-          label,
+          label.tr(),
           style: TextStyle(
             fontSize: isLandscape ? 10 : (isMobile ? 11 : 13),
             color: isDark

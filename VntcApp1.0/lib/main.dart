@@ -21,14 +21,11 @@ import 'package:vnt_app/utils/window_restore_guard.dart';
 import 'package:vnt_app/utils/log_utils.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/config_manager.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 
 final SystemTray systemTray = SystemTray();
 final AppWindow appWindow = AppWindow();
-
-/// 是否静默启动（通过 --silent 命令行参数触发）
-final bool isSilentStart = Platform.isWindows &&
-    Platform.executableArguments.contains('--silent');
 
 void _writeBootTrace(String message) {
   try {
@@ -149,6 +146,23 @@ Future<void> main() async {
     _writeBootTrace('before ConfigManager.init');
     await ConfigManager().init();
     _writeBootTrace('after ConfigManager.init');
+    final identityRefresh =
+        await DataPersistence().ensureWindowsRuntimeIdentityOwnership();
+    if (identityRefresh != null) {
+      _writeBootTrace(
+        'windows identity ownership '
+        'reason=${identityRefresh.reason} '
+        'rotated=${identityRefresh.rotated} '
+        'updatedConfigs=${identityRefresh.updatedConfigCount}',
+      );
+      if (identityRefresh.rotated) {
+        debugPrint(
+          'Windows 运行时身份已自动刷新: '
+          'reason=${identityRefresh.reason}, '
+          'configs=${identityRefresh.updatedConfigCount}',
+        );
+      }
+    }
   }
 
   // 初始化日志系统，所有平台统一使用log4rs
@@ -183,12 +197,12 @@ Future<void> main() async {
     // macOS 使用系统原生标题栏（保留所有原生窗口功能）
     if (Platform.isMacOS) {
       // macOS 专用配置 - 使用系统标题栏
-      WindowOptions windowOptions = WindowOptions(
-        size: const Size(1000, 700),
-        minimumSize: const Size(800, 600),
+      WindowOptions windowOptions = const WindowOptions(
+        size: Size(1000, 700),
+        minimumSize: Size(800, 600),
         center: true,
         backgroundColor: Colors.transparent,
-        skipTaskbar: isSilentStart,
+        skipTaskbar: false,
         titleBarStyle: TitleBarStyle.normal, // macOS 使用系统标题栏
       );
 
@@ -212,22 +226,19 @@ Future<void> main() async {
         await windowManager.setMinimizable(false);
         await windowManager.setMaximizable(false);
 
-        if (isSilentStart) {
-          await appWindow.hide();
-        } else {
-          await appWindow.show();
-        }
+        // 显示窗口
+        await appWindow.show();
       });
     } else {
       // Windows 和 Linux 保持原有逻辑
       const defaultWindowSize = WindowRestoreGuard.defaultWindowSize;
       const minimumWindowSize = WindowRestoreGuard.minimumWindowSize;
-      final windowOptions = WindowOptions(
+      const windowOptions = WindowOptions(
         size: defaultWindowSize,
         minimumSize: minimumWindowSize,
         center: true,
         backgroundColor: Colors.transparent,
-        skipTaskbar: isSilentStart,
+        skipTaskbar: false,
       );
       final dataPersistence = DataPersistence();
       await windowManager.waitUntilReadyToShow(windowOptions, () async {
@@ -263,12 +274,8 @@ Future<void> main() async {
         await dataPersistence.saveWindowSize(placement.size);
         await dataPersistence.saveWindowPosition(placement.position);
 
-        if (isSilentStart) {
-          await appWindow.hide();
-        } else {
-          await appWindow.show();
-          await windowManager.focus();
-        }
+        await appWindow.show();
+        await windowManager.focus();
 
         _writeBootTrace(
           'window restore decision=${placement.decision.name} '
@@ -303,8 +310,23 @@ class _VntAppState extends State<VntApp> {
   @override
   void initState() {
     super.initState();
+    AppLanguageController.instance.addListener(_handleLanguageChanged);
+    AppLanguageController.instance.load();
     _loadThemeMode();
     _loadCustomThemeColor();
+  }
+
+  @override
+  void dispose() {
+    AppLanguageController.instance.removeListener(_handleLanguageChanged);
+    super.dispose();
+  }
+
+  void _handleLanguageChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(() {});
   }
 
   Future<void> _loadThemeMode() async {
@@ -360,7 +382,7 @@ class _VntAppState extends State<VntApp> {
           Locale('zh', 'Hans'), // 简体中文
           Locale('en', ''), // 英文
         ],
-        locale: const Locale('zh', 'CN'), // 默认使用中文
+        locale: AppLanguageController.instance.locale,
         theme: AppTheme.createLightTheme(_customThemeColor),
         darkTheme: AppTheme.createDarkTheme(_customThemeColor),
         themeMode: _themeMode,
@@ -812,13 +834,7 @@ Future<void> initSystemTray() async {
   // 注册事件处理器
   systemTray.registerSystemTrayEventHandler((eventName) {
     if (eventName == kSystemTrayEventClick) {
-      Platform.isWindows
-          ? () async {
-              await windowManager.show();
-              await windowManager.setSkipTaskbar(false);
-              await windowManager.focus();
-            }()
-          : systemTray.popUpContextMenu();
+      Platform.isWindows ? windowManager.show() : systemTray.popUpContextMenu();
     } else if (eventName == kSystemTrayEventRightClick) {
       Platform.isWindows ? systemTray.popUpContextMenu() : windowManager.show();
     }

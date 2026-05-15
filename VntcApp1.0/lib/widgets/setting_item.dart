@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
@@ -63,7 +64,7 @@ class SettingItem extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      title,
+                      title.tr(),
                       style: TextStyle(
                         fontSize: context.fontMedium,
                         fontWeight: FontWeight.w500,
@@ -79,7 +80,7 @@ class SettingItem extends StatelessWidget {
                     if (subtitle != null) ...[
                       SizedBox(height: context.spacing(2)),
                       Text(
-                        subtitle!,
+                        subtitle!.tr(),
                         style: TextStyle(
                           fontSize: context.fontSmall,
                           color: isDark
@@ -174,7 +175,7 @@ class SettingGroupTitle extends StatelessWidget {
         context.spacing(8),
       ),
       child: Text(
-        title,
+        title.tr(),
         style: TextStyle(
           fontSize: context.fontSmall,
           fontWeight: FontWeight.w600,

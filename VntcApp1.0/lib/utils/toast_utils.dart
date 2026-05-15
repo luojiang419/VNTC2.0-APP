@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
 // 全局活跃 Toast 列表
@@ -14,7 +15,7 @@ void showTopToast(BuildContext context, String message, {bool isSuccess = true})
 
   overlayEntry = OverlayEntry(
     builder: (context) => _TopToast(
-      message: message,
+      message: message.tr(),
       isSuccess: isSuccess,
       toastInfo: toastInfo,
       onDismiss: () {

@@ -4,23 +4,49 @@ import 'network_config.dart';
 import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'dart:io';
+import 'package:path/path.dart' as path;
 import 'config_manager.dart';
 import 'window_close_behavior.dart';
+
+class WindowsRuntimeIdentityRefreshResult {
+  const WindowsRuntimeIdentityRefreshResult({
+    required this.rotated,
+    required this.reason,
+    required this.uniqueId,
+    required this.updatedConfigCount,
+    required this.installRegistrationId,
+  });
+
+  final bool rotated;
+  final String reason;
+  final String uniqueId;
+  final int updatedConfigCount;
+  final String installRegistrationId;
+}
 
 class DataPersistence {
   static const String dataKey = 'data-key';
   static const String dataKeyForNative = 'data-key-native';
   static const String vntUniqueIdKey = 'vnt-unique-id-key';
+  static const String windowsInstallRegistrationKey =
+      'vnt-install-registration-id';
+  static const String windowsIdentityRefreshedAtKey =
+      'vnt-identity-refreshed-at';
   static const Set<String> windowsDistributionUnsafeKeys = {
     'window-x',
     'window-y',
     'window-width',
     'window-height',
     'vnt-unique-id-key',
+    'vnt-install-registration-id',
+    'vnt-identity-refreshed-at',
     'is-auto-start',
-    'is-silent-start',
     'is-always-on-top',
     'is-close-app',
+  };
+  static const Set<String> windowsDistributionUnsafeNetworkConfigKeys = {
+    'ip',
+    'device_id',
   };
 
   ConfigManager? _configManager;
@@ -88,6 +114,186 @@ class DataPersistence {
     }
 
     return uniqueId;
+  }
+
+  static bool shouldRotateWindowsIdentityForCopiedRuntime({
+    required String uniqueId,
+    required List<NetworkConfig> configs,
+    required bool hasRegistrationMarker,
+  }) {
+    if (hasRegistrationMarker) {
+      return false;
+    }
+    if (uniqueId.trim().isNotEmpty) {
+      return true;
+    }
+    return configs.any((config) => config.deviceID.trim().isNotEmpty);
+  }
+
+  static List<NetworkConfig> rebuildNetworkConfigsWithUniqueId(
+    List<NetworkConfig> configs,
+    String nextUniqueId,
+  ) {
+    return configs.map((config) {
+      config.deviceID = nextUniqueId;
+      return config;
+    }).toList(growable: false);
+  }
+
+  Future<Directory> _getWindowsIdentityRegistryDirectory() async {
+    final localAppData = Platform.environment['LOCALAPPDATA'];
+    final basePath = (localAppData != null && localAppData.trim().isNotEmpty)
+        ? localAppData
+        : Directory.systemTemp.path;
+    final directory = Directory(
+      path.join(basePath, 'VntcApp1.0', 'identity_registry'),
+    );
+    if (!await directory.exists()) {
+      await directory.create(recursive: true);
+    }
+    return directory;
+  }
+
+  Future<File> _getWindowsIdentityMarkerFile(String registrationId) async {
+    final directory = await _getWindowsIdentityRegistryDirectory();
+    return File(path.join(directory.path, '$registrationId.json'));
+  }
+
+  Future<void> _writeWindowsIdentityMarker({
+    required String registrationId,
+    required String uniqueId,
+    required String reason,
+    required int configCount,
+  }) async {
+    final markerFile = await _getWindowsIdentityMarkerFile(registrationId);
+    final payload = <String, dynamic>{
+      'registration_id': registrationId,
+      'unique_id': uniqueId,
+      'reason': reason,
+      'config_count': configCount,
+      'hostname': Platform.localHostname,
+      'username': Platform.environment['USERNAME'] ?? '',
+      'userdomain': Platform.environment['USERDOMAIN'] ?? '',
+      'resolved_executable': Platform.resolvedExecutable,
+      'written_at': DateTime.now().toIso8601String(),
+    };
+    await markerFile.writeAsString(
+      const JsonEncoder.withIndent('  ').convert(payload),
+    );
+  }
+
+  Future<WindowsRuntimeIdentityRefreshResult> _rotateWindowsRuntimeIdentity({
+    required String reason,
+  }) async {
+    final configManager = await _getConfigManager();
+    final configs = await loadData();
+    final nextUniqueId = const Uuid().v4().toString();
+    final nextRegistrationId = const Uuid().v4().toString();
+    final rebuiltConfigs = rebuildNetworkConfigsWithUniqueId(
+      configs,
+      nextUniqueId,
+    );
+    await saveData(rebuiltConfigs);
+    await configManager.setString(vntUniqueIdKey, nextUniqueId);
+    await configManager.setString(
+      windowsInstallRegistrationKey,
+      nextRegistrationId,
+    );
+    await configManager.setString(
+      windowsIdentityRefreshedAtKey,
+      DateTime.now().toIso8601String(),
+    );
+    await _writeWindowsIdentityMarker(
+      registrationId: nextRegistrationId,
+      uniqueId: nextUniqueId,
+      reason: reason,
+      configCount: rebuiltConfigs.length,
+    );
+    return WindowsRuntimeIdentityRefreshResult(
+      rotated: true,
+      reason: reason,
+      uniqueId: nextUniqueId,
+      updatedConfigCount: rebuiltConfigs.length,
+      installRegistrationId: nextRegistrationId,
+    );
+  }
+
+  Future<WindowsRuntimeIdentityRefreshResult?>
+      ensureWindowsRuntimeIdentityOwnership() async {
+    if (!Platform.isWindows) {
+      return null;
+    }
+    final configManager = await _getConfigManager();
+    final registrationId =
+        configManager.getString(windowsInstallRegistrationKey)?.trim() ?? '';
+    final currentUniqueId =
+        configManager.getString(vntUniqueIdKey)?.trim() ?? '';
+    final configs = await loadData();
+
+    if (registrationId.isEmpty) {
+      final nextRegistrationId = const Uuid().v4().toString();
+      await configManager.setString(
+        windowsInstallRegistrationKey,
+        nextRegistrationId,
+      );
+      await configManager.setString(
+        windowsIdentityRefreshedAtKey,
+        DateTime.now().toIso8601String(),
+      );
+      await _writeWindowsIdentityMarker(
+        registrationId: nextRegistrationId,
+        uniqueId: currentUniqueId,
+        reason: 'initialize-registration',
+        configCount: configs.length,
+      );
+      return WindowsRuntimeIdentityRefreshResult(
+        rotated: false,
+        reason: 'initialize-registration',
+        uniqueId: currentUniqueId,
+        updatedConfigCount: 0,
+        installRegistrationId: nextRegistrationId,
+      );
+    }
+
+    final markerFile = await _getWindowsIdentityMarkerFile(registrationId);
+    final hasRegistrationMarker = await markerFile.exists();
+    if (!shouldRotateWindowsIdentityForCopiedRuntime(
+      uniqueId: currentUniqueId,
+      configs: configs,
+      hasRegistrationMarker: hasRegistrationMarker,
+    )) {
+      await _writeWindowsIdentityMarker(
+        registrationId: registrationId,
+        uniqueId: currentUniqueId,
+        reason: hasRegistrationMarker
+            ? 'existing-owner'
+            : 'fresh-copy-without-identity',
+        configCount: configs.length,
+      );
+      return WindowsRuntimeIdentityRefreshResult(
+        rotated: false,
+        reason: hasRegistrationMarker
+            ? 'existing-owner'
+            : 'fresh-copy-without-identity',
+        uniqueId: currentUniqueId,
+        updatedConfigCount: 0,
+        installRegistrationId: registrationId,
+      );
+    }
+
+    return _rotateWindowsRuntimeIdentity(
+      reason: 'copied-runtime-detected',
+    );
+  }
+
+  Future<WindowsRuntimeIdentityRefreshResult?>
+      repairWindowsRuntimeIdentityConflict() async {
+    if (!Platform.isWindows) {
+      return null;
+    }
+    return _rotateWindowsRuntimeIdentity(
+      reason: 'ip-conflict-recovery',
+    );
   }
 
   Future<Size?> loadWindowSize() async {
@@ -273,26 +479,6 @@ class DataPersistence {
     }
   }
 
-  Future<bool?> loadSilentStart() async {
-    if (Platform.isWindows) {
-      final configManager = await _getConfigManager();
-      return configManager.getBool('is-silent-start');
-    } else {
-      final prefs = await SharedPreferences.getInstance();
-      return prefs.getBool('is-silent-start');
-    }
-  }
-
-  Future<void> saveSilentStart(bool silentStart) async {
-    if (Platform.isWindows) {
-      final configManager = await _getConfigManager();
-      await configManager.setBool('is-silent-start', silentStart);
-    } else {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setBool('is-silent-start', silentStart);
-    }
-  }
-
   Future<bool?> loadAutoConnect() async {
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
@@ -370,6 +556,26 @@ class DataPersistence {
     }
   }
 
+  Future<String?> loadAppLanguageCode() async {
+    if (Platform.isWindows) {
+      final configManager = await _getConfigManager();
+      return configManager.getString('app-language-code');
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      return prefs.getString('app-language-code');
+    }
+  }
+
+  Future<void> saveAppLanguageCode(String code) async {
+    if (Platform.isWindows) {
+      final configManager = await _getConfigManager();
+      await configManager.setString('app-language-code', code);
+    } else {
+      final prefs = await SharedPreferences.getInstance();
+      await prefs.setString('app-language-code', code);
+    }
+  }
+
   Future<void> saveCustomThemeColor(Color color) async {
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
@@ -414,7 +620,6 @@ class DataPersistence {
         final themeMode = await loadThemeMode();
         final customColor = await loadCustomThemeColor();
         final autoStart = await loadAutoStart();
-        final silentStart = await loadSilentStart();
         final autoConnect = await loadAutoConnect();
         final defaultKey = await loadDefaultKey();
         final closeApp = await loadCloseApp();
@@ -431,7 +636,6 @@ class DataPersistence {
           if (themeMode != null) 'theme_mode': themeMode.index,
           if (customColor != null) 'custom_theme_color': customColor.value,
           if (autoStart != null) 'auto_start': autoStart,
-          if (silentStart != null) 'silent_start': silentStart,
           if (autoConnect != null) 'auto_connect': autoConnect,
           if (defaultKey != null) 'default_key': defaultKey,
           if (closeApp != null) 'close_app': closeApp,
@@ -491,10 +695,6 @@ class DataPersistence {
 
         if (winSettings.containsKey('auto_start')) {
           await saveAutoStart(winSettings['auto_start']);
-        }
-
-        if (winSettings.containsKey('silent_start')) {
-          await saveSilentStart(winSettings['silent_start']);
         }
 
         if (winSettings.containsKey('auto_connect')) {
@@ -587,7 +787,48 @@ class DataPersistence {
     for (final key in windowsDistributionUnsafeKeys) {
       sanitized.remove(key);
     }
+    final dataKeyValue = sanitized[dataKey];
+    if (dataKeyValue is List) {
+      sanitized[dataKey] = dataKeyValue
+          .map((item) => _sanitizeSerializedNetworkConfig(item))
+          .toList(growable: false);
+    }
+    final nativeValue = sanitized[dataKeyForNative];
+    if (nativeValue is String && nativeValue.trim().isNotEmpty) {
+      try {
+        final decoded = jsonDecode(nativeValue);
+        if (decoded is List) {
+          final sanitizedList = decoded
+              .map((item) => _sanitizeSerializedNetworkConfig(item))
+              .toList(growable: false);
+          sanitized[dataKeyForNative] = jsonEncode(sanitizedList);
+        }
+      } catch (_) {
+        // 保持原值，避免异常配置影响分发脚本
+      }
+    }
     return sanitized;
+  }
+
+  static String _sanitizeSerializedNetworkConfig(Object? rawItem) {
+    if (rawItem is! String || rawItem.trim().isEmpty) {
+      return rawItem?.toString() ?? '';
+    }
+    try {
+      final decoded = jsonDecode(rawItem);
+      if (decoded is! Map) {
+        return rawItem;
+      }
+      final sanitized = Map<String, dynamic>.from(decoded);
+      for (final key in windowsDistributionUnsafeNetworkConfigKeys) {
+        if (sanitized.containsKey(key)) {
+          sanitized[key] = '';
+        }
+      }
+      return jsonEncode(sanitized);
+    } catch (_) {
+      return rawItem;
+    }
   }
 
   Future<Map<String, dynamic>> buildDistributionSafeWindowsConfigMap({

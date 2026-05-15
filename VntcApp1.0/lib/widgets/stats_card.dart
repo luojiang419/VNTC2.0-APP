@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
@@ -66,7 +67,7 @@ class StatsCard extends StatelessWidget {
           ),
           SizedBox(height: context.spacing(4)),
           Text(
-            label,
+            label.tr(),
             style: TextStyle(
               fontSize: context.fontSmall,
               color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,

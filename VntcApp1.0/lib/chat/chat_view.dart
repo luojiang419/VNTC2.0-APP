@@ -3,26 +3,24 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 
 import 'chat_manager.dart';
 import 'chat_models.dart';
+import 'chat_peer_labels.dart';
 import 'chat_repository.dart';
 
-enum ChatRoomSection { lobby, directMessages }
-
-enum ChatRoomLayoutMode { standard, androidLobby, androidDirectDetail }
+enum ChatRoomSection { channels, directMessages }
 
 class ChatRoomView extends StatefulWidget {
   const ChatRoomView({
     super.key,
     required this.section,
-    this.layoutMode = ChatRoomLayoutMode.standard,
-    this.initialDirectPeer,
+    this.scopedNetworkKey,
   });
 
   final ChatRoomSection section;
-  final ChatRoomLayoutMode layoutMode;
-  final ChatPeer? initialDirectPeer;
+  final String? scopedNetworkKey;
 
   @override
   State<ChatRoomView> createState() => _ChatRoomViewState();
@@ -32,18 +30,75 @@ class _ChatRoomViewState extends State<ChatRoomView> {
   final TextEditingController _textController = TextEditingController();
   int _lastStatusVersion = -1;
 
+  String? get _scopedNetworkKey {
+    final value = widget.scopedNetworkKey?.trim() ?? '';
+    return value.isEmpty ? null : value;
+  }
+
+  List<ChatConversationSummary> get _lobbyConversations =>
+      chatManager.lobbyConversationsForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  List<ChatConversationSummary> get _roomConversations =>
+      chatManager.roomConversationsForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  List<ChatConversationSummary> get _directConversations =>
+      chatManager.directConversationsForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  List<ChatConversationSummary> get _channelConversations =>
+      chatManager.channelConversationsForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  List<ChatChannel> get _scopedChannels =>
+      chatManager.channelsForScope(scopedNetworkKey: _scopedNetworkKey);
+
+  List<ChatPeer> get _onlinePeers => chatManager.onlinePeersForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  List<String> get _connectedNetworkKeys =>
+      chatManager.connectedNetworkKeysForScope(
+        scopedNetworkKey: _scopedNetworkKey,
+      );
+
+  bool get _hasMultipleNetworks => chatManager.hasMultipleNetworksInScope(
+      scopedNetworkKey: _scopedNetworkKey);
+
   @override
   void initState() {
     super.initState();
     unawaited(chatManager.init());
-    if (widget.section == ChatRoomSection.lobby) {
+    if (widget.section == ChatRoomSection.channels) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(chatManager.openPreferredLobby());
+        unawaited(
+          chatManager.openPreferredChannelConversation(
+            scopedNetworkKey: _scopedNetworkKey,
+          ),
+        );
       });
     }
-    if (widget.initialDirectPeer != null) {
+  }
+
+  @override
+  void didUpdateWidget(covariant ChatRoomView oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.section != widget.section ||
+        oldWidget.scopedNetworkKey != widget.scopedNetworkKey) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(chatManager.openDirectConversation(widget.initialDirectPeer!));
+        if (!mounted || widget.section != ChatRoomSection.channels) {
+          return;
+        }
+        unawaited(
+          chatManager.openPreferredChannelConversation(
+            scopedNetworkKey: _scopedNetworkKey,
+          ),
+        );
       });
     }
   }
@@ -60,17 +115,18 @@ class _ChatRoomViewState extends State<ChatRoomView> {
       animation: chatManager,
       builder: (context, _) {
         _showStatusSnackBarIfNeeded(context);
-        if (widget.layoutMode == ChatRoomLayoutMode.androidLobby) {
-          return _buildAndroidLobbyView(context);
-        }
-        if (widget.layoutMode == ChatRoomLayoutMode.androidDirectDetail) {
-          return _buildAndroidDirectDetailView(context);
-        }
         return LayoutBuilder(
           builder: (context, constraints) {
             final isWide = constraints.maxWidth >= 980;
             final leftPane = _buildSidebar(context, widget.section);
-            final rightPane = _buildConversationPane(context);
+            final showConversationOnlyOnNarrow =
+                _shouldShowConversationOnlyOnNarrow();
+            final rightPane = _buildConversationPane(
+              context,
+              onShowSidebar: !isWide && showConversationOnlyOnNarrow
+                  ? () => _showSidebarSheet(context)
+                  : null,
+            );
             if (isWide) {
               return Row(
                 children: [
@@ -80,13 +136,10 @@ class _ChatRoomViewState extends State<ChatRoomView> {
                 ],
               );
             }
-            return Column(
-              children: [
-                SizedBox(height: 300, child: leftPane),
-                const Divider(height: 1),
-                Expanded(child: rightPane),
-              ],
-            );
+            if (showConversationOnlyOnNarrow) {
+              return rightPane;
+            }
+            return leftPane;
           },
         );
       },
@@ -101,6 +154,10 @@ class _ChatRoomViewState extends State<ChatRoomView> {
       return;
     }
     _lastStatusVersion = chatManager.statusVersion;
+    if (!chatManager.consumeStatusVersion(chatManager.statusVersion) ||
+        !chatManager.shouldShowStatusSnackBar(message)) {
+      return;
+    }
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) {
         return;
@@ -111,137 +168,79 @@ class _ChatRoomViewState extends State<ChatRoomView> {
     });
   }
 
-  Widget _buildSidebar(BuildContext context, ChatRoomSection section) {
-    final showDebugTools = !Platform.isAndroid && !Platform.isIOS;
+  KeyEventResult _handleComposerKey(FocusNode node, KeyEvent event) {
+    if (event is! KeyDownEvent) {
+      return KeyEventResult.ignored;
+    }
+    final isEnter = event.logicalKey == LogicalKeyboardKey.enter ||
+        event.logicalKey == LogicalKeyboardKey.numpadEnter;
+    if (!isEnter || HardwareKeyboard.instance.isShiftPressed) {
+      return KeyEventResult.ignored;
+    }
+    final value = _textController.value;
+    final isComposing = value.composing.isValid && !value.composing.isCollapsed;
+    if (isComposing) {
+      return KeyEventResult.ignored;
+    }
+    unawaited(_sendText());
+    return KeyEventResult.handled;
+  }
+
+  Widget _buildSidebar(
+    BuildContext context,
+    ChatRoomSection section, {
+    VoidCallback? onEntryActivated,
+  }) {
     return Container(
       color: Theme.of(context).colorScheme.surface,
       child: ListView(
         padding: const EdgeInsets.all(12),
         children: [
-          if (showDebugTools) ...[
-            _buildDebugToolsCard(context),
-            const SizedBox(height: 12),
-          ],
-          if (section == ChatRoomSection.lobby) ...[
+          _buildDebugToolsCard(context),
+          const SizedBox(height: 12),
+          if (section == ChatRoomSection.channels) ...[
             _buildSectionCard(
               context: context,
-              title: '大厅',
-              count: chatManager.lobbyConversations.length,
-              child: _buildLobbyConversationList(),
-            ),
-            const SizedBox(height: 12),
-            _buildSectionCard(
-              context: context,
-              title: '在线成员',
-              count: chatManager.onlinePeers.length,
-              child: _buildOnlinePeerList(),
-            ),
-          ] else ...[
-            _buildSectionCard(
-              context: context,
-              title: '私信会话',
-              count: chatManager.directConversations.length,
-              child: _buildConversationList(
-                chatManager.directConversations,
-                emptyTitle: '还没有私信会话',
-                emptySubtitle: '从在线成员发起私聊后会出现在这里',
+              title: '默认大厅'.tr(),
+              count: _lobbyConversations.length,
+              child: _buildLobbyConversationList(
+                onEntryActivated: onEntryActivated,
               ),
             ),
             const SizedBox(height: 12),
             _buildSectionCard(
               context: context,
-              title: '在线成员',
-              count: chatManager.onlinePeers.length,
-              child: _buildOnlinePeerList(),
+              title: '房间',
+              count: _roomConversations.length,
+              child: _buildRoomConversationList(
+                onEntryActivated: onEntryActivated,
+              ),
+            ),
+          ] else ...[
+            _buildSectionCard(
+              context: context,
+              title: '私信会话'.tr(),
+              count: _directConversations.length,
+              child: _buildConversationList(
+                _directConversations,
+                emptyTitle: '还没有私信会话'.tr(),
+                emptySubtitle: '从在线成员发起私聊后会出现在这里'.tr(),
+                onEntryActivated: onEntryActivated,
+              ),
+            ),
+            const SizedBox(height: 12),
+            _buildSectionCard(
+              context: context,
+              title: '在线成员'.tr(),
+              count: _onlinePeers.length,
+              child: _buildOnlinePeerList(
+                onEntryActivated: onEntryActivated,
+              ),
             ),
           ],
         ],
       ),
     );
-  }
-
-  Widget _buildAndroidLobbyView(BuildContext context) {
-    final conversation = chatManager.selectedConversation;
-    if (conversation == null ||
-        !ChatManager.isLobbyChannelId(conversation.channelId)) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(chatManager.openPreferredLobby());
-      });
-    }
-    return Column(
-      children: [
-        _buildAndroidLobbyOnlinePeers(context),
-        const Divider(height: 1),
-        Expanded(child: _buildConversationPane(context)),
-      ],
-    );
-  }
-
-  Widget _buildAndroidLobbyOnlinePeers(BuildContext context) {
-    final activeNetworkKey = chatManager.selectedConversation?.networkKey ??
-        chatManager.preferredNetworkKey();
-    final peers = activeNetworkKey == null
-        ? const <ChatPeer>[]
-        : chatManager.lobbyOnlinePeersForNetwork(activeNetworkKey);
-    return Container(
-      color: Theme.of(context).colorScheme.surface,
-      padding: const EdgeInsets.fromLTRB(16, 14, 16, 12),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '在线成员 ${peers.length}',
-            style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-          ),
-          const SizedBox(height: 10),
-          if (peers.isEmpty)
-            Text(
-              '当前在线成员信息尚未同步完成，请稍候刷新页面。',
-              style: Theme.of(context).textTheme.bodySmall,
-            )
-          else
-            Wrap(
-              spacing: 8,
-              runSpacing: 8,
-              children: peers
-                  .map(
-                    (peer) => Chip(
-                      avatar: Icon(
-                        chatManager.isLocalPeer(peer.peerId)
-                            ? Icons.person
-                            : Icons.person_outline,
-                        size: 16,
-                      ),
-                      label: Text(
-                        chatManager.isLocalPeer(peer.peerId)
-                            ? '${peer.displayName}（我）'
-                            : peer.displayName,
-                      ),
-                    ),
-                  )
-                  .toList(),
-            ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildAndroidDirectDetailView(BuildContext context) {
-    final peer = widget.initialDirectPeer;
-    final conversation = chatManager.selectedConversation;
-    final matchesTarget = peer == null
-        ? conversation?.type == ChatConversationType.direct
-        : conversation?.type == ChatConversationType.direct &&
-            conversation?.peerId == peer.peerId &&
-            conversation?.networkKey == peer.networkKey;
-    if (!matchesTarget) {
-      return const Center(
-        child: CircularProgressIndicator(),
-      );
-    }
-    return _buildConversationPane(context);
   }
 
   Widget _buildDebugToolsCard(BuildContext context) {
@@ -261,7 +260,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
             ),
             const SizedBox(height: 8),
             Text(
-              '网络 ${chatManager.connectedNetworkKeys.length} 个 · 在线设备 ${chatManager.onlinePeers.length} 个',
+              '网络 ${_connectedNetworkKeys.length} 个 · 在线设备 ${_onlinePeers.length} 个',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             const SizedBox(height: 12),
@@ -350,6 +349,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
     List<ChatConversationSummary> conversations, {
     required String emptyTitle,
     required String emptySubtitle,
+    VoidCallback? onEntryActivated,
   }) {
     if (conversations.isEmpty) {
       return _buildEmptyHint(emptyTitle, emptySubtitle);
@@ -361,8 +361,10 @@ class _ChatRoomViewState extends State<ChatRoomView> {
         final title = conversation.title.isEmpty ? '未命名会话' : conversation.title;
         return _buildSelectableTile(
           selected: selected,
-          onTap: () =>
-              chatManager.selectConversation(conversation.conversationId),
+          onTap: () {
+            onEntryActivated?.call();
+            chatManager.selectConversation(conversation.conversationId);
+          },
           title: title,
           subtitle: conversation.lastPreview.isEmpty
               ? '暂无消息'
@@ -375,21 +377,57 @@ class _ChatRoomViewState extends State<ChatRoomView> {
     );
   }
 
-  Widget _buildLobbyConversationList() {
-    if (chatManager.lobbyConversations.isEmpty) {
-      return _buildEmptyHint('大厅尚未就绪', '连接组网后会自动创建默认大厅');
+  Widget _buildLobbyConversationList({VoidCallback? onEntryActivated}) {
+    if (_lobbyConversations.isEmpty) {
+      return _buildEmptyHint('默认大厅尚未就绪', '连接组网后会自动创建默认大厅');
     }
     return Column(
-      children: chatManager.lobbyConversations.map((conversation) {
+      children: _lobbyConversations.map((conversation) {
         final selected =
             chatManager.selectedConversationId == conversation.conversationId;
-        final subtitle = chatManager.hasMultipleNetworks
+        final subtitle = _hasMultipleNetworks
             ? '${conversation.networkKey} · 默认公共大厅'
             : '默认公共大厅';
         return _buildSelectableTile(
           selected: selected,
-          onTap: () =>
-              chatManager.selectConversation(conversation.conversationId),
+          onTap: () {
+            onEntryActivated?.call();
+            chatManager.selectConversation(conversation.conversationId);
+          },
+          title: conversation.title,
+          subtitle: subtitle,
+          trailing: conversation.unreadCount > 0
+              ? _buildUnreadBadge(conversation.unreadCount)
+              : null,
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildRoomConversationList({VoidCallback? onEntryActivated}) {
+    if (_roomConversations.isEmpty) {
+      return _buildEmptyHint('还没有房间会话', '请先从大厅创建房间或加入房间');
+    }
+    return Column(
+      children: _roomConversations.map((conversation) {
+        final selected =
+            chatManager.selectedConversationId == conversation.conversationId;
+        final channel = conversation.channelId == null
+            ? null
+            : _scopedChannels
+                .where((item) => item.channelId == conversation.channelId)
+                .cast<ChatChannel?>()
+                .firstOrNull;
+        final roomTypeLabel = channel?.isPrivate == true ? '私密房间' : '公开房间';
+        final subtitle = _hasMultipleNetworks
+            ? '${conversation.networkKey} · $roomTypeLabel'
+            : roomTypeLabel;
+        return _buildSelectableTile(
+          selected: selected,
+          onTap: () {
+            onEntryActivated?.call();
+            chatManager.selectConversation(conversation.conversationId);
+          },
           title: conversation.title,
           subtitle: subtitle,
           trailing: conversation.unreadCount > 0
@@ -401,11 +439,11 @@ class _ChatRoomViewState extends State<ChatRoomView> {
   }
 
   Widget _buildChannelList() {
-    if (chatManager.channels.isEmpty) {
+    if (_scopedChannels.isEmpty) {
       return _buildEmptyHint('还没有频道', '点击右上角创建公开频道或私密频道');
     }
     return Column(
-      children: chatManager.channels.map((channel) {
+      children: _scopedChannels.map((channel) {
         final conversationId = ChatIds.channelConversationId(
           channel.networkKey,
           channel.channelId,
@@ -496,7 +534,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
               : () => chatManager.openDirectConversation(peer),
           title: peer.displayName,
           subtitle:
-              '${peer.virtualIp}${chatManager.hasMultipleNetworks ? ' · ${peer.networkKey}' : ''} · $subtitle',
+              '${peer.virtualIp}${_hasMultipleNetworks ? ' · ${peer.networkKey}' : ''} · $subtitle',
           trailing: status == ChatFriendStatus.pending
               ? Row(
                   mainAxisSize: MainAxisSize.min,
@@ -537,21 +575,27 @@ class _ChatRoomViewState extends State<ChatRoomView> {
     );
   }
 
-  Widget _buildOnlinePeerList() {
-    if (chatManager.onlinePeers.isEmpty) {
+  Widget _buildOnlinePeerList({VoidCallback? onEntryActivated}) {
+    if (_onlinePeers.isEmpty) {
       return _buildEmptyHint('暂无在线设备', '等待其他设备加入当前组网');
     }
     return Column(
-      children: chatManager.onlinePeers.map((peer) {
+      children: _onlinePeers.map((peer) {
         final friendStatus = chatManager.friendStatusOf(peer.peerId);
         return _buildSelectableTile(
           selected: false,
-          onTap: () => chatManager.openDirectConversation(peer),
+          onTap: () {
+            onEntryActivated?.call();
+            chatManager.openDirectConversation(peer);
+          },
           onSecondaryTapDown: (details) =>
               _showPeerContextMenu(peer, details.globalPosition),
-          title: peer.displayName,
-          subtitle:
-              '${peer.virtualIp}${chatManager.hasMultipleNetworks ? ' · ${peer.networkKey}' : ''}${friendStatus == ChatFriendStatus.friend ? ' · 好友' : ''}',
+          title: chatPeerPrimaryName(peer),
+          subtitle: buildOnlinePeerSubtitle(
+            peer,
+            hasMultipleNetworks: _hasMultipleNetworks,
+            friendStatus: friendStatus,
+          ),
           trailing: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -681,50 +725,101 @@ class _ChatRoomViewState extends State<ChatRoomView> {
     );
   }
 
-  Widget _buildConversationPane(BuildContext context) {
+  bool _conversationMatchesCurrentSection(
+      ChatConversationSummary? conversation) {
+    if (conversation == null ||
+        !chatMatchesNetworkScope(conversation.networkKey, _scopedNetworkKey)) {
+      return false;
+    }
+    return switch (widget.section) {
+      ChatRoomSection.channels =>
+        conversation.type == ChatConversationType.channel,
+      ChatRoomSection.directMessages =>
+        conversation.type == ChatConversationType.direct,
+    };
+  }
+
+  bool _shouldShowConversationOnlyOnNarrow() {
+    return _conversationMatchesCurrentSection(chatManager.selectedConversation);
+  }
+
+  void _showSidebarSheet(BuildContext context) {
+    showModalBottomSheet<void>(
+      context: context,
+      isScrollControlled: true,
+      builder: (sheetContext) {
+        final height = MediaQuery.of(sheetContext).size.height * 0.82;
+        return SafeArea(
+          child: SizedBox(
+            height: height,
+            child: _buildSidebar(
+              sheetContext,
+              widget.section,
+              onEntryActivated: () => Navigator.of(sheetContext).pop(),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildConversationPane(
+    BuildContext context, {
+    VoidCallback? onShowSidebar,
+  }) {
     final conversation = chatManager.selectedConversation;
     final section = widget.section;
-    if (section == ChatRoomSection.lobby &&
-        chatManager.lobbyConversations.isNotEmpty &&
-        (conversation == null ||
-            !ChatManager.isLobbyChannelId(conversation.channelId))) {
+    if (section == ChatRoomSection.channels &&
+        _channelConversations.isNotEmpty &&
+        !_conversationMatchesCurrentSection(conversation)) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(chatManager.openPreferredLobby());
+        unawaited(
+          chatManager.openPreferredChannelConversation(
+            scopedNetworkKey: _scopedNetworkKey,
+          ),
+        );
       });
     }
-    if (conversation == null ||
-        (section == ChatRoomSection.lobby &&
-            !ChatManager.isLobbyChannelId(conversation.channelId)) ||
-        (section == ChatRoomSection.directMessages &&
-            conversation.type != ChatConversationType.direct)) {
+    if (!_conversationMatchesCurrentSection(conversation)) {
       return Center(
         child: _buildEmptyHint(
-          section == ChatRoomSection.lobby ? '聊天室已启用' : '私信已启用',
-          section == ChatRoomSection.lobby
-              ? '从左侧选择大厅并在在线成员列表中开始交流'
-              : '从左侧私信会话或在线成员开始一对一聊天',
+          (section == ChatRoomSection.channels ? '聊天室已启用' : '私信已启用')
+              .tr(),
+          section == ChatRoomSection.channels
+              ? '从大厅选择默认大厅或房间后开始交流'.tr()
+              : '从左侧私信会话或在线成员开始一对一聊天'.tr(),
         ),
       );
     }
-    final peer = chatManager.findPeer(conversation.peerId);
-    final channel = conversation.channelId == null
+    final activeConversation = conversation!;
+    final peer = chatManager.findPeer(activeConversation.peerId);
+    final channel = activeConversation.channelId == null
         ? null
-        : chatManager.channels
-            .where((item) => item.channelId == conversation.channelId)
+        : _scopedChannels
+            .where((item) => item.channelId == activeConversation.channelId)
             .cast<ChatChannel?>()
             .firstOrNull;
     return Column(
       children: [
-        _buildConversationHeader(conversation, peer, channel),
+        _buildConversationHeader(
+          activeConversation,
+          peer,
+          channel,
+          onShowSidebar: onShowSidebar,
+        ),
         if (chatManager.callSession?.isIncoming == true &&
             chatManager.callSession?.state == ChatCallState.ringing)
           _buildIncomingCallBanner(),
-        if (chatManager.remoteAssistSession?.peerId == conversation.peerId)
+        if (chatManager.remoteAssistSession?.peerId ==
+            activeConversation.peerId)
           _buildRemoteAssistBanner(peer),
         Expanded(
           child: chatManager.activeMessages.isEmpty
               ? Center(
-                  child: _buildEmptyHint('暂无消息', '现在可以发送文字、图片、文件和语音'),
+                  child: _buildEmptyHint(
+                    '暂无消息'.tr(),
+                    '现在可以发送文字、图片、文件和语音'.tr(),
+                  ),
                 )
               : ListView.builder(
                   padding: const EdgeInsets.all(16),
@@ -735,16 +830,14 @@ class _ChatRoomViewState extends State<ChatRoomView> {
                   },
                 ),
         ),
-        _buildInputBar(conversation, channel),
+        _buildInputBar(activeConversation, channel),
       ],
     );
   }
 
-  Widget _buildConversationHeader(
-    ChatConversationSummary conversation,
-    ChatPeer? peer,
-    ChatChannel? channel,
-  ) {
+  Widget _buildConversationHeader(ChatConversationSummary conversation,
+      ChatPeer? peer, ChatChannel? channel,
+      {VoidCallback? onShowSidebar}) {
     final session = chatManager.callSession;
     final isDirectCall = session?.type == ChatCallType.direct &&
         session?.peerId == conversation.peerId &&
@@ -758,7 +851,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
         : chatManager.remoteAssistUnavailableMessageForPeer(peer);
     final subtitle = conversation.type == ChatConversationType.direct
         ? '${peer?.virtualIp ?? ''} · ${peer?.isOnline == true ? '在线' : '离线'}'
-        : '${conversation.networkKey} · ${channel?.isPrivate == true ? '私密频道' : '公开频道'}';
+        : '${conversation.networkKey} · ${channel?.isPrivate == true ? '私密房间' : '公开房间'}';
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
@@ -771,6 +864,14 @@ class _ChatRoomViewState extends State<ChatRoomView> {
       ),
       child: Row(
         children: [
+          if (onShowSidebar != null)
+            IconButton(
+              onPressed: onShowSidebar,
+              tooltip: widget.section == ChatRoomSection.channels
+                  ? '切换大厅和房间'
+                  : '切换私信会话',
+              icon: const Icon(Icons.view_list_rounded),
+            ),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -907,12 +1008,12 @@ class _ChatRoomViewState extends State<ChatRoomView> {
             : '已邀请对方来控制当前设备');
     final subtitle = switch (session.state) {
       RemoteAssistState.pending => session.isIncoming ? '等待你处理' : '等待对方处理',
-      RemoteAssistState.accepted => '对方已同意，准备启动远程协助',
-      RemoteAssistState.ready => '远程协助准备完成',
-      RemoteAssistState.active => '远程协助会话已启动',
-      RemoteAssistState.rejected => '远程协助请求已被拒绝',
-      RemoteAssistState.ended => '远程协助会话已结束',
-      RemoteAssistState.failed => '远程协助启动失败',
+      RemoteAssistState.accepted => '对方已同意，准备启动远程协助'.tr(),
+      RemoteAssistState.ready => '远程协助准备完成'.tr(),
+      RemoteAssistState.active => '远程协助会话已启动'.tr(),
+      RemoteAssistState.rejected => '远程协助请求已被拒绝'.tr(),
+      RemoteAssistState.ended => '远程协助会话已结束'.tr(),
+      RemoteAssistState.failed => '远程协助启动失败'.tr(),
     };
     return Container(
       margin: const EdgeInsets.all(12),
@@ -1269,7 +1370,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      '频道语音中 · ${session?.participants.length ?? 1} 人 · 当前发言: $currentSpeaker',
+                      '房间语音中 · ${session?.participants.length ?? 1} 人 · 当前发言: $currentSpeaker',
                     ),
                   ),
                   Listener(
@@ -1287,28 +1388,35 @@ class _ChatRoomViewState extends State<ChatRoomView> {
           Row(
             children: [
               Expanded(
-                child: TextField(
-                  controller: _textController,
-                  maxLength: ChatManager.textLimit,
-                  minLines: 1,
-                  maxLines: 4,
-                  decoration: const InputDecoration(
-                    hintText: '输入消息...',
-                    counterText: '',
-                    border: OutlineInputBorder(),
+                child: Focus(
+                  onKeyEvent: _handleComposerKey,
+                  child: TextField(
+                    controller: _textController,
+                    maxLength: ChatManager.textLimit,
+                    minLines: 1,
+                    maxLines: 4,
+                    decoration: const InputDecoration(
+                      hintText: '输入消息...',
+                      counterText: '',
+                      border: OutlineInputBorder(),
+                    ),
+                    onSubmitted: (_) => _sendText(),
                   ),
-                  onSubmitted: (_) => _sendText(),
                 ),
               ),
               const SizedBox(width: 8),
               IconButton(
-                onPressed: chatManager.sendPickedImage,
-                tooltip: '发送图片',
+                onPressed: chatManager.isSendingAttachment
+                    ? null
+                    : chatManager.sendPickedImage,
+                tooltip: chatManager.isSendingAttachment ? '附件发送中' : '发送图片',
                 icon: const Icon(Icons.image_outlined),
               ),
               IconButton(
-                onPressed: chatManager.sendPickedFile,
-                tooltip: '发送文件',
+                onPressed: chatManager.isSendingAttachment
+                    ? null
+                    : chatManager.sendPickedFile,
+                tooltip: chatManager.isSendingAttachment ? '附件发送中' : '发送文件',
                 icon: const Icon(Icons.attach_file),
               ),
               if (audioSupported)
@@ -1374,7 +1482,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
   }
 
   Future<void> _showCreateChannelDialog() async {
-    final connectedNetworks = chatManager.connectedNetworkKeys;
+    final connectedNetworks = _connectedNetworkKeys;
     if (connectedNetworks.isEmpty) {
       if (!mounted) {
         return;
@@ -1384,7 +1492,9 @@ class _ChatRoomViewState extends State<ChatRoomView> {
       );
       return;
     }
-    String? selectedNetworkKey = chatManager.preferredNetworkKey();
+    String? selectedNetworkKey = chatManager.preferredNetworkKey(
+      scopedNetworkKey: _scopedNetworkKey,
+    );
     bool isPrivate = false;
     final selectedIds = <String>{};
     final nameController = TextEditingController();
@@ -1560,7 +1670,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
         return AlertDialog(
           title: const Text('清空聊天室本地数据'),
           content: const Text(
-            '这会删除当前机器上的聊天数据库、附件缓存、频道本地状态和聊天室日志。用于双机联调前清场，是否继续？',
+            '这会删除当前机器上的聊天数据库、附件缓存、房间本地状态和聊天室日志。用于双机联调前清场，是否继续？',
           ),
           actions: [
             TextButton(
@@ -1615,7 +1725,7 @@ class _ChatRoomViewState extends State<ChatRoomView> {
   }
 
   Future<void> _showInviteMembersDialog(ChatChannel channel) async {
-    final allCandidates = chatManager.onlinePeers
+    final allCandidates = _onlinePeers
         .where((peer) => peer.networkKey == channel.networkKey)
         .toList();
     final selectedIds = <String>{};

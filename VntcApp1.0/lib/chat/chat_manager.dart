@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:math';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/foundation.dart';
@@ -9,6 +10,7 @@ import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
 import 'package:vnt_app/remote_assist/remote_assist_service.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
+import 'package:vnt_app/windows/windows_firewall_service.dart';
 
 import 'chat_audio_service.dart';
 import 'chat_logger.dart';
@@ -38,7 +40,41 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
   int _mediaPlaybackPackets = 0;
   final Map<String, int> _networkStartRetryCounts = {};
   final RemoteAssistService _remoteAssist = RemoteAssistService.instance;
+  final WindowsFirewallService _firewall = WindowsFirewallService.instance;
   bool _remoteAssistRuntimeReady = false;
+  bool _chatFirewallChecked = false;
+  WindowsFirewallEnsureResult? _lastChatFirewallResult;
+  WindowsFirewallEnsureResult? _lastRemoteAssistFirewallResult;
+  bool _lastRemoteAssistFirewallBlockedReady = false;
+  bool? _lastRemoteAssistHostReadySucceeded;
+  DateTime? _lastRemoteAssistReadySentAt;
+  DateTime? _lastRemoteAssistReadyReceivedAt;
+
+  @visibleForTesting
+  Future<void> Function({int? listenPort})? debugRefreshRemoteAssistRuntime;
+
+  @visibleForTesting
+  Future<WindowsFirewallEnsureResult> Function(RemoteAssistSession session)?
+      debugEnsureRemoteAssistFirewallResult;
+
+  @visibleForTesting
+  Future<void> Function(int listenPort)? debugEnsureRemoteAssistHostReady;
+
+  @visibleForTesting
+  Future<void> Function(String virtualIp)? debugLaunchRemoteAssistController;
+
+  @visibleForTesting
+  Future<void> Function({int? listenPort})? debugCleanupRemoteAssistRuntime;
+
+  @visibleForTesting
+  Future<void> Function({
+    required String networkKey,
+    required String peerId,
+    required ChatEnvelopeType type,
+    String? conversationId,
+    String? channelId,
+    required Map<String, dynamic> payload,
+  })? debugSendEnvelopeToPeer;
 
   List<ChatConversationSummary> conversations = const [];
   List<ChatPeer> onlinePeers = const [];
@@ -51,14 +87,26 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
   String? selectedConversationId;
   ChatCallSession? callSession;
   RemoteAssistSession? remoteAssistSession;
+  String? _lastRemoteAssistHostError;
+  String? _lastRemoteAssistConnectError;
+  String? _lastRemoteAssistBundledRuntimePath;
+  String? _lastRemoteAssistInstalledRuntimePath;
+  int? _lastRemoteAssistListenPort;
   String? statusMessage;
   int statusVersion = 0;
+  int _lastConsumedStatusVersion = -1;
+  String? _lastPushedStatusMessage;
+  DateTime? _lastPushedStatusAt;
+  int _pendingOutgoingAttachmentCount = 0;
+  final Set<String> _processingRemoteAssistAcceptSessionIds = <String>{};
 
   ChatAudioService get _audio => ChatAudioService.instance;
 
   bool get isVoiceRecording => _audio.isVoiceRecording;
 
   bool get isChatAudioSupported => _audio.isAudioFeatureSupported;
+
+  bool get isSendingAttachment => _pendingOutgoingAttachmentCount > 0;
 
   String get chatAudioUnsupportedReason => _audio.unsupportedReason;
 
@@ -74,6 +122,15 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           isLobbyChannelId(conversation.channelId))
       .toList();
 
+  List<ChatConversationSummary> get channelConversations => conversations
+      .where(
+          (conversation) => conversation.type == ChatConversationType.channel)
+      .toList();
+
+  List<ChatConversationSummary> get roomConversations => channelConversations
+      .where((conversation) => !isLobbyChannelId(conversation.channelId))
+      .toList();
+
   bool get isRemoteAssistSupported =>
       !kIsWeb && defaultTargetPlatform == TargetPlatform.windows;
   bool get isRemoteAssistRuntimeReady => _remoteAssistRuntimeReady;
@@ -84,6 +141,92 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
   }
 
   bool get hasMultipleNetworks => connectedNetworkKeys.length > 1;
+
+  List<String> connectedNetworkKeysForScope({String? scopedNetworkKey}) {
+    final keys = connectedNetworkKeys;
+    final normalizedScope = scopedNetworkKey?.trim() ?? '';
+    if (normalizedScope.isEmpty) {
+      return keys;
+    }
+    return keys.where((key) => key == normalizedScope).toList();
+  }
+
+  bool hasMultipleNetworksInScope({String? scopedNetworkKey}) {
+    return connectedNetworkKeysForScope(scopedNetworkKey: scopedNetworkKey)
+            .length >
+        1;
+  }
+
+  List<ChatConversationSummary> directConversationsForScope({
+    String? scopedNetworkKey,
+  }) {
+    return directConversations
+        .where(
+          (conversation) => chatMatchesNetworkScope(
+            conversation.networkKey,
+            scopedNetworkKey,
+          ),
+        )
+        .toList();
+  }
+
+  List<ChatConversationSummary> lobbyConversationsForScope({
+    String? scopedNetworkKey,
+  }) {
+    return lobbyConversations
+        .where(
+          (conversation) => chatMatchesNetworkScope(
+            conversation.networkKey,
+            scopedNetworkKey,
+          ),
+        )
+        .toList();
+  }
+
+  List<ChatConversationSummary> roomConversationsForScope({
+    String? scopedNetworkKey,
+  }) {
+    return roomConversations
+        .where(
+          (conversation) => chatMatchesNetworkScope(
+            conversation.networkKey,
+            scopedNetworkKey,
+          ),
+        )
+        .toList();
+  }
+
+  List<ChatConversationSummary> channelConversationsForScope({
+    String? scopedNetworkKey,
+  }) {
+    return channelConversations
+        .where(
+          (conversation) => chatMatchesNetworkScope(
+            conversation.networkKey,
+            scopedNetworkKey,
+          ),
+        )
+        .toList();
+  }
+
+  List<ChatChannel> channelsForScope({String? scopedNetworkKey}) {
+    return channels
+        .where(
+          (channel) => chatMatchesNetworkScope(
+            channel.networkKey,
+            scopedNetworkKey,
+          ),
+        )
+        .toList();
+  }
+
+  List<ChatPeer> onlinePeersForScope({String? scopedNetworkKey}) {
+    return onlinePeers
+        .where(
+          (peer) => chatMatchesNetworkScope(peer.networkKey, scopedNetworkKey),
+        )
+        .toList();
+  }
 
   static bool isLobbyChannelId(String? channelId) {
     return channelId != null && channelId.startsWith('lobby:');
@@ -105,6 +248,41 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       await _repository.init();
       await _audio.init();
       _remoteAssistRuntimeReady = await _remoteAssist.isAvailable();
+      if (_remoteAssistRuntimeReady) {
+        try {
+          await _remoteAssist.cleanupManagedSessionState(
+            listenPort: RemoteAssistService.listenPort,
+          );
+          _lastRemoteAssistHostError = null;
+          await _refreshRemoteAssistRuntimeDetails(
+            listenPort: RemoteAssistService.listenPort,
+          );
+          await _logRemoteAssistInfo(
+            '内置 RustDesk 启动期会话清理完成',
+            extra: {
+              'startupCleanup': true,
+            },
+          );
+        } catch (error, stackTrace) {
+          _lastRemoteAssistHostError = error.toString();
+          await _logger.warn(
+            'remote_assist.runtime',
+            '内置 RustDesk 启动期会话清理失败',
+            extra: {
+              'error': error.toString(),
+              'stackTrace': stackTrace.toString(),
+            },
+          );
+        }
+      }
+      if (!_chatFirewallChecked) {
+        _chatFirewallChecked = true;
+        await _ensureFirewallRules(
+          includeRemoteAssist: false,
+          contextLabel: '聊天室',
+          pushStatusOnFailure: true,
+        );
+      }
       await _purgeRetentionIfNeeded(force: true);
       _syncTimer = Timer.periodic(_syncInterval, (_) {
         unawaited(syncConnections());
@@ -156,12 +334,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           delegate: this,
         ),
       );
-      var discoveryReady = service.isStarted;
       if (!service.isStarted) {
         try {
           await service.start();
           _networkStartRetryCounts.remove(key);
-          discoveryReady = true;
         } catch (error, stackTrace) {
           if (ChatNetworkService.isRetryableStartError(error)) {
             final retryCount = (_networkStartRetryCounts[key] ?? 0) + 1;
@@ -177,25 +353,26 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
               },
             );
             if (retryCount == 3 || retryCount % 10 == 0) {
-              _pushStatus('聊天室网络正在等待虚拟IP就绪，将自动重试');
+              _pushStatus(
+                '聊天室本地监听正在等待虚拟IP就绪（已连接服务器，将自动重试）',
+              );
             }
-            discoveryReady = false;
-          } else {
-            _networkStartRetryCounts.remove(key);
-            await _logger.error(
-              'manager.network',
-              '聊天室网络监听启动失败',
-              networkKey: key,
-              extra: {
-                'error': error.toString(),
-              },
-            );
-            onNetworkWarning(key, error, stackTrace);
-            discoveryReady = false;
+            continue;
           }
+          _networkStartRetryCounts.remove(key);
+          await _logger.error(
+            'manager.network',
+            '聊天室网络监听启动失败',
+            networkKey: key,
+            extra: {
+              'error': error.toString(),
+            },
+          );
+          onNetworkWarning(key, error, stackTrace);
+          continue;
         }
       }
-      await _syncNetworkPeers(key, box, refreshDiscovery: discoveryReady);
+      await _syncNetworkPeers(key, box);
     }
 
     final staleKeys =
@@ -251,11 +428,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     }
   }
 
-  Future<void> _syncNetworkPeers(
-    String networkKey,
-    VntBox box, {
-    required bool refreshDiscovery,
-  }) async {
+  Future<void> _syncNetworkPeers(String networkKey, VntBox box) async {
     final service = _services[networkKey];
     if (service == null) {
       return;
@@ -333,32 +506,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
         ),
       );
     }
-    if (refreshDiscovery) {
-      try {
-        await service.refreshPeers(peers);
-      } catch (error, stackTrace) {
-        await _logger.warn(
-          'manager.discovery',
-          '在线成员列表已同步，但聊天室发现广播刷新失败',
-          networkKey: networkKey,
-          extra: {
-            'error': error.toString(),
-            'peerCount': peers.length,
-          },
-        );
-        onNetworkWarning(networkKey, error, stackTrace);
-      }
-    } else {
-      await _logger.info(
-        'manager.discovery',
-        '在线成员列表已同步，聊天室发现广播等待监听启动',
-        networkKey: networkKey,
-        extra: {
-          'peerCount': peers.length,
-          'localVirtualIp': localIp,
-        },
-      );
-    }
+    await service.refreshPeers(peers);
     await _logger.info(
       'manager.discovery',
       '同步在线设备完成',
@@ -386,13 +534,20 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     final channelList = await _repository.listChannels();
     final allPeers = await _repository.listPeers();
     final friends = await _repository.listFriends();
+    final now = DateTime.now();
+    final normalizedPeers = allPeers
+        .map((peer) => _normalizePeerOnlineState(peer, now))
+        .toList(growable: false);
+    final normalizedPeerIndex = {
+      for (final peer in normalizedPeers) peer.peerId: peer,
+    };
     final peers = <ChatPeer>[];
     final localPeerIds = connectedNetworkKeys
         .map(_localPeerIdForNetwork)
         .whereType<String>()
         .toSet();
     for (final friend in friends) {
-      final peer = await _repository.getPeer(friend.peerId);
+      final peer = normalizedPeerIndex[friend.peerId];
       if (peer != null) {
         peers.add(peer);
       }
@@ -400,12 +555,12 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     conversations = conversationsList
         .map((conversation) => _resolveConversationSummary(
               conversation,
-              allPeers,
+              normalizedPeers,
               channelList,
             ))
         .toList();
     channels = channelList.where((channel) => !channel.archived).toList();
-    onlinePeers = allPeers
+    onlinePeers = normalizedPeers
         .where((peer) => peer.isOnline && !localPeerIds.contains(peer.peerId))
         .toList()
       ..sort((a, b) {
@@ -416,9 +571,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
         return a.virtualIp.compareTo(b.virtualIp);
       });
     friendPeers = peers;
-    peerIndex = {
-      for (final peer in allPeers) peer.peerId: peer,
-    };
+    peerIndex = normalizedPeerIndex;
     friendStatuses = {
       for (final friend in friends) friend.peerId: friend.status,
     };
@@ -480,6 +633,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     return peerIndex[peerId];
   }
 
+  bool isPeerOnline(ChatPeer peer, {DateTime? now}) {
+    return chatPeerIsEffectivelyOnline(peer, now: now);
+  }
+
   ChatFriendStatus friendStatusOf(String peerId) {
     return friendStatuses[peerId] ?? ChatFriendStatus.stranger;
   }
@@ -488,11 +645,47 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     return friendStatusOf(peerId) == ChatFriendStatus.blocked;
   }
 
+  Duration _statusCooldownForMessage(String message) {
+    if (message.contains('防火墙') || message.contains('虚拟IP')) {
+      return const Duration(seconds: 90);
+    }
+    return const Duration(seconds: 3);
+  }
+
+  bool consumeStatusVersion(int version) {
+    if (version <= _lastConsumedStatusVersion) {
+      return false;
+    }
+    _lastConsumedStatusVersion = version;
+    return true;
+  }
+
+  bool shouldShowStatusSnackBar(String message) {
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) {
+      return false;
+    }
+    return !(trimmed.contains('虚拟IP') || trimmed.contains('防火墙'));
+  }
+
   void _pushStatus(String message) {
-    statusMessage = message;
+    final trimmed = message.trim();
+    if (trimmed.isEmpty) {
+      return;
+    }
+    final now = DateTime.now();
+    if (_lastPushedStatusMessage == trimmed && _lastPushedStatusAt != null) {
+      final cooldown = _statusCooldownForMessage(trimmed);
+      if (now.difference(_lastPushedStatusAt!) < cooldown) {
+        return;
+      }
+    }
+    _lastPushedStatusMessage = trimmed;
+    _lastPushedStatusAt = now;
+    statusMessage = trimmed;
     statusVersion++;
     notifyListeners();
-    unawaited(_logger.warn('status', message));
+    unawaited(_logger.warn('status', trimmed));
   }
 
   Future<bool> _ensureChatAudioAvailable(
@@ -519,6 +712,13 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
   }
 
   Future<void> debugRefreshNow() async {
+    if (_lastChatFirewallResult?.success != true) {
+      await _ensureFirewallRules(
+        includeRemoteAssist: false,
+        contextLabel: '聊天室',
+        pushStatusOnFailure: true,
+      );
+    }
     for (final service in _services.values) {
       service.resetDiscoveryState();
     }
@@ -553,11 +753,259 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     _pushStatus('聊天室本地数据已清空');
   }
 
+  String _formatFirewallRules(List<WindowsFirewallRuleSpec> rules) {
+    if (rules.isEmpty) {
+      return 'none';
+    }
+    return rules.map((rule) => '${rule.signature}(${rule.purpose})').join(', ');
+  }
+
+  Future<WindowsFirewallEnsureResult> _ensureFirewallRules({
+    required bool includeRemoteAssist,
+    required String contextLabel,
+    bool pushStatusOnFailure = false,
+  }) async {
+    final result = await _firewall.ensureChatAndRemoteAssistRules(
+      includeRemoteAssist: includeRemoteAssist,
+    );
+    if (includeRemoteAssist) {
+      _lastRemoteAssistFirewallResult = result;
+    } else {
+      _lastChatFirewallResult = result;
+    }
+    if (result.success) {
+      await _logger.info(
+        'firewall',
+        result.firewallEnabled
+            ? '$contextLabel 端口放行检查完成'
+            : '$contextLabel 检测到 Windows 防火墙已关闭，跳过端口放行检查',
+        extra: {
+          'includeRemoteAssist': includeRemoteAssist,
+          'promptedForElevation': result.promptedForElevation,
+          'firewallEnabled': result.firewallEnabled,
+          'skippedRuleCheck': result.skippedRuleCheck,
+          'allowedRules': result.allowedRules
+              .map((rule) => rule.signature)
+              .toList(growable: false),
+        },
+      );
+      return result;
+    }
+
+    final message = result.errorMessage?.trim().isNotEmpty == true
+        ? result.errorMessage!.trim()
+        : '仍缺少放行规则: ${_formatFirewallRules(result.missingRules)}';
+    await _logger.error(
+      'firewall',
+      '$contextLabel 端口放行检查失败',
+      extra: {
+        'includeRemoteAssist': includeRemoteAssist,
+        'promptedForElevation': result.promptedForElevation,
+        'failureKind': result.failureKind.name,
+        'blocksRemoteAssist': result.blocksRemoteAssist,
+        'firewallEnabled': result.firewallEnabled,
+        'skippedRuleCheck': result.skippedRuleCheck,
+        'missingRules': result.missingRules
+            .map((rule) => rule.signature)
+            .toList(growable: false),
+        'error': message,
+        if (result.attemptedCommand != null)
+          'attemptedCommand': result.attemptedCommand,
+        if (result.processExitCode != null)
+          'processExitCode': result.processExitCode,
+        if (result.processStdout != null) 'processStdout': result.processStdout,
+        if (result.processStderr != null) 'processStderr': result.processStderr,
+        if (result.elevatedScriptStarted != null)
+          'elevatedScriptStarted': result.elevatedScriptStarted,
+      },
+    );
+    if (pushStatusOnFailure) {
+      _pushStatus(
+        '$contextLabel 可能被 Windows 防火墙拦截，请允许管理员授权或手动放行相关端口',
+      );
+    }
+    return result;
+  }
+
+  bool _remoteAssistFirewallHasWarning(WindowsFirewallEnsureResult result) {
+    return result.failureKind != WindowsFirewallEnsureFailureKind.none &&
+        result.failureKind != WindowsFirewallEnsureFailureKind.firewallDisabled;
+  }
+
+  String _remoteAssistControlledReadyStatusMessage(
+    WindowsFirewallEnsureResult result,
+  ) {
+    if (_remoteAssistFirewallHasWarning(result)) {
+      return '桌面服务已启动，但 Windows 防火墙未确认放行；若对方无法接入，请手动放行 TCP 21118';
+    }
+    return '桌面服务已启动，正在等待对方接入';
+  }
+
+  Future<WindowsFirewallEnsureResult> _ensureRemoteAssistFirewallState(
+    RemoteAssistSession session,
+  ) async {
+    final result = debugEnsureRemoteAssistFirewallResult != null
+        ? await debugEnsureRemoteAssistFirewallResult!(session)
+        : await _ensureFirewallRules(
+            includeRemoteAssist: true,
+            contextLabel: '远程协助',
+            pushStatusOnFailure: false,
+          );
+    _lastRemoteAssistFirewallResult = result;
+    _lastRemoteAssistFirewallBlockedReady = result.blocksRemoteAssist;
+    final logMessage = result.success
+        ? '远程协助端口放行检查完成'
+        : result.blocksRemoteAssist
+            ? '远程协助端口放行失败并阻断桌面服务就绪'
+            : '远程协助端口放行未确认，将继续尝试启动桌面服务';
+    final logExtra = {
+      'sessionId': session.sessionId,
+      'listenPort': session.listenPort,
+      'success': result.success,
+      'failureKind': result.failureKind.name,
+      'blocksRemoteAssist': result.blocksRemoteAssist,
+      'firewallEnabled': result.firewallEnabled,
+      'skippedRuleCheck': result.skippedRuleCheck,
+      'promptedForElevation': result.promptedForElevation,
+      'allowedRules': result.allowedRules
+          .map((rule) => rule.signature)
+          .toList(growable: false),
+      'missingRules': result.missingRules
+          .map((rule) => rule.signature)
+          .toList(growable: false),
+      if (result.errorMessage != null) 'error': result.errorMessage,
+      if (result.attemptedCommand != null)
+        'attemptedCommand': result.attemptedCommand,
+      if (result.processExitCode != null)
+        'processExitCode': result.processExitCode,
+      if (result.processStdout != null) 'processStdout': result.processStdout,
+      if (result.processStderr != null) 'processStderr': result.processStderr,
+      if (result.elevatedScriptStarted != null)
+        'elevatedScriptStarted': result.elevatedScriptStarted,
+    };
+    if (result.success) {
+      await _logger.info(
+        'remote_assist.firewall',
+        logMessage,
+        networkKey: session.networkKey,
+        extra: logExtra,
+      );
+    } else if (result.blocksRemoteAssist) {
+      await _logger.error(
+        'remote_assist.firewall',
+        logMessage,
+        networkKey: session.networkKey,
+        extra: logExtra,
+      );
+    } else {
+      await _logger.warn(
+        'remote_assist.firewall',
+        logMessage,
+        networkKey: session.networkKey,
+        extra: logExtra,
+      );
+    }
+    return result;
+  }
+
+  Future<WindowsFirewallEnsureResult> _prepareControlledLocalRemoteAssistHost(
+    RemoteAssistSession session,
+  ) async {
+    _pushStatus('已同意远程协助，正在准备本机桌面服务');
+    await _logRemoteAssistInfo(
+      '开始准备本机桌面服务',
+      session: session,
+    );
+    final firewallResult = await _ensureRemoteAssistFirewallState(session);
+    await _logRemoteAssistInfo(
+      '远程协助防火墙检查结果',
+      session: session,
+      extra: {
+        'firewallSuccess': firewallResult.success,
+        'firewallFailureKind': firewallResult.failureKind.name,
+        'firewallBlocksRemoteAssist': firewallResult.blocksRemoteAssist,
+        'firewallEnabled': firewallResult.firewallEnabled,
+        'firewallSkippedRuleCheck': firewallResult.skippedRuleCheck,
+        if (firewallResult.errorMessage != null)
+          'firewallError': firewallResult.errorMessage,
+      },
+    );
+    if (firewallResult.blocksRemoteAssist) {
+      _lastRemoteAssistHostReadySucceeded = false;
+      throw StateError(
+        firewallResult.errorMessage?.trim().isNotEmpty == true
+            ? firewallResult.errorMessage!.trim()
+            : '远程协助防火墙检查阻断了桌面服务启动',
+      );
+    }
+    try {
+      if (debugEnsureRemoteAssistHostReady != null) {
+        await debugEnsureRemoteAssistHostReady!(session.listenPort);
+      } else {
+        await _remoteAssist.ensureHostReady(listenPort: session.listenPort);
+      }
+      _lastRemoteAssistHostError = null;
+      _lastRemoteAssistHostReadySucceeded = true;
+      await _logRemoteAssistInfo(
+        '本机桌面服务已就绪',
+        session: session,
+        extra: {
+          'firewallWarning': _remoteAssistFirewallHasWarning(firewallResult),
+          'firewallFailureKind': firewallResult.failureKind.name,
+        },
+      );
+      return firewallResult;
+    } catch (error, stackTrace) {
+      _lastRemoteAssistHostError = error.toString();
+      _lastRemoteAssistHostReadySucceeded = false;
+      await _logger.error(
+        'remote_assist.host',
+        '本机桌面服务就绪失败',
+        networkKey: session.networkKey,
+        extra: {
+          'sessionId': session.sessionId,
+          'listenPort': session.listenPort,
+          'error': error.toString(),
+          'stackTrace': stackTrace.toString(),
+          if (_lastRemoteAssistBundledRuntimePath != null)
+            'bundledRuntime': _lastRemoteAssistBundledRuntimePath,
+          if (_lastRemoteAssistInstalledRuntimePath != null)
+            'installedRuntime': _lastRemoteAssistInstalledRuntimePath,
+          'firewallFailureKind': firewallResult.failureKind.name,
+        },
+      );
+      rethrow;
+    }
+  }
+
   Future<String> buildDiagnosticsReport() async {
     final dbPath = await _repository.databasePath;
     final baseDir = await _repository.baseDirectoryPath;
     final attachmentsDir = (await _repository.attachmentsDirectory).path;
     final tempDir = (await _repository.tempDirectory).path;
+    final bundledRuntimePath = await _remoteAssist.bundledRuntimePath();
+    final companionExecutablePath =
+        await _remoteAssist.companionExecutablePath();
+    final installedRuntimePath = await _remoteAssist.installedRuntimePath();
+    final managedRuntimeHome = await _remoteAssist.managedRuntimeHomePath();
+    final managedConfigDir = await _remoteAssist.managedConfigDirectoryPath();
+    final managedLogsDir = await _remoteAssist.managedLogsDirectoryPath();
+    await _remoteAssist.syncManagedLogsToMirror();
+    final managedRustDeskLogsDir =
+        await _remoteAssist.managedRustDeskInternalLogsDirectoryPath();
+    final managedRustDeskCurrentLogPath =
+        await _remoteAssist.managedRustDeskCurrentLogPath();
+    final bundledRuntimeMetadataPath =
+        await _remoteAssist.bundledRuntimeMetadataPath();
+    final mirroredCompanionLogsDir =
+        await _remoteAssist.mirroredCompanionLogsDirectoryPath();
+    final bundledRuntimeMetadata = bundledRuntimeMetadataPath == null
+        ? null
+        : await File(bundledRuntimeMetadataPath).exists()
+            ? await File(bundledRuntimeMetadataPath).readAsString()
+            : null;
+    final firewallStatus =
+        await _firewall.checkRuleStatus(includeRemoteAssist: true);
     final buffer = StringBuffer()
       ..writeln('聊天室联调诊断')
       ..writeln('时间: ${DateTime.now().toIso8601String()}')
@@ -584,6 +1032,87 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       ..writeln('实时播放器开启: ${_audio.isIncomingStreamPlaying}')
       ..writeln(
           '当前通话: ${callSession?.type.name ?? 'none'} / ${callSession?.state.name ?? 'idle'}');
+    buffer
+      ..writeln('Windows 防火墙已启用: ${firewallStatus.firewallEnabled}')
+      ..writeln('Windows 防火墙规则已就绪: ${firewallStatus.success}')
+      ..writeln('Windows 防火墙跳过规则检查: ${firewallStatus.skippedRuleCheck}')
+      ..writeln('Windows 防火墙结果分类: ${firewallStatus.failureKind.name}')
+      ..writeln(
+          'Windows 防火墙已放行: ${_formatFirewallRules(firewallStatus.allowedRules)}')
+      ..writeln(
+          'Windows 防火墙缺失: ${_formatFirewallRules(firewallStatus.missingRules)}')
+      ..writeln(
+          '最近聊天室防火墙授权: ${_lastChatFirewallResult?.promptedForElevation ?? false}')
+      ..writeln(
+          '最近远程协助防火墙授权: ${_lastRemoteAssistFirewallResult?.promptedForElevation ?? false}')
+      ..writeln(
+          '最近远程协助防火墙结果分类: ${_lastRemoteAssistFirewallResult?.failureKind.name ?? WindowsFirewallEnsureFailureKind.none.name}')
+      ..writeln('最近远程协助防火墙是否阻断 ready: $_lastRemoteAssistFirewallBlockedReady')
+      ..writeln(
+          '最近远程协助防火墙命令: ${_lastRemoteAssistFirewallResult?.attemptedCommand ?? 'none'}')
+      ..writeln(
+          '最近远程协助防火墙退出码: ${_lastRemoteAssistFirewallResult?.processExitCode?.toString() ?? 'none'}')
+      ..writeln(
+          '最近防火墙错误: ${_lastRemoteAssistFirewallResult?.errorMessage ?? _lastChatFirewallResult?.errorMessage ?? 'none'}')
+      ..writeln('远程协助运行时就绪: $_remoteAssistRuntimeReady')
+      ..writeln(
+          '远程协助运行策略: bundled-only + VNT virtual-ip direct + manual-approve')
+      ..writeln('远程协助 bundled runtime: ${bundledRuntimePath ?? 'missing'}')
+      ..writeln(
+          '附带 rustdesk_qs.exe（仅分发兼容）: ${companionExecutablePath ?? 'missing'}')
+      ..writeln(
+          '系统安装 RustDesk（仅诊断，不参与启动）: ${installedRuntimePath ?? 'missing'}')
+      ..writeln('远程协助受管目录: $managedRuntimeHome')
+      ..writeln('远程协助受管配置目录: $managedConfigDir')
+      ..writeln('远程协助受管 supervisor 日志目录: $managedLogsDir')
+      ..writeln('远程协助受管 RustDesk 日志目录: $managedRustDeskLogsDir')
+      ..writeln('远程协助官方 portable 当前日志: $managedRustDeskCurrentLogPath')
+      ..writeln(
+          '远程协助 runtime metadata: ${bundledRuntimeMetadataPath ?? 'missing'}')
+      ..writeln(
+          '远程协助 runtime metadata 内容: ${bundledRuntimeMetadata?.trim().isNotEmpty == true ? bundledRuntimeMetadata!.replaceAll(RegExp(r'\s+'), ' ').trim() : 'none'}')
+      ..writeln('远程协助镜像日志目录: $mirroredCompanionLogsDir')
+      ..writeln(
+          '最近内置 RustDesk host 命令: ${_remoteAssist.lastHostCommand ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host 模式: ${_remoteAssist.lastHostLaunchMode ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host 日志: ${_remoteAssist.lastHostLogPath ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host 镜像日志: ${_remoteAssist.lastCompanionMirrorLogPath ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk 官方日志: ${_remoteAssist.lastHostOfficialLogPath ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk 官方日志片段: ${_remoteAssist.lastHostOfficialLogSnippet ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host 退出码: ${_remoteAssist.lastHostExitCode?.toString() ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host stdout: ${_remoteAssist.lastHostStdoutSnippet ?? 'none'}')
+      ..writeln(
+          '最近内置 RustDesk host stderr: ${_remoteAssist.lastHostStderrSnippet ?? 'none'}')
+      ..writeln(
+          '最近远程协助监听端口: ${_lastRemoteAssistListenPort ?? RemoteAssistService.listenPort}')
+      ..writeln(
+          '最近远程协助 host ready 成功: ${_lastRemoteAssistHostReadySucceeded?.toString() ?? 'unknown'}')
+      ..writeln(
+          '最近 remoteAssistReady 已发送: ${_lastRemoteAssistReadySentAt?.toIso8601String() ?? 'none'}')
+      ..writeln(
+          '最近 remoteAssistReady 已接收: ${_lastRemoteAssistReadyReceivedAt?.toIso8601String() ?? 'none'}')
+      ..writeln('最近远程协助 host 错误: ${_lastRemoteAssistHostError ?? 'none'}')
+      ..writeln(
+          '最近远程协助 connect 错误: ${_lastRemoteAssistConnectError ?? 'none'}');
+    if (remoteAssistSession != null) {
+      buffer
+        ..writeln(
+            '当前远程协助: ${remoteAssistSession!.mode.name} / ${remoteAssistSession!.state.name}')
+        ..writeln('远程协助 controller: ${remoteAssistSession!.controllerPeerId}')
+        ..writeln('远程协助 controlled: ${remoteAssistSession!.controlledPeerId}')
+        ..writeln(
+            '远程协助 controllerIp: ${remoteAssistSession!.controllerVirtualIp}')
+        ..writeln(
+            '远程协助 controlledIp: ${remoteAssistSession!.controlledVirtualIp}')
+        ..writeln('远程协助 listenPort: ${remoteAssistSession!.listenPort}');
+    }
     for (final entry in _services.entries) {
       final service = entry.value;
       buffer
@@ -599,6 +1128,55 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     return buffer.toString();
   }
 
+  Future<void> _refreshRemoteAssistRuntimeDetails({
+    int? listenPort,
+  }) async {
+    if (debugRefreshRemoteAssistRuntime != null) {
+      await debugRefreshRemoteAssistRuntime!(listenPort: listenPort);
+      return;
+    }
+    _remoteAssistRuntimeReady = await _remoteAssist.isAvailable();
+    _lastRemoteAssistBundledRuntimePath =
+        await _remoteAssist.bundledRuntimePath();
+    _lastRemoteAssistInstalledRuntimePath =
+        await _remoteAssist.installedRuntimePath();
+    _lastRemoteAssistListenPort = listenPort ?? _lastRemoteAssistListenPort;
+  }
+
+  Future<void> _logRemoteAssistInfo(
+    String message, {
+    RemoteAssistSession? session,
+    String? networkKey,
+    Map<String, Object?> extra = const {},
+  }) async {
+    final currentSession = session ?? remoteAssistSession;
+    final payload = <String, Object?>{
+      if (currentSession != null) 'sessionId': currentSession.sessionId,
+      if (currentSession != null) 'mode': currentSession.mode.name,
+      if (currentSession != null) 'state': currentSession.state.name,
+      if (currentSession != null)
+        'controllerPeerId': currentSession.controllerPeerId,
+      if (currentSession != null)
+        'controlledPeerId': currentSession.controlledPeerId,
+      if (currentSession != null)
+        'controllerVirtualIp': currentSession.controllerVirtualIp,
+      if (currentSession != null)
+        'controlledVirtualIp': currentSession.controlledVirtualIp,
+      if (currentSession != null) 'listenPort': currentSession.listenPort,
+      if (_lastRemoteAssistBundledRuntimePath != null)
+        'bundledRuntime': _lastRemoteAssistBundledRuntimePath,
+      if (_lastRemoteAssistInstalledRuntimePath != null)
+        'installedRuntime': _lastRemoteAssistInstalledRuntimePath,
+      ...extra,
+    };
+    await _logger.info(
+      'remote_assist',
+      message,
+      networkKey: networkKey ?? currentSession?.networkKey,
+      extra: payload,
+    );
+  }
+
   String? _localPeerIdForNetwork(String networkKey) {
     final service = _services[networkKey];
     if (service == null || service.localVirtualIp.isEmpty) {
@@ -607,19 +1185,32 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     return ChatIds.peerId(networkKey, service.localVirtualIp);
   }
 
-  String? preferredNetworkKey() {
-    if (selectedConversation != null) {
+  ChatPeer _normalizePeerOnlineState(ChatPeer peer, DateTime now) {
+    final effectivelyOnline = chatPeerIsEffectivelyOnline(peer, now: now);
+    if (effectivelyOnline == peer.isOnline) {
+      return peer;
+    }
+    return peer.copyWith(isOnline: effectivelyOnline);
+  }
+
+  String? preferredNetworkKey({String? scopedNetworkKey}) {
+    if (selectedConversation != null &&
+        chatMatchesNetworkScope(
+          selectedConversation!.networkKey,
+          scopedNetworkKey,
+        )) {
       return selectedConversation!.networkKey;
     }
-    final keys = connectedNetworkKeys;
+    final keys =
+        connectedNetworkKeysForScope(scopedNetworkKey: scopedNetworkKey);
     if (keys.isEmpty) {
       return null;
     }
     return keys.first;
   }
 
-  ChatChannel? preferredLobbyChannel() {
-    final networkKey = preferredNetworkKey();
+  ChatChannel? preferredLobbyChannel({String? scopedNetworkKey}) {
+    final networkKey = preferredNetworkKey(scopedNetworkKey: scopedNetworkKey);
     if (networkKey == null) {
       return null;
     }
@@ -630,14 +1221,31 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
         .firstOrNull;
   }
 
-  Future<void> openPreferredLobby() async {
-    final lobby = preferredLobbyChannel();
+  Future<void> openPreferredLobby({String? scopedNetworkKey}) async {
+    final lobby = preferredLobbyChannel(scopedNetworkKey: scopedNetworkKey);
     if (lobby == null) {
       return;
     }
     await selectConversation(
       ChatIds.channelConversationId(lobby.networkKey, lobby.channelId),
     );
+  }
+
+  Future<void> openPreferredChannelConversation(
+      {String? scopedNetworkKey}) async {
+    final lobby = preferredLobbyChannel(scopedNetworkKey: scopedNetworkKey);
+    if (lobby != null) {
+      await selectConversation(
+        ChatIds.channelConversationId(lobby.networkKey, lobby.channelId),
+      );
+      return;
+    }
+    final scopedRoomConversations = roomConversationsForScope(
+      scopedNetworkKey: scopedNetworkKey,
+    );
+    if (scopedRoomConversations.isNotEmpty) {
+      await selectConversation(scopedRoomConversations.first.conversationId);
+    }
   }
 
   bool peerSupportsRemoteAssist(ChatPeer peer) {
@@ -654,7 +1262,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     if (runtimeReason.isNotEmpty) {
       return runtimeReason;
     }
-    if (!peer.isOnline) {
+    if (!isPeerOnline(peer)) {
       return '对方当前不在线';
     }
     if (!peerSupportsRemoteAssist(peer)) {
@@ -670,7 +1278,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     if (!_remoteAssistRuntimeReady) {
       return 'RustDesk 运行时缺失，请重新构建或检查运行包';
     }
-    if (!peer.isOnline) {
+    if (!isPeerOnline(peer)) {
       return '对方当前不在线';
     }
     if (!peerSupportsRemoteAssist(peer)) {
@@ -681,36 +1289,6 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
 
   List<ChatPeer> onlinePeersForNetwork(String networkKey) {
     return onlinePeers.where((peer) => peer.networkKey == networkKey).toList();
-  }
-
-  List<ChatPeer> lobbyOnlinePeersForNetwork(String networkKey) {
-    final localPeerId = _localPeerIdForNetwork(networkKey);
-    final peers = peerIndex.values
-        .where((peer) => peer.networkKey == networkKey && peer.isOnline)
-        .toList()
-      ..sort((a, b) => a.virtualIp.compareTo(b.virtualIp));
-    if (localPeerId == null) {
-      return peers;
-    }
-    peers.sort((a, b) {
-      final aIsLocal = a.peerId == localPeerId;
-      final bIsLocal = b.peerId == localPeerId;
-      if (aIsLocal && !bIsLocal) {
-        return -1;
-      }
-      if (!aIsLocal && bIsLocal) {
-        return 1;
-      }
-      return a.virtualIp.compareTo(b.virtualIp);
-    });
-    return peers;
-  }
-
-  bool isLocalPeer(String peerId) {
-    return connectedNetworkKeys
-        .map(_localPeerIdForNetwork)
-        .whereType<String>()
-        .contains(peerId);
   }
 
   bool isChannelOwner(ChatChannel channel) {
@@ -1241,6 +1819,72 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     );
   }
 
+  Future<List<ChatChannel>> _publicChannelsForHandshakeSync(
+    String networkKey,
+  ) async {
+    final channels = await _repository.listChannels(networkKey: networkKey);
+    final visibleChannels = channels
+        .where(chatChannelShouldSyncOnHandshake)
+        .toList(growable: false);
+    return visibleChannels
+      ..sort((a, b) {
+        final createdCompare = a.createdAt.compareTo(b.createdAt);
+        if (createdCompare != 0) {
+          return createdCompare;
+        }
+        return a.channelId.compareTo(b.channelId);
+      });
+  }
+
+  Future<void> _syncKnownPublicChannelsToPeer({
+    required String networkKey,
+    required String peerId,
+  }) async {
+    final channels = await _publicChannelsForHandshakeSync(networkKey);
+    if (channels.isEmpty) {
+      return;
+    }
+    try {
+      for (final channel in channels) {
+        await _sendEnvelopeToPeer(
+          networkKey: networkKey,
+          peerId: peerId,
+          type: ChatEnvelopeType.channelAnnounce,
+          conversationId: ChatIds.channelConversationId(
+            networkKey,
+            channel.channelId,
+          ),
+          channelId: channel.channelId,
+          payload: buildPublicChannelAnnouncementPayload(channel),
+        );
+      }
+    } catch (error) {
+      await _logger.warn(
+        'channel.sync',
+        '握手后补同步公开频道失败',
+        networkKey: networkKey,
+        extra: {
+          'peerId': peerId,
+          'channelCount': channels.length,
+          'error': error.toString(),
+        },
+      );
+      return;
+    }
+    await _logger.info(
+      'channel.sync',
+      '握手后补同步公开频道',
+      networkKey: networkKey,
+      extra: {
+        'peerId': peerId,
+        'channelCount': channels.length,
+        'channelIds': channels
+            .map((channel) => channel.channelId)
+            .toList(growable: false),
+      },
+    );
+  }
+
   Future<void> renameChannel(ChatChannel channel, String newName) async {
     final localPeerId = _localPeerIdForNetwork(channel.networkKey);
     final trimmed = newName.trim();
@@ -1408,7 +2052,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           },
         );
       } else if (conversation.channelId != null) {
-        await _broadcastToPeers(
+        final result = await _broadcastToPeers(
           networkKey: conversation.networkKey,
           peers: await _channelBroadcastPeerIds(conversation),
           type: ChatEnvelopeType.dmMessage,
@@ -1420,6 +2064,23 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
             'text': text,
           },
         );
+        if (result.allFailed) {
+          throw StateError('频道文字消息广播失败，全部目标节点均未送达');
+        }
+        if (result.hasFailures) {
+          await _logger.warn(
+            'message.text',
+            '频道文字消息部分节点发送失败',
+            networkKey: conversation.networkKey,
+            extra: {
+              'conversationId': conversation.conversationId,
+              'messageId': messageId,
+              'attemptedCount': result.attemptedCount,
+              'successCount': result.successCount,
+              'failedIps': result.failedIps,
+            },
+          );
+        }
       }
       await _repository.replaceMessage(
         message.copyWith(status: ChatMessageStatus.sent),
@@ -1434,7 +2095,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           'messageId': messageId,
         },
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
       await _repository.replaceMessage(
         message.copyWith(status: ChatMessageStatus.failed),
       );
@@ -1446,8 +2107,11 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
         extra: {
           'conversationId': conversation.conversationId,
           'messageId': messageId,
+          'error': error.toString(),
+          'stackTrace': stackTrace.toString(),
         },
       );
+      _pushStatus('聊天室消息发送失败，请查看联调诊断和 chat-debug.log');
     }
   }
 
@@ -1465,28 +2129,48 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
   }
 
   Future<void> sendPickedImage() async {
-    final picked = await FilePicker.platform.pickFiles(
-      type: FileType.image,
-      allowMultiple: false,
-    );
-    if (picked == null || picked.files.single.path == null) {
-      return;
+    try {
+      final picked = await FilePicker.platform.pickFiles(
+        type: FileType.image,
+        allowMultiple: false,
+      );
+      if (picked == null || picked.files.single.path == null) {
+        return;
+      }
+      await sendAttachmentFile(
+        picked.files.single.path!,
+        ChatMessageKind.image,
+      );
+    } catch (error, stackTrace) {
+      await _recordOutgoingAttachmentFailure(
+        stage: 'pick',
+        kind: ChatMessageKind.image,
+        networkKey: selectedConversation?.networkKey,
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
-    await sendAttachmentFile(
-      picked.files.single.path!,
-      ChatMessageKind.image,
-    );
   }
 
   Future<void> sendPickedFile() async {
-    final picked = await FilePicker.platform.pickFiles(allowMultiple: false);
-    if (picked == null || picked.files.single.path == null) {
-      return;
+    try {
+      final picked = await FilePicker.platform.pickFiles(allowMultiple: false);
+      if (picked == null || picked.files.single.path == null) {
+        return;
+      }
+      await sendAttachmentFile(
+        picked.files.single.path!,
+        ChatMessageKind.file,
+      );
+    } catch (error, stackTrace) {
+      await _recordOutgoingAttachmentFailure(
+        stage: 'pick',
+        kind: ChatMessageKind.file,
+        networkKey: selectedConversation?.networkKey,
+        error: error,
+        stackTrace: stackTrace,
+      );
     }
-    await sendAttachmentFile(
-      picked.files.single.path!,
-      ChatMessageKind.file,
-    );
   }
 
   Future<void> sendAttachmentFile(
@@ -1497,23 +2181,67 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     if (conversation == null) {
       return;
     }
-    final file = File(sourcePath);
-    final stat = await file.stat();
-    if (kind == ChatMessageKind.image && stat.size > imageLimitBytes) {
-      _pushStatus('图片不能超过 20MB');
-      return;
+    _pendingOutgoingAttachmentCount++;
+    notifyListeners();
+    try {
+      final file = File(sourcePath);
+      if (!await file.exists()) {
+        _pushStatus('待发送附件不存在或已被移动');
+        return;
+      }
+      final stat = await file.stat();
+      if (kind == ChatMessageKind.image && stat.size > imageLimitBytes) {
+        _pushStatus('图片不能超过 20MB');
+        return;
+      }
+      if (kind == ChatMessageKind.file && stat.size > fileLimitBytes) {
+        _pushStatus('文件不能超过 200MB');
+        return;
+      }
+      final imported = await _repository.importOutgoingFile(sourcePath);
+      await _sendOutgoingAttachment(
+        conversation: conversation,
+        localPath: imported.path,
+        fileName: path.basename(sourcePath),
+        kind: kind,
+      );
+    } catch (error, stackTrace) {
+      await _recordOutgoingAttachmentFailure(
+        stage: 'prepare',
+        kind: kind,
+        networkKey: conversation.networkKey,
+        sourcePath: sourcePath,
+        error: error,
+        stackTrace: stackTrace,
+      );
+    } finally {
+      if (_pendingOutgoingAttachmentCount > 0) {
+        _pendingOutgoingAttachmentCount--;
+      }
+      notifyListeners();
     }
-    if (kind == ChatMessageKind.file && stat.size > fileLimitBytes) {
-      _pushStatus('文件不能超过 200MB');
-      return;
-    }
-    final imported = await _repository.importOutgoingFile(sourcePath);
-    await _sendOutgoingAttachment(
-      conversation: conversation,
-      localPath: imported.path,
-      fileName: path.basename(sourcePath),
-      kind: kind,
+  }
+
+  Future<void> _recordOutgoingAttachmentFailure({
+    required String stage,
+    required ChatMessageKind kind,
+    required Object error,
+    String? networkKey,
+    String? sourcePath,
+    StackTrace? stackTrace,
+  }) async {
+    await _logger.error(
+      'attachment.$stage',
+      '准备发送附件失败',
+      networkKey: networkKey,
+      extra: {
+        'kind': kind.name,
+        if (sourcePath != null) 'sourcePath': sourcePath,
+        'error': error.toString(),
+        if (stackTrace != null) 'stackTrace': stackTrace.toString(),
+      },
     );
+    _pushStatus('聊天室附件发送失败，请查看联调诊断和 chat-debug.log');
   }
 
   Future<void> _sendOutgoingAttachment({
@@ -1614,24 +2342,72 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       'sha256': sha256,
       'expiresAt': attachment.expiresAt!.millisecondsSinceEpoch,
     };
-    if (conversation.type == ChatConversationType.direct &&
-        conversation.peerId != null) {
-      await _sendEnvelopeToPeer(
-        networkKey: conversation.networkKey,
-        peerId: conversation.peerId!,
-        type: type,
-        conversationId: conversation.conversationId,
-        payload: payload,
+    ChatBroadcastResult? result;
+    try {
+      if (conversation.type == ChatConversationType.direct &&
+          conversation.peerId != null) {
+        await _sendEnvelopeToPeer(
+          networkKey: conversation.networkKey,
+          peerId: conversation.peerId!,
+          type: type,
+          conversationId: conversation.conversationId,
+          payload: payload,
+        );
+      } else if (conversation.channelId != null) {
+        result = await _broadcastToPeers(
+          networkKey: conversation.networkKey,
+          peers: await _channelBroadcastPeerIds(conversation),
+          type: type,
+          conversationId: conversation.conversationId,
+          channelId: conversation.channelId,
+          payload: payload,
+        );
+        if (result.allFailed) {
+          throw StateError('频道附件消息广播失败，全部目标节点均未送达');
+        }
+        if (result.hasFailures) {
+          await _logger.warn(
+            'attachment.offer',
+            '频道附件消息部分节点发送失败',
+            networkKey: conversation.networkKey,
+            extra: {
+              'conversationId': conversation.conversationId,
+              'messageId': messageId,
+              'attachmentId': attachmentId,
+              'attemptedCount': result.attemptedCount,
+              'successCount': result.successCount,
+              'failedIps': result.failedIps,
+            },
+          );
+        }
+      }
+    } catch (error, stackTrace) {
+      await _repository.upsertAttachment(
+        attachment.copyWith(
+          offerStatus: ChatMessageStatus.failed,
+          transferStatus: ChatMessageStatus.failed,
+        ),
       );
-    } else if (conversation.channelId != null) {
-      await _broadcastToPeers(
-        networkKey: conversation.networkKey,
-        peers: await _channelBroadcastPeerIds(conversation),
-        type: type,
-        conversationId: conversation.conversationId,
-        channelId: conversation.channelId,
-        payload: payload,
+      await _repository.replaceMessage(
+        message.copyWith(status: ChatMessageStatus.failed),
       );
+      await selectConversation(conversation.conversationId);
+      await _logger.error(
+        'attachment.offer',
+        '附件消息发送失败',
+        networkKey: conversation.networkKey,
+        extra: {
+          'conversationId': conversation.conversationId,
+          'messageId': messageId,
+          'attachmentId': attachmentId,
+          if (result != null) 'attemptedCount': result.attemptedCount,
+          if (result != null) 'successCount': result.successCount,
+          if (result != null) 'failedIps': result.failedIps,
+          'error': error.toString(),
+          'stackTrace': stackTrace.toString(),
+        },
+      );
+      _pushStatus('聊天室附件发送失败，请查看联调诊断和 chat-debug.log');
     }
   }
 
@@ -1826,6 +2602,50 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     await _startRemoteAssist(peer, RemoteAssistMode.inviteControl);
   }
 
+  String _generateRemoteAssistSessionToken({int length = 16}) {
+    const alphabet =
+        'ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789';
+    final random = Random.secure();
+    final buffer = StringBuffer();
+    for (var index = 0; index < length; index++) {
+      buffer.write(alphabet[random.nextInt(alphabet.length)]);
+    }
+    return buffer.toString();
+  }
+
+  Future<void> _cleanupRemoteAssistRuntime({
+    int? listenPort,
+    required String reason,
+  }) async {
+    try {
+      if (debugCleanupRemoteAssistRuntime != null) {
+        await debugCleanupRemoteAssistRuntime!(listenPort: listenPort);
+      } else {
+        await _remoteAssist.cleanupManagedSessionState(
+          listenPort: listenPort ?? RemoteAssistService.listenPort,
+        );
+      }
+      await _logRemoteAssistInfo(
+        '已清理内置 RustDesk 会话态',
+        extra: {
+          'cleanupReason': reason,
+          'listenPort': listenPort ?? RemoteAssistService.listenPort,
+        },
+      );
+    } catch (error, stackTrace) {
+      await _logger.warn(
+        'remote_assist.cleanup',
+        '清理内置 RustDesk 会话态失败',
+        extra: {
+          'cleanupReason': reason,
+          'listenPort': listenPort ?? RemoteAssistService.listenPort,
+          'error': error.toString(),
+          'stackTrace': stackTrace.toString(),
+        },
+      );
+    }
+  }
+
   Future<void> _startRemoteAssist(
     ChatPeer peer,
     RemoteAssistMode mode,
@@ -1843,7 +2663,6 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       _pushStatus('当前网络尚未就绪，暂时无法发起远程协助');
       return;
     }
-    await _remoteAssist.ensureHostReady();
     await openDirectConversation(peer);
     final now = DateTime.now();
     final sessionId = _uuid.v4();
@@ -1859,14 +2678,34 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       controlledVirtualIp: isRequestControl ? peer.virtualIp : localVirtualIp,
       mode: mode,
       listenPort: RemoteAssistService.listenPort,
-      sessionToken: _uuid.v4(),
+      sessionToken: _generateRemoteAssistSessionToken(),
       state: RemoteAssistState.pending,
       isIncoming: false,
       createdAt: now,
       updatedAt: now,
     );
     remoteAssistSession = session;
+    _lastRemoteAssistHostError = null;
+    _lastRemoteAssistConnectError = null;
+    _lastRemoteAssistHostReadySucceeded = null;
+    _lastRemoteAssistReadySentAt = null;
+    _lastRemoteAssistReadyReceivedAt = null;
+    _lastRemoteAssistFirewallBlockedReady = false;
+    await _refreshRemoteAssistRuntimeDetails(listenPort: session.listenPort);
     notifyListeners();
+    await _logRemoteAssistInfo(
+      '发起远程协助邀请',
+      session: session,
+      extra: {
+        'peerId': peer.peerId,
+        'peerVirtualIp': peer.virtualIp,
+        'conversationId': ChatIds.directConversationId(
+          peer.networkKey,
+          localPeerId,
+          peer.peerId,
+        ),
+      },
+    );
     await _sendEnvelopeToPeer(
       networkKey: peer.networkKey,
       peerId: peer.peerId,
@@ -1896,17 +2735,31 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
 
   Future<void> acceptRemoteAssist() async {
     final session = remoteAssistSession;
-    if (session == null || !session.isIncoming) {
+    if (session == null ||
+        !session.isIncoming ||
+        session.state != RemoteAssistState.pending ||
+        !_processingRemoteAssistAcceptSessionIds.add(session.sessionId)) {
       return;
     }
     try {
-      await _remoteAssist.ensureHostReady();
-      remoteAssistSession = session.copyWith(
-        state: session.isControllerLocal
-            ? RemoteAssistState.active
-            : RemoteAssistState.ready,
-        updatedAt: DateTime.now(),
+      await _refreshRemoteAssistRuntimeDetails(listenPort: session.listenPort);
+      await _logRemoteAssistInfo(
+        '开始处理远程协助同意',
+        session: session,
       );
+      WindowsFirewallEnsureResult? firewallResult;
+      if (session.isControlledLocal) {
+        firewallResult = await _prepareControlledLocalRemoteAssistHost(session);
+        remoteAssistSession = session.copyWith(
+          state: RemoteAssistState.ready,
+          updatedAt: DateTime.now(),
+        );
+      } else {
+        remoteAssistSession = session.copyWith(
+          state: RemoteAssistState.accepted,
+          updatedAt: DateTime.now(),
+        );
+      }
       notifyListeners();
       await _sendEnvelopeToPeer(
         networkKey: session.networkKey,
@@ -1920,28 +2773,76 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           'sessionToken': session.sessionToken,
         },
       );
-      await _sendEnvelopeToPeer(
-        networkKey: session.networkKey,
-        peerId: session.peerId,
-        type: ChatEnvelopeType.remoteAssistReady,
-        conversationId: selectedConversationId,
-        payload: {
-          'sessionId': session.sessionId,
-          'listenPort': session.listenPort,
-          'sessionToken': session.sessionToken,
-        },
-      );
-      if (session.isControllerLocal) {
-        await _remoteAssist.launchController(session.controlledVirtualIp);
+      if (session.isControlledLocal) {
+        await _sendEnvelopeToPeer(
+          networkKey: session.networkKey,
+          peerId: session.peerId,
+          type: ChatEnvelopeType.remoteAssistReady,
+          conversationId: selectedConversationId,
+          payload: {
+            'sessionId': session.sessionId,
+            'listenPort': session.listenPort,
+            'sessionToken': session.sessionToken,
+          },
+        );
+        _lastRemoteAssistReadySentAt = DateTime.now();
+        await _logRemoteAssistInfo(
+          '已发送 remoteAssistReady',
+          session: remoteAssistSession,
+          extra: {
+            'firewallFailureKind': firewallResult?.failureKind.name ??
+                WindowsFirewallEnsureFailureKind.none.name,
+          },
+        );
+        await _logRemoteAssistInfo(
+          '受控端已就绪并发送 ready',
+          session: remoteAssistSession,
+        );
+        _pushStatus(
+          _remoteAssistControlledReadyStatusMessage(
+            firewallResult ??
+                const WindowsFirewallEnsureResult(
+                  success: true,
+                  promptedForElevation: false,
+                  includeRemoteAssist: true,
+                  targetedRules: const [],
+                  allowedRules: const [],
+                  missingRules: const [],
+                ),
+          ),
+        );
+      } else {
+        _pushStatus('已同意远程协助，正在等待对方启动桌面服务');
       }
-      _pushStatus('远程协助请求已同意');
     } catch (error) {
+      _lastRemoteAssistHostError = error.toString();
+      _lastRemoteAssistHostReadySucceeded = false;
       remoteAssistSession = session.copyWith(
         state: RemoteAssistState.failed,
         updatedAt: DateTime.now(),
       );
       notifyListeners();
+      await _logger.error(
+        'remote_assist.host',
+        '远程协助 host 就绪失败',
+        networkKey: session.networkKey,
+        extra: {
+          'sessionId': session.sessionId,
+          'listenPort': session.listenPort,
+          'error': error.toString(),
+          if (_lastRemoteAssistBundledRuntimePath != null)
+            'bundledRuntime': _lastRemoteAssistBundledRuntimePath,
+          if (_lastRemoteAssistInstalledRuntimePath != null)
+            'installedRuntime': _lastRemoteAssistInstalledRuntimePath,
+        },
+      );
+      await _cleanupRemoteAssistRuntime(
+        listenPort: session.listenPort,
+        reason: 'accept_failed',
+      );
       _pushStatus('启动远程协助失败: $error');
+    } finally {
+      _processingRemoteAssistAcceptSessionIds.remove(session.sessionId);
     }
   }
 
@@ -1962,6 +2863,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       conversationId: selectedConversationId,
       payload: {'sessionId': session.sessionId},
     );
+    await _cleanupRemoteAssistRuntime(
+      listenPort: session.listenPort,
+      reason: 'reject_local',
+    );
   }
 
   Future<void> cancelRemoteAssist() async {
@@ -1980,6 +2885,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       type: ChatEnvelopeType.remoteAssistCancel,
       conversationId: selectedConversationId,
       payload: {'sessionId': session.sessionId},
+    );
+    await _cleanupRemoteAssistRuntime(
+      listenPort: session.listenPort,
+      reason: 'cancel_local',
     );
   }
 
@@ -2551,8 +3460,19 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     String? channelId,
     Map<String, dynamic> payload = const {},
   }) async {
+    if (debugSendEnvelopeToPeer != null) {
+      await debugSendEnvelopeToPeer!(
+        networkKey: networkKey,
+        peerId: peerId,
+        type: type,
+        conversationId: conversationId,
+        channelId: channelId,
+        payload: payload,
+      );
+      return;
+    }
     final peer = await _repository.getPeer(peerId);
-    if (peer == null || !peer.isOnline) {
+    if (peer == null || !chatPeerIsEffectivelyOnline(peer)) {
       throw StateError('目标设备不在线');
     }
     final service = _services[networkKey];
@@ -2575,7 +3495,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     );
   }
 
-  Future<void> _broadcastToPeers({
+  Future<ChatBroadcastResult> _broadcastToPeers({
     required String networkKey,
     required List<String> peers,
     required ChatEnvelopeType type,
@@ -2586,7 +3506,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     final localPeerId = _localPeerIdForNetwork(networkKey);
     final service = _services[networkKey];
     if (service == null) {
-      return;
+      return const ChatBroadcastResult.empty();
     }
     final remoteIps = <String>[];
     for (final peerId in peers.toSet()) {
@@ -2594,11 +3514,11 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
         continue;
       }
       final peer = await _repository.getPeer(peerId);
-      if (peer != null && peer.isOnline) {
+      if (peer != null && chatPeerIsEffectivelyOnline(peer)) {
         remoteIps.add(peer.virtualIp);
       }
     }
-    await service.broadcastEnvelope(
+    return service.broadcastEnvelope(
       remoteIps: remoteIps,
       envelope: ChatEnvelope(
         messageId: _uuid.v4(),
@@ -2685,6 +3605,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           payload: {
             'capabilities': profileCapabilities,
           },
+        );
+        await _syncKnownPublicChannelsToPeer(
+          networkKey: networkKey,
+          peerId: peerId,
         );
         break;
       case ChatEnvelopeType.profileSync:
@@ -3229,7 +4153,7 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           'remotePeerId': requestingPeerId,
         },
       );
-    } catch (_) {
+    } catch (error, stackTrace) {
       await _repository.upsertAttachment(
         attachment.copyWith(transferStatus: ChatMessageStatus.failed),
       );
@@ -3244,6 +4168,8 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
           'messageId': messageId,
           'attachmentId': attachmentId,
           'remotePeerId': requestingPeerId,
+          'error': error.toString(),
+          'stackTrace': stackTrace.toString(),
         },
       );
     }
@@ -3411,6 +4337,12 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     }
     await openDirectConversation(peer);
     final now = DateTime.now();
+    _lastRemoteAssistHostError = null;
+    _lastRemoteAssistConnectError = null;
+    _lastRemoteAssistHostReadySucceeded = null;
+    _lastRemoteAssistReadySentAt = null;
+    _lastRemoteAssistReadyReceivedAt = null;
+    _lastRemoteAssistFirewallBlockedReady = false;
     remoteAssistSession = RemoteAssistSession(
       sessionId:
           (envelope.payload['sessionId'] as String?) ?? envelope.messageId,
@@ -3437,7 +4369,19 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       createdAt: now,
       updatedAt: now,
     );
+    await _refreshRemoteAssistRuntimeDetails(
+      listenPort: (envelope.payload['listenPort'] as num?)?.toInt() ??
+          RemoteAssistService.listenPort,
+    );
     notifyListeners();
+    await _logRemoteAssistInfo(
+      '收到远程协助邀请',
+      session: remoteAssistSession,
+      extra: {
+        'peerId': senderPeerId,
+        'peerVirtualIp': peer.virtualIp,
+      },
+    );
     _pushStatus(
       remoteAssistSession?.mode == RemoteAssistMode.requestControl
           ? '${peer.displayName} 请求控制当前设备'
@@ -3450,11 +4394,107 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
     if (session == null) {
       return;
     }
-    remoteAssistSession = session.copyWith(
-      state: RemoteAssistState.accepted,
-      updatedAt: DateTime.now(),
-    );
-    notifyListeners();
+    try {
+      await _logRemoteAssistInfo(
+        '收到远程协助 accept',
+        session: session,
+      );
+      final envelopeSessionId = envelope.payload['sessionId'] as String?;
+      if (envelopeSessionId != null && envelopeSessionId != session.sessionId) {
+        return;
+      }
+      if (session.state != RemoteAssistState.pending ||
+          !_processingRemoteAssistAcceptSessionIds.add(session.sessionId)) {
+        return;
+      }
+      await _refreshRemoteAssistRuntimeDetails(listenPort: session.listenPort);
+      WindowsFirewallEnsureResult? firewallResult;
+      if (session.isControlledLocal) {
+        firewallResult = await _prepareControlledLocalRemoteAssistHost(session);
+        remoteAssistSession = session.copyWith(
+          state: RemoteAssistState.ready,
+          updatedAt: DateTime.now(),
+        );
+        notifyListeners();
+        await _sendEnvelopeToPeer(
+          networkKey: session.networkKey,
+          peerId: session.peerId,
+          type: ChatEnvelopeType.remoteAssistReady,
+          conversationId: selectedConversationId,
+          payload: {
+            'sessionId': session.sessionId,
+            'listenPort': session.listenPort,
+            'sessionToken': session.sessionToken,
+          },
+        );
+        _lastRemoteAssistReadySentAt = DateTime.now();
+        await _logRemoteAssistInfo(
+          '已发送 remoteAssistReady',
+          session: remoteAssistSession,
+          extra: {
+            'firewallFailureKind': firewallResult?.failureKind.name ??
+                WindowsFirewallEnsureFailureKind.none.name,
+          },
+        );
+        await _logRemoteAssistInfo(
+          '发起方受控端已就绪并发送 ready',
+          session: remoteAssistSession,
+        );
+        _pushStatus(
+          _remoteAssistControlledReadyStatusMessage(
+            firewallResult ??
+                const WindowsFirewallEnsureResult(
+                  success: true,
+                  promptedForElevation: false,
+                  includeRemoteAssist: true,
+                  targetedRules: const [],
+                  allowedRules: const [],
+                  missingRules: const [],
+                ),
+          ),
+        );
+        return;
+      }
+      remoteAssistSession = session.copyWith(
+        state: RemoteAssistState.accepted,
+        updatedAt: DateTime.now(),
+      );
+      notifyListeners();
+      await _logRemoteAssistInfo(
+        '收到远程协助 accept，等待对方 ready',
+        session: remoteAssistSession,
+      );
+      _pushStatus('已同意远程协助，正在等待对方启动桌面服务');
+    } catch (error) {
+      _lastRemoteAssistHostError = error.toString();
+      _lastRemoteAssistHostReadySucceeded = false;
+      remoteAssistSession = session.copyWith(
+        state: RemoteAssistState.failed,
+        updatedAt: DateTime.now(),
+      );
+      notifyListeners();
+      await _logger.error(
+        'remote_assist.host',
+        '远程协助发起方 host 就绪失败',
+        networkKey: session.networkKey,
+        extra: {
+          'sessionId': session.sessionId,
+          'listenPort': session.listenPort,
+          'error': error.toString(),
+          if (_lastRemoteAssistBundledRuntimePath != null)
+            'bundledRuntime': _lastRemoteAssistBundledRuntimePath,
+          if (_lastRemoteAssistInstalledRuntimePath != null)
+            'installedRuntime': _lastRemoteAssistInstalledRuntimePath,
+        },
+      );
+      await _cleanupRemoteAssistRuntime(
+        listenPort: session.listenPort,
+        reason: 'handle_accept_failed',
+      );
+      _pushStatus('启动远程协助失败: $error');
+    } finally {
+      _processingRemoteAssistAcceptSessionIds.remove(session.sessionId);
+    }
   }
 
   Future<void> _handleRemoteAssistReady(ChatEnvelope envelope) async {
@@ -3463,29 +4503,183 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       return;
     }
     try {
-      if (session.isControllerLocal &&
-          session.state != RemoteAssistState.active) {
-        await _remoteAssist.launchController(session.controlledVirtualIp);
+      final envelopeSessionId = envelope.payload['sessionId'] as String?;
+      if (envelopeSessionId != null && envelopeSessionId != session.sessionId) {
+        return;
+      }
+      _lastRemoteAssistReadyReceivedAt = DateTime.now();
+      await _logRemoteAssistInfo(
+        '已收到 remoteAssistReady',
+        session: session,
+      );
+      if (session.isControllerLocal) {
+        if (session.state == RemoteAssistState.active) {
+          await _logRemoteAssistInfo(
+            '重复收到 remoteAssistReady，当前控制端已处于 active',
+            session: session,
+          );
+          return;
+        }
+        await _refreshRemoteAssistRuntimeDetails(
+            listenPort: session.listenPort);
+        await _logRemoteAssistInfo(
+          '控制端准备连接远程桌面',
+          session: session,
+          extra: {
+            'targetAddress':
+                '${session.controlledVirtualIp}:${session.listenPort}',
+          },
+        );
+        if (debugLaunchRemoteAssistController != null) {
+          await debugLaunchRemoteAssistController!(session.controlledVirtualIp);
+        } else {
+          await _remoteAssist.launchController(session.controlledVirtualIp);
+        }
+        _lastRemoteAssistConnectError = null;
         remoteAssistSession = session.copyWith(
           state: RemoteAssistState.active,
           updatedAt: DateTime.now(),
+        );
+        await _logRemoteAssistInfo(
+          '控制端已拉起远程桌面',
+          session: remoteAssistSession,
+          extra: {
+            'targetAddress':
+                '${session.controlledVirtualIp}:${session.listenPort}',
+          },
         );
       } else {
         remoteAssistSession = session.copyWith(
           state: RemoteAssistState.ready,
           updatedAt: DateTime.now(),
         );
+        await _logRemoteAssistInfo(
+          '已收到 remoteAssistReady，等待控制端接入',
+          session: remoteAssistSession,
+        );
       }
       notifyListeners();
-      _pushStatus('远程协助会话已启动，请在 RustDesk 窗口中继续操作');
+      _pushStatus('远程协助会话已启动，请在 RustDesk 窗口中继续确认并操作');
     } catch (error) {
+      _lastRemoteAssistConnectError = error.toString();
       remoteAssistSession = session.copyWith(
         state: RemoteAssistState.failed,
         updatedAt: DateTime.now(),
       );
       notifyListeners();
+      await _logger.error(
+        'remote_assist.controller',
+        '拉起远程桌面控制端失败',
+        networkKey: session.networkKey,
+        extra: {
+          'sessionId': session.sessionId,
+          'listenPort': session.listenPort,
+          'targetAddress':
+              '${session.controlledVirtualIp}:${session.listenPort}',
+          'error': error.toString(),
+          if (_lastRemoteAssistBundledRuntimePath != null)
+            'bundledRuntime': _lastRemoteAssistBundledRuntimePath,
+        },
+      );
+      await _cleanupRemoteAssistRuntime(
+        listenPort: session.listenPort,
+        reason: 'controller_launch_failed',
+      );
       _pushStatus('拉起远程协助失败: $error');
     }
+  }
+
+  @visibleForTesting
+  Future<void> debugHandleRemoteAssistAcceptForTest({
+    required String sessionId,
+  }) async {
+    await _handleRemoteAssistAccept(
+      ChatEnvelope(
+        messageId: 'debug-remote-assist-accept-$sessionId',
+        type: ChatEnvelopeType.remoteAssistAccept,
+        fromVirtualIp: '10.0.0.2',
+        fromDeviceName: 'debug-peer',
+        sentAt: DateTime.now().millisecondsSinceEpoch,
+        payload: {
+          'sessionId': sessionId,
+        },
+      ),
+    );
+  }
+
+  @visibleForTesting
+  Future<void> debugHandleRemoteAssistReadyForTest({
+    required String sessionId,
+  }) async {
+    await _handleRemoteAssistReady(
+      ChatEnvelope(
+        messageId: 'debug-remote-assist-ready-$sessionId',
+        type: ChatEnvelopeType.remoteAssistReady,
+        fromVirtualIp: '10.0.0.2',
+        fromDeviceName: 'debug-peer',
+        sentAt: DateTime.now().millisecondsSinceEpoch,
+        payload: {
+          'sessionId': sessionId,
+        },
+      ),
+    );
+  }
+
+  @visibleForTesting
+  Future<void> debugHandleRemoteAssistRejectForTest() async {
+    await _handleRemoteAssistReject(
+      ChatEnvelope(
+        messageId: 'debug-remote-assist-reject',
+        type: ChatEnvelopeType.remoteAssistReject,
+        fromVirtualIp: '10.0.0.2',
+        fromDeviceName: 'debug-peer',
+        sentAt: DateTime.now().millisecondsSinceEpoch,
+        payload: const {},
+      ),
+    );
+  }
+
+  @visibleForTesting
+  Future<void> debugHandleRemoteAssistEndForTest() async {
+    await _handleRemoteAssistEnd(
+      ChatEnvelope(
+        messageId: 'debug-remote-assist-end',
+        type: ChatEnvelopeType.remoteAssistEnd,
+        fromVirtualIp: '10.0.0.2',
+        fromDeviceName: 'debug-peer',
+        sentAt: DateTime.now().millisecondsSinceEpoch,
+        payload: const {},
+      ),
+    );
+  }
+
+  @visibleForTesting
+  void debugResetRemoteAssistTestState() {
+    remoteAssistSession = null;
+    _remoteAssistRuntimeReady = false;
+    _lastRemoteAssistHostError = null;
+    _lastRemoteAssistConnectError = null;
+    _lastRemoteAssistBundledRuntimePath = null;
+    _lastRemoteAssistInstalledRuntimePath = null;
+    _lastRemoteAssistListenPort = null;
+    _lastChatFirewallResult = null;
+    _lastRemoteAssistFirewallResult = null;
+    _lastRemoteAssistFirewallBlockedReady = false;
+    _lastRemoteAssistHostReadySucceeded = null;
+    _lastRemoteAssistReadySentAt = null;
+    _lastRemoteAssistReadyReceivedAt = null;
+    _processingRemoteAssistAcceptSessionIds.clear();
+    debugRefreshRemoteAssistRuntime = null;
+    debugEnsureRemoteAssistFirewallResult = null;
+    debugEnsureRemoteAssistHostReady = null;
+    debugLaunchRemoteAssistController = null;
+    debugCleanupRemoteAssistRuntime = null;
+    debugSendEnvelopeToPeer = null;
+    statusMessage = null;
+    statusVersion = 0;
+    _lastConsumedStatusVersion = -1;
+    _lastPushedStatusMessage = null;
+    _lastPushedStatusAt = null;
   }
 
   Future<void> _handleRemoteAssistReject(ChatEnvelope envelope) async {
@@ -3498,6 +4692,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       updatedAt: DateTime.now(),
     );
     notifyListeners();
+    await _cleanupRemoteAssistRuntime(
+      listenPort: session.listenPort,
+      reason: 'reject_remote',
+    );
     _pushStatus('对方拒绝了远程协助请求');
   }
 
@@ -3511,6 +4709,10 @@ class ChatManager extends ChangeNotifier implements ChatNetworkDelegate {
       updatedAt: DateTime.now(),
     );
     notifyListeners();
+    await _cleanupRemoteAssistRuntime(
+      listenPort: session.listenPort,
+      reason: 'end_remote',
+    );
     _pushStatus('远程协助会话已结束');
   }
 

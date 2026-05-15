@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:vnt_app/l10n/app_i18n.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
 import 'package:vnt_app/data_persistence.dart';
@@ -38,7 +39,6 @@ class _SettingsPageState extends State<SettingsPage> {
   final DataPersistence _dataPersistence = DataPersistence();
 
   bool _autoStart = false;
-  bool _silentStart = false;
   bool _autoConnect = false;
   WindowCloseBehavior _closeBehavior = WindowCloseBehavior.ask;
   final List<(String, String)> _configNames = [];
@@ -70,7 +70,6 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
     _autoConnect = await _dataPersistence.loadAutoConnect() ?? false;
-    _silentStart = await _dataPersistence.loadSilentStart() ?? false;
     _closeBehavior = await _dataPersistence.loadWindowCloseBehavior();
     _defaultKey = await _dataPersistence.loadDefaultKey() ?? '';
 
@@ -93,7 +92,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _setStartupWithAdmin(bool enable, {bool silentStart = false}) async {
+  Future<void> _setStartupWithAdmin(bool enable) async {
     if (!Platform.isWindows) {
       return;
     }
@@ -104,23 +103,31 @@ class _SettingsPageState extends State<SettingsPage> {
       final String username = Platform.environment['USERNAME'] ?? 'SYSTEM';
 
       if (enable) {
-        final argClause = silentStart ? " -Argument '--silent'" : '';
-        final psScript = '''
-\$action = New-ScheduledTaskAction -Execute '$executablePath'$argClause
-\$trigger = New-ScheduledTaskTrigger -AtLogOn
-\$principal = New-ScheduledTaskPrincipal -UserId '$username' -RunLevel Highest
-\$settings = New-ScheduledTaskSettingsSet -DisallowStartIfOnBatteries \$false
-Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger -Principal \$principal -Settings \$settings -Force
-''';
+        List<String> args = [
+          '/CREATE',
+          '/F',
+          '/TN',
+          taskName,
+          '/TR',
+          executablePath,
+          '/SC',
+          'ONLOGON',
+          '/RL',
+          'HIGHEST',
+          '/IT',
+          '/RU',
+          username,
+        ];
 
-        final result = await Process.run(
-            'powershell', ['-Command', psScript], runInShell: true);
+        final result =
+            await Process.run('SCHTASKS.EXE', args, runInShell: true);
 
         if (result.exitCode == 0) {
           debugPrint("Scheduled task created successfully.");
         } else {
           debugPrint("Error creating scheduled task: ${result.stderr}");
         }
+        await _modifyTaskSettings();
       } else {
         List<String> args = [
           '/DELETE',
@@ -189,10 +196,9 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         // AppImage 需要用 APPIMAGE 环境变量，否则用 resolvedExecutable
         final execPath =
             Platform.environment['APPIMAGE'] ?? Platform.resolvedExecutable;
-        final silentArg = _silentStart ? ' --silent' : '';
 
         await File(desktopFile).writeAsString(
-          '[Desktop Entry]\nType=Application\nName=VNT App\nExec=pkexec $execPath$silentArg\nX-GNOME-Autostart-enabled=true\n',
+          '[Desktop Entry]\nType=Application\nName=VNT App\nExec=pkexec $execPath\nX-GNOME-Autostart-enabled=true\n',
         );
         debugPrint('开机自启文件已创建: $desktopFile');
       } else {
@@ -238,9 +244,13 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
 
         if (mounted) {
           if (success) {
-            showTopToast(context, '备份成功: $fileName', isSuccess: true);
+            showTopToast(
+              context,
+              '备份成功: {file}'.tr({'file': fileName}),
+              isSuccess: true,
+            );
           } else {
-            showTopToast(context, '备份已取消', isSuccess: false);
+            showTopToast(context, '备份已取消'.tr(), isSuccess: false);
           }
         }
       } else if (Platform.isIOS) {
@@ -270,15 +280,19 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
 
           if (mounted) {
             if (result.status == ShareResultStatus.success) {
-              showTopToast(context, '配置已备份', isSuccess: true);
+              showTopToast(context, '配置已备份'.tr(), isSuccess: true);
             } else if (result.status == ShareResultStatus.dismissed) {
-              showTopToast(context, '操作已取消', isSuccess: false);
+              showTopToast(context, '操作已取消'.tr(), isSuccess: false);
             }
           }
         } catch (e) {
           debugPrint('分享文件失败: $e');
           if (mounted) {
-            showTopToast(context, '分享失败: $e', isSuccess: false);
+            showTopToast(
+              context,
+              '分享失败: {error}'.tr({'error': '$e'}),
+              isSuccess: false,
+            );
           }
         }
 
@@ -291,7 +305,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
       } else {
         // Windows/macOS/Linux
         String? path = await FilePicker.platform.saveFile(
-          dialogTitle: '选择保存位置',
+          dialogTitle: '选择保存位置'.tr(),
           fileName: 'vnt_backup_${DateTime.now().millisecondsSinceEpoch}.json',
           type: FileType.custom,
           allowedExtensions: ['json'],
@@ -306,13 +320,21 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         await _dataPersistence.exportAllConfigs(path);
 
         if (mounted) {
-          showTopToast(context, '备份成功: $path', isSuccess: true);
+          showTopToast(
+            context,
+            '备份成功: {file}'.tr({'file': path}),
+            isSuccess: true,
+          );
         }
       }
     } catch (e) {
       debugPrint('导出配置失败: $e');
       if (mounted) {
-        showTopToast(context, '备份失败: $e', isSuccess: false);
+        showTopToast(
+          context,
+          '备份失败: {error}'.tr({'error': '$e'}),
+          isSuccess: false,
+        );
       }
     }
   }
@@ -340,7 +362,11 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
 
       if (jsonData.containsKey('config') && !jsonData.containsKey('configs')) {
         if (mounted) {
-          showTopToast(context, '这是单个组网配置文件，请在配置页面的导入按钮中导入', isSuccess: false);
+          showTopToast(
+            context,
+            '这是单个组网配置文件，请在配置页面的导入按钮中导入'.tr(),
+            isSuccess: false,
+          );
         }
         return;
       }
@@ -349,7 +375,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
       await _dataPersistence.importAllConfigs(filePath);
 
       if (mounted) {
-        showTopToast(context, '恢复成功', isSuccess: true);
+        showTopToast(context, '恢复成功'.tr(), isSuccess: true);
         // 重新加载数据以实时显示恢复的配置
         await _loadData();
         // 通知配置列表页面刷新
@@ -362,7 +388,11 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
     } catch (e) {
       debugPrint('导入配置失败: $e');
       if (mounted) {
-        showTopToast(context, '恢复失败: $e', isSuccess: false);
+        showTopToast(
+          context,
+          '恢复失败: {error}'.tr({'error': '$e'}),
+          isSuccess: false,
+        );
       }
     }
   }
@@ -442,7 +472,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               Text(
-                '设置',
+                '设置'.tr(),
                 style: TextStyle(
                   fontSize: context.fontXLarge,
                   fontWeight: FontWeight.bold,
@@ -452,7 +482,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 ),
               ),
               Text(
-                '自定义应用设置',
+                '自定义应用设置'.tr(),
                 style: TextStyle(
                   fontSize: context.fontBody,
                   color: isDark
@@ -472,7 +502,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
     return Padding(
       padding: EdgeInsets.only(left: context.spacingXSmall / 2),
       child: Text(
-        title,
+        title.tr(),
         style: TextStyle(
           fontSize: context.fontBody,
           fontWeight: FontWeight.w600,
@@ -503,6 +533,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
       child: Column(
         children: [
           _buildThemeSelector(isDark),
+          _buildDivider(isDark),
+          _buildLanguageSelector(isDark),
           _buildDivider(isDark),
           _buildColorSelector(isDark, customColor),
         ],
@@ -538,7 +570,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      '主题模式',
+                      '主题模式'.tr(),
                       style: TextStyle(
                         fontSize: context.fontMedium,
                         fontWeight: FontWeight.w500,
@@ -548,7 +580,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                       ),
                     ),
                     Text(
-                      '选择应用的外观主题',
+                      '选择应用的外观主题'.tr(),
                       style: TextStyle(
                         fontSize: context.fontSmall,
                         color: isDark
@@ -629,7 +661,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               ),
               SizedBox(height: context.spacingXSmall),
               Text(
-                label,
+                label.tr(),
                 style: TextStyle(
                   fontSize: context.fontSmall,
                   fontWeight: isSelected ? FontWeight.w600 : FontWeight.normal,
@@ -643,6 +675,105 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageSelector(bool isDark) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final currentLanguage = AppLanguageController.instance.language;
+
+    return Padding(
+      padding: ResponsiveUtils.padding(context, all: 16),
+      child: Row(
+        children: [
+          Container(
+            width: context.listItemIconContainerSize,
+            height: context.listItemIconContainerSize,
+            decoration: BoxDecoration(
+              color: primaryColor.withOpacity(0.1),
+              borderRadius: BorderRadius.circular(context.cardRadius),
+            ),
+            child: Icon(
+              Icons.language,
+              color: primaryColor,
+              size: context.iconSmall,
+            ),
+          ),
+          SizedBox(width: context.spacingMedium),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '界面语言'.tr(),
+                  style: TextStyle(
+                    fontSize: context.fontMedium,
+                    fontWeight: FontWeight.w500,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+                Text(
+                  '在简体中文和英文之间切换界面显示'.tr(),
+                  style: TextStyle(
+                    fontSize: context.fontSmall,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          Container(
+            padding: EdgeInsets.symmetric(horizontal: context.spacingSmall),
+            decoration: BoxDecoration(
+              color: isDark
+                  ? Colors.white.withOpacity(0.05)
+                  : Colors.black.withOpacity(0.03),
+              borderRadius: BorderRadius.circular(context.cardRadius),
+            ),
+            child: DropdownButton<AppLanguage>(
+              value: currentLanguage,
+              underline: const SizedBox(),
+              dropdownColor: isDark
+                  ? AppTheme.darkCardBackground
+                  : AppTheme.lightCardBackground,
+              borderRadius: BorderRadius.circular(context.cardRadius),
+              style: TextStyle(
+                fontSize: context.fontBody,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+              onChanged: (AppLanguage? value) async {
+                if (value == null) {
+                  return;
+                }
+                await AppLanguageController.instance.setLanguage(value);
+                if (mounted) {
+                  setState(() {});
+                  showTopToast(
+                    context,
+                    '界面语言已切换为 {language}'
+                        .tr({'language': value.displayName}),
+                    isSuccess: true,
+                  );
+                }
+              },
+              items: AppLanguage.values
+                  .map(
+                    (language) => DropdownMenuItem<AppLanguage>(
+                      value: language,
+                      child: Text(language.displayName),
+                    ),
+                  )
+                  .toList(),
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -681,7 +812,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                         Switch(
                           value: _autoStart,
                           onChanged: (value) async {
-                            await _setStartupWithAdmin(value, silentStart: _silentStart);
+                            await _setStartupWithAdmin(value);
                             await _dataPersistence.saveAutoStart(value);
                             setState(() {
                               _autoStart = value;
@@ -698,7 +829,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                                 : AppTheme.lightTextSecondary,
                           ),
                           onPressed: _openTaskScheduler,
-                          tooltip: '编辑任务计划',
+                          tooltip: '编辑任务计划'.tr(),
                         ),
                       ],
                     )
@@ -715,7 +846,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                         if (mounted) {
                           showTopToast(
                             context,
-                            value ? '开机自启已启用' : '开机自启已关闭',
+                            (value ? '开机自启已启用' : '开机自启已关闭')
+                                .tr(),
                             isSuccess: true,
                           );
                         }
@@ -724,33 +856,6 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                     ),
             ),
             _buildDivider(isDark),
-            if (Platform.isWindows || Platform.isLinux) ...[
-              _buildSettingItem(
-                isDark,
-                icon: Icons.visibility_off,
-                title: '静默启动',
-                subtitle: '开机自启时不显示窗口，最小化到系统托盘',
-                trailing: Switch(
-                  value: _silentStart,
-                  onChanged: (value) async {
-                    await _dataPersistence.saveSilentStart(value);
-                    setState(() {
-                      _silentStart = value;
-                    });
-                    // 如果开机自启已开启，重新创建计划任务以更新 --silent 参数
-                    if (_autoStart) {
-                      if (Platform.isWindows) {
-                        await _setStartupWithAdmin(true, silentStart: value);
-                      } else if (Platform.isLinux) {
-                        await _setLinuxAutoStart(true);
-                      }
-                    }
-                  },
-                  activeColor: Theme.of(context).primaryColor,
-                ),
-              ),
-              _buildDivider(isDark),
-            ],
           ],
           _buildSettingItem(
             isDark,
@@ -804,7 +909,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '默认配置',
+                  '默认配置'.tr(),
                   style: TextStyle(
                     fontSize: context.fontMedium,
                     fontWeight: FontWeight.w500,
@@ -814,7 +919,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                   ),
                 ),
                 Text(
-                  '自动连接时使用的配置',
+                  '自动连接时使用的配置'.tr(),
                   style: TextStyle(
                     fontSize: context.fontSmall,
                     color: isDark
@@ -881,7 +986,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             )
           else
             Text(
-              '暂无配置',
+              '暂无配置'.tr(),
               style: TextStyle(
                 fontSize: context.fontBody,
                 color: isDark
@@ -919,7 +1024,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '关闭按钮默认动作',
+                  '关闭按钮默认动作'.tr(),
                   style: TextStyle(
                     fontSize: context.fontMedium,
                     fontWeight: FontWeight.w500,
@@ -972,7 +1077,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 if (mounted) {
                   showTopToast(
                     context,
-                    '关闭按钮默认动作已设置为${newValue.label}',
+                    '关闭按钮默认动作已设置为{label}'
+                        .tr({'label': newValue.label}),
                     isSuccess: true,
                   );
                 }
@@ -1107,7 +1213,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    title,
+                    title.tr(),
                     style: TextStyle(
                       fontSize: context.fontMedium,
                       fontWeight: FontWeight.w500,
@@ -1117,7 +1223,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                     ),
                   ),
                   Text(
-                    subtitle,
+                    subtitle.tr(),
                     style: TextStyle(
                       fontSize: context.fontSmall,
                       color: isDark
@@ -1179,7 +1285,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    '主题颜色',
+                    '主题颜色'.tr(),
                     style: TextStyle(
                       fontSize: context.fontMedium,
                       fontWeight: FontWeight.w500,
@@ -1189,7 +1295,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                     ),
                   ),
                   Text(
-                    '自定义应用主题颜色',
+                    '自定义应用主题颜色'.tr(),
                     style: TextStyle(
                       fontSize: context.fontSmall,
                       color: isDark
@@ -1239,7 +1345,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
     if (result != null) {
       themeProvider.setCustomThemeColor(result);
       if (mounted) {
-        showTopToast(context, '主题颜色已更新', isSuccess: true);
+        showTopToast(context, '主题颜色已更新'.tr(), isSuccess: true);
       }
     }
   }
@@ -1256,14 +1362,14 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         shape: RoundedRectangleBorder(
             borderRadius: BorderRadius.circular(context.cardRadius)),
         title: Text(
-          '清除所有数据',
+          '清除所有数据'.tr(),
           style: TextStyle(
             color:
                 isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
           ),
         ),
         content: Text(
-          '确定要清除所有数据吗？此操作将删除所有配置，且不可恢复。',
+          '确定要清除所有数据吗？此操作将删除所有配置，且不可恢复。'.tr(),
           style: TextStyle(
             color: isDark
                 ? AppTheme.darkTextSecondary
@@ -1278,7 +1384,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                   ? AppTheme.darkTextSecondary
                   : AppTheme.lightTextSecondary,
             ),
-            child: const Text('取消'),
+            child: Text('取消'.tr()),
           ),
           ElevatedButton(
             onPressed: () async {
@@ -1286,7 +1392,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               await _dataPersistence.clear();
               await _setStartupWithAdmin(false);
               if (mounted) {
-                showTopToast(context, '数据已清除', isSuccess: true);
+                showTopToast(context, '数据已清除'.tr(), isSuccess: true);
                 _loadData();
               }
             },
@@ -1294,7 +1400,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               backgroundColor: AppTheme.errorColor,
               foregroundColor: Colors.white,
             ),
-            child: const Text('清除'),
+            child: Text('清除'.tr()),
           ),
         ],
       ),
@@ -1432,7 +1538,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          '选择主题颜色',
+                          '选择主题颜色'.tr(),
                           style: TextStyle(
                             fontSize: context.fontLarge,
                             fontWeight: FontWeight.w600,
@@ -1480,9 +1586,9 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                 dividerColor: widget.isDark
                     ? Colors.white.withOpacity(0.05)
                     : Colors.black.withOpacity(0.05),
-                tabs: const [
-                  Tab(text: '预设颜色'),
-                  Tab(text: '自定义'),
+                tabs: [
+                  Tab(text: '预设颜色'.tr()),
+                  Tab(text: '自定义'.tr()),
                 ],
               ),
             ),
@@ -1521,7 +1627,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                               BorderRadius.circular(context.buttonRadius),
                         ),
                       ),
-                      child: Text('取消',
+                      child: Text('取消'.tr(),
                           style: TextStyle(fontSize: context.fontBody)),
                     ),
                   ),
@@ -1539,7 +1645,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                               BorderRadius.circular(context.buttonRadius),
                         ),
                       ),
-                      child: Text('确定',
+                      child: Text('确定'.tr(),
                           style: TextStyle(fontSize: context.fontBody)),
                     ),
                   ),
@@ -1671,7 +1777,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
               ),
               child: Center(
                 child: Text(
-                  '颜色预览效果',
+                  '颜色预览效果'.tr(),
                   style: TextStyle(
                     fontSize: context.fontBody,
                     fontWeight: FontWeight.w600,
@@ -1771,7 +1877,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        '颜色值',
+                        '颜色值'.tr(),
                         style: TextStyle(
                           fontSize: context.fontSmall,
                           color: widget.isDark
