@@ -8,6 +8,43 @@
 
 上图为当前 Windows 桌面客户端主界面封面图，便于用户直接看到软件实际 UI 风格。
 
+其余主要页面如下，方便用户在首页直接查看实际功能界面：
+
+<table>
+  <tr>
+    <td width="50%" align="center">
+      <img src="VntcApp1.0/docs/screenshots/detail-01-dashboard.png" alt="仪表盘页面" />
+      <br />
+      <sub>仪表盘：连接状态、流量、延迟、设备概览</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="VntcApp1.0/docs/screenshots/detail-02-room.png" alt="房间页面" />
+      <br />
+      <sub>房间：大厅、聊天室、私信与协作入口</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="VntcApp1.0/docs/screenshots/detail-03-link-status.png" alt="链接状态页面" />
+      <br />
+      <sub>链接状态：设备列表、路由与链路观察</sub>
+    </td>
+    <td width="50%" align="center">
+      <img src="VntcApp1.0/docs/screenshots/detail-04-config.png" alt="配置管理页面" />
+      <br />
+      <sub>配置管理：新建、导入导出、排序与编辑</sub>
+    </td>
+  </tr>
+  <tr>
+    <td width="50%" align="center">
+      <img src="VntcApp1.0/docs/screenshots/detail-05-settings.png" alt="设置页面" />
+      <br />
+      <sub>设置：主题、语言、自启动、默认配置与数据管理</sub>
+    </td>
+    <td width="50%" align="center"></td>
+  </tr>
+</table>
+
 客户端详情说明、功能介绍和更多页面截图见：
 
 - [VntcApp1.0/README.md](VntcApp1.0/README.md)
