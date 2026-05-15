@@ -853,7 +853,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 SizedBox(width: context.spacing(8)),
                 Expanded(
                   child: Text(
-                    '网络速度',
+                    '网络速度'.tr(),
                     style: TextStyle(
                       fontSize: context.sp(16),
                       fontWeight: FontWeight.w600,
@@ -878,7 +878,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     SizedBox(width: context.spacing(4)),
                     Flexible(
                       child: Text(
-                        '上传: $_currentUpSpeed',
+                        '上传: {value}'.tr({'value': _currentUpSpeed}),
                         style: TextStyle(
                           fontSize: context.sp(12),
                           color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -896,7 +896,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     SizedBox(width: context.spacing(4)),
                     Flexible(
                       child: Text(
-                        '下载: $_currentDownSpeed',
+                        '下载: {value}'.tr({'value': _currentDownSpeed}),
                         style: TextStyle(
                           fontSize: context.sp(12),
                           color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -1049,7 +1049,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 final isUpload = spot.barIndex == 0;
                 final speed = _formatSpeed(spot.y);
                 return LineTooltipItem(
-                  '${isUpload ? '上传' : '下载'}\n$speed',
+                  '${(isUpload ? '上传' : '下载').tr()}\n$speed',
                   TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -1127,7 +1127,7 @@ class _DashboardPageState extends State<DashboardPage> {
               SizedBox(width: context.spacing(8)),
               Expanded(
                 child: Text(
-                  '网络质量',
+                  '网络质量'.tr(),
                   style: TextStyle(
                     fontSize: context.sp(16),
                     fontWeight: FontWeight.w600,
@@ -1187,7 +1187,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(width: context.spacing(4)),
                   Flexible(
                     child: Text(
-                      '延迟: ${_avgLatency > 0 ? '$_avgLatency ms' : '-- ms'}',
+                      '延迟: {value}'.tr({
+                        'value': _avgLatency > 0 ? '$_avgLatency ms' : '-- ms',
+                      }),
                       style: TextStyle(
                         fontSize: context.sp(12),
                         color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -1204,7 +1206,9 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(width: context.spacing(4)),
                   Flexible(
                     child: Text(
-                      '丢包: ${_packetLoss.toStringAsFixed(2)}%',
+                      '丢包: {value}'.tr({
+                        'value': '${_packetLoss.toStringAsFixed(2)}%',
+                      }),
                       style: TextStyle(
                         fontSize: context.sp(12),
                         color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -1321,7 +1325,7 @@ class _DashboardPageState extends State<DashboardPage> {
               SizedBox(width: context.spacing(8)),
               Expanded(
                 child: Text(
-                  '流量统计',
+                  '流量统计'.tr(),
                   style: TextStyle(
                     fontSize: context.sp(16),
                     fontWeight: FontWeight.w600,
@@ -1379,7 +1383,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(width: context.spacing(4)),
                   Flexible(
                     child: Text(
-                      '上传: $_totalUpStream',
+                      '上传: {value}'.tr({'value': _totalUpStream}),
                       style: TextStyle(
                         fontSize: context.sp(12),
                         color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -1396,7 +1400,7 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(width: context.spacing(4)),
                   Flexible(
                     child: Text(
-                      '下载: $_totalDownStream',
+                      '下载: {value}'.tr({'value': _totalDownStream}),
                       style: TextStyle(
                         fontSize: context.sp(12),
                         color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -1987,7 +1991,7 @@ class _DashboardPageState extends State<DashboardPage> {
         ),
         SizedBox(width: context.spacing(6)),
         Text(
-          label,
+          label.tr(),
           style: TextStyle(
             fontSize: context.sp(12),
             color: color,
@@ -2009,7 +2013,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 isDark,
                 icon: Icons.computer,
                 title: '当前设备',
-                value: hasConnection ? _deviceName : '未连接',
+                value: hasConnection ? _deviceName : '未连接'.tr(),
                 subtitle: hasConnection ? _natType : '',
                 isNatType: true,
                 onTap: hasConnection ? () => _showCurrentDeviceDialog(isDark) : null,
@@ -2021,9 +2025,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 isDark,
                 icon: Icons.settings_input_antenna,
                 title: '当前配置',
-                value: hasConnection ? _configName : '未连接',
+                value: hasConnection ? _configName : '未连接'.tr(),
                 subtitle: hasConnection
-                    ? (_isEncrypted ? '$_encryptionAlgorithm 加密' : '未加密')
+                    ? (_isEncrypted
+                        ? '{algorithm} 加密'.tr({'algorithm': _encryptionAlgorithm})
+                        : '未加密'.tr())
                     : '',
                 isEncrypted: hasConnection ? _isEncrypted : false,
                 onTap: hasConnection ? () => _showConfigDialog(isDark) : null,
@@ -2040,10 +2046,16 @@ class _DashboardPageState extends State<DashboardPage> {
                 isDark,
                 icon: Icons.devices_other,
                 title: '连接设备',
-                value: hasConnection ? '$_deviceCount 台' : '0 台',
+                value: hasConnection
+                    ? '{count} 台'.tr({'count': _deviceCount})
+                    : '{count} 台'.tr({'count': 0}),
                 subtitle: hasConnection
-                    ? '${_deviceCount - _offlineDeviceCount} 在线 / $_offlineDeviceCount 离线'
-                    : '0 在线 / 0 离线',
+                    ? '{online} 在线 / {offline} 离线'.tr({
+                        'online': _deviceCount - _offlineDeviceCount,
+                        'offline': _offlineDeviceCount,
+                      })
+                    : '{online} 在线 / {offline} 离线'
+                        .tr({'online': 0, 'offline': 0}),
                 onlineCount: hasConnection ? _deviceCount - _offlineDeviceCount : 0,
                 offlineCount: hasConnection ? _offlineDeviceCount : 0,
                 onTap: () => _showDevicesDialog(isDark),
@@ -2055,12 +2067,17 @@ class _DashboardPageState extends State<DashboardPage> {
                 isDark,
                 icon: Icons.lan,
                 title: '虚拟 IP',
-                value: hasConnection ? _virtualIp : '未连接',
+                value: hasConnection ? _virtualIp : '未连接'.tr(),
                 subtitle: hasConnection
-                    ? (_isVirtualIpAutoAssigned ? '服务器自动分配' : '用户静态指定')
+                    ? (_isVirtualIpAutoAssigned
+                        ? '服务器自动分配'.tr()
+                        : '用户静态指定'.tr())
                     : '',
                 showCopyButton: hasConnection && _virtualIp.isNotEmpty,
-                onCopy: () => _copyToClipboard(_virtualIp, '$_virtualIp 已复制'),
+                onCopy: () => _copyToClipboard(
+                  _virtualIp,
+                  '{value} 已复制'.tr({'value': _virtualIp}),
+                ),
               ),
             ),
           ],
@@ -2071,10 +2088,13 @@ class _DashboardPageState extends State<DashboardPage> {
           isDark,
           icon: Icons.router,
           title: '中继服务器',
-          value: hasConnection ? _relayServer : '未连接',
+          value: hasConnection ? _relayServer : '未连接'.tr(),
           subtitle: '',
           showCopyButton: hasConnection && _relayServer.isNotEmpty,
-          onCopy: () => _copyToClipboard(_relayServer, '$_relayServer 已复制'),
+          onCopy: () => _copyToClipboard(
+            _relayServer,
+            '{value} 已复制'.tr({'value': _relayServer}),
+          ),
         ),
       ],
     );
@@ -2124,7 +2144,7 @@ class _DashboardPageState extends State<DashboardPage> {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  title,
+                  title.tr(),
                   style: TextStyle(
                     fontSize: context.fontBody,
                     fontWeight: FontWeight.w500,
@@ -2217,7 +2237,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ),
                       Text(
-                        ' 在线 / ',
+                        ' ${'在线'.tr()} / ',
                         style: TextStyle(
                           fontSize: context.fontXSmall,
                           color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
@@ -2232,7 +2252,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         ),
                       ),
                       Text(
-                        ' 离线',
+                        ' ${'离线'.tr()}',
                         style: TextStyle(
                           fontSize: context.fontXSmall,
                           color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
