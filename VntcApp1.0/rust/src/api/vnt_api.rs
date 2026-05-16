@@ -131,9 +131,8 @@ impl VntApi {
             });
         }
 
-        let (network_manager, network_addr) = match runtime.block_on(async {
-            start_network(core_config, task_group, call.clone()).await
-        }) {
+        let (network_manager, network_addr) =
+            match runtime.block_on(async { start_network(core_config, task_group).await }) {
                 Ok(value) => value,
                 Err(err) => {
                     call.emit_error(error_info_from_error(&err));
@@ -337,9 +336,8 @@ impl VntApi {
 async fn start_network(
     core_config: CoreConfig,
     task_group: vnt_core::utils::task_control::TaskGroup,
-    call: VntApiCallback,
 ) -> anyhow::Result<(NetworkManager, NetworkAddr)> {
-    let mut network_manager = NetworkManager::create_network(Box::new(core_config.clone()), task_group)
+    let mut network_manager = NetworkManager::create_network(Box::new(core_config), task_group)
         .await
         .context("创建 VNT 2.0 网络实例失败")?;
     let register_response = network_manager
@@ -353,17 +351,6 @@ async fn start_network(
         }
     };
     if !network_manager.is_no_tun() {
-        #[cfg(target_os = "android")]
-        {
-            let tun_config = build_android_tun_config(&network_addr, &core_config)?;
-            let tun_fd = call.request_android_vpn_fd(tun_config).await?;
-            network_manager
-                .start_tun_fd(Some(tun_fd as i32))
-                .await
-                .context("启动 Android VPN 失败")?;
-        }
-        #[cfg(not(target_os = "android"))]
-        {
         network_manager
             .start_tun()
             .await
@@ -372,36 +359,8 @@ async fn start_network(
             .set_tun_network_ip(network_addr.ip, network_addr.prefix_len)
             .await
             .context("设置虚拟网卡 IP 失败")?;
-        }
     }
     Ok((network_manager, network_addr))
-}
-
-fn build_android_tun_config(
-    network_addr: &NetworkAddr,
-    core_config: &CoreConfig,
-) -> anyhow::Result<RustDeviceConfig> {
-    let virtual_network = Ipv4Net::new(network_addr.ip, network_addr.prefix_len)
-        .context("解析 Android VPN 虚拟网段失败")?
-        .network()
-        .to_string();
-    let external_route = core_config
-        .output
-        .iter()
-        .map(|network| {
-            (
-                network.network().to_string(),
-                prefix_to_netmask(network.prefix_len()).to_string(),
-            )
-        })
-        .collect();
-    Ok(RustDeviceConfig {
-        virtual_ip: network_addr.ip.to_string(),
-        virtual_netmask: prefix_to_netmask(network_addr.prefix_len).to_string(),
-        virtual_gateway: network_addr.gateway.to_string(),
-        virtual_network,
-        external_route,
-    })
 }
 
 fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig, Vec<String>)> {
@@ -825,14 +784,6 @@ impl VntApiCallback {
             let f = &inner.error_fn;
             f(info)
         });
-    }
-
-    async fn request_android_vpn_fd(&self, info: RustDeviceConfig) -> anyhow::Result<u32> {
-        let fd = (self.inner.generate_tun_fn)(info).await;
-        if fd == 0 {
-            return Err(anyhow!("Android VPN 返回无效 fd"));
-        }
-        Ok(fd)
     }
 }
 

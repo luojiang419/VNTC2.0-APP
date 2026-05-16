@@ -30,7 +30,13 @@ migrate_working_dir/
 .pub-cache/
 .pub/
 /build/
+/dist/
+/output/
+/logs/
+/错误日志/
+/dist.zip
 /third_party/rustdesk/windows/runtime/
+/rust/target/
 
 # Symbolication related
 app.*.symbols
@@ -42,3 +48,18 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+/android/local.properties
+/android/app/src/main/jniLibs/
+/android/app/src/main/jniLibs/armeabi-v7a/0
+
+# Flutter desktop/iOS/macOS generated files
+/ios/Flutter/ephemeral/
+/ios/Flutter/flutter_export_environment.sh
+/macos/Flutter/ephemeral/
+/windows/flutter/ephemeral/
+/rust/flutter_rust_bridge_codegen
+
+# Windows launcher build outputs
+/windows_launcher/*.exe
+/windows_launcher/*.obj
+/windows_launcher/*.res

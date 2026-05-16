@@ -1,0 +1,129 @@
+[package]
+name = "tun-rs"
+version = "2.5.7"
+edition = "2021"
+authors = ["xmh0511, vnt-dev"]
+license = "Apache-2.0"
+description = "Cross-platform TUN and TAP library"
+repository = "https://github.com/tun-rs/tun-rs"
+keywords = ["tun", "tap", "tunnel", "VPN", "network-interface"]
+documentation  = "https://docs.rs/tun-rs"
+
+[lib]
+crate-type = ["staticlib", "cdylib", "lib"]
+
+[dependencies]
+bytes = { version = "1" }
+libc = { version = "0.2", features = ["extra_traits"] }
+log = "0.4"
+blocking = { version = "1.6", optional = true }
+tokio = { version = "1.45", features = [
+    "net",
+    "macros",
+    "io-util",
+    "rt",
+], optional = true }
+async-io = { version = "2.3", optional = true }
+
+ipnet = "2"
+byteorder = "1.5.0"
+getifaddrs = "0.2.0"
+
+futures-core = { version = "0.3", optional = true }
+futures = { version = "0.3", optional = true }
+
+[target.'cfg(any(target_os = "linux", target_os = "macos", target_os = "android", target_os="freebsd", target_os="openbsd"))'.dependencies]
+nix = { version = "0.30", features = ["ioctl"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+encoding_rs = "0.8.34"
+
+scopeguard = "1.2.0"
+winreg = "0.55"
+widestring = "1.0.2"
+c2rust-bitfields = "0.20"
+windows-sys = { version = "0.60", features = [
+    "Win32_Devices_DeviceAndDriverInstallation",
+    "Win32_Storage_FileSystem",
+    "Win32_System_Registry",
+    "Win32_Networking_WinSock",
+    "Win32_NetworkManagement_Ndis",
+    "Win32_Foundation",
+    "Win32_Security",
+    "Win32_System_IO",
+    "Win32_System_Ioctl",
+    "Win32_System_Com",
+    "Win32_Security_WinTrust",
+    "Win32_Security_Cryptography",
+    "Win32_System_Threading",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_System_LibraryLoader",
+    "Win32_NetworkManagement_IpHelper",
+    "Win32_Devices_Properties",
+    "Win32_System_SystemInformation",
+] }
+libloading = "0.8"
+
+[target.'cfg(any(target_os = "macos", target_os = "freebsd", target_os = "openbsd"))'.dependencies]
+route_manager = "0.2.5"
+
+
+[target.'cfg(any(target_os = "linux", target_os = "freebsd", target_os = "openbsd",target_os = "windows"))'.dependencies]
+mac_address = "1.1.7"
+
+[build-dependencies]
+bindgen = "0.72.0"
+
+[dev-dependencies]
+ctrlc2 = { version = "3.7", features = ["tokio", "termination"] }
+env_logger = "0.11"
+futures = "0.3"
+pnet_packet = "0.35.0"
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+async-std = { version = "1", features = ["attributes", "unstable"] }
+async-ctrlc = "1.2.0"
+rand = "0.9"
+
+[features]
+async = ["async_tokio"]
+async_std = ["async_io"]
+async_tokio = ["blocking", "tokio"]
+async_io = ["blocking", "async-io"]
+async_framed = ["futures", "futures-core"]
+interruptible = []
+experimental = []
+
+[package.metadata.docs.rs]
+all-features = true
+rustdoc-args = ["--cfg", "docsrs"]
+rustc-args = ["--cfg","docsrs"]
+targets = [
+    "x86_64-unknown-linux-gnu",
+    "x86_64-pc-windows-msvc",
+    "aarch64-apple-darwin",
+    "x86_64-apple-darwin",
+    "aarch64-linux-android",
+    "aarch64-apple-ios",
+    "x86_64-apple-ios",
+    "x86_64-unknown-freebsd"
+]
+
+[[example]]
+name = "async_ping"
+required-features = ["async_tokio"]
+
+[[example]]
+name = "async_ping_framed"
+required-features = ["async_tokio", "async_framed"]
+
+[[example]]
+name = "ping_offload"
+required-features = ["async_tokio"]
+
+[[example]]
+name = "async_tap"
+required-features = ["async_tokio"]
+
+[[example]]
+name = "read_interruptible"
+required-features = ["interruptible"]

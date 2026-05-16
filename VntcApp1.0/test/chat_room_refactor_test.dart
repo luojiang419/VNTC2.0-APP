@@ -10,6 +10,107 @@ void main() {
         'channel:net-a:lobby:net-a',
       );
     });
+
+    test('当前页面网络作用域仅匹配选中的连接', () {
+      expect(chatMatchesNetworkScope('net-a', null), isTrue);
+      expect(chatMatchesNetworkScope('net-a', ''), isTrue);
+      expect(chatMatchesNetworkScope('net-a', 'net-a'), isTrue);
+      expect(chatMatchesNetworkScope('net-a', 'net-b'), isFalse);
+    });
+  });
+
+  group('ChatPeer online freshness', () {
+    test('超过新鲜度窗口的在线记录会被视为离线', () {
+      final now = DateTime(2026, 5, 7, 12, 0, 0);
+      final peer = ChatPeer(
+        peerId: 'peer-a',
+        networkKey: 'net-a',
+        virtualIp: '10.0.0.2',
+        deviceName: 'Office-PC',
+        isOnline: true,
+        lastSeenAt: now.subtract(const Duration(seconds: 30)),
+        createdAt: now,
+        updatedAt: now,
+      );
+
+      expect(chatPeerIsEffectivelyOnline(peer, now: now), isFalse);
+      expect(
+        chatPeerIsEffectivelyOnline(
+          peer.copyWith(lastSeenAt: now.subtract(const Duration(seconds: 3))),
+          now: now,
+        ),
+        isTrue,
+      );
+    });
+  });
+
+  group('Public channel handshake sync', () {
+    test('仅公开未归档房间参与握手补同步', () {
+      final now = DateTime(2026, 5, 7, 12, 0, 0);
+      final channels = [
+        ChatChannel(
+          channelId: 'lobby:net-a',
+          networkKey: 'net-a',
+          name: '大厅',
+          ownerPeerId: 'peer-a',
+          isPrivate: false,
+          joined: true,
+          archived: false,
+          createdAt: now,
+          updatedAt: now,
+        ),
+        ChatChannel(
+          channelId: 'public-room',
+          networkKey: 'net-a',
+          name: '公开房间',
+          ownerPeerId: 'peer-a',
+          isPrivate: false,
+          joined: true,
+          archived: false,
+          createdAt: now,
+          updatedAt: now,
+        ),
+        ChatChannel(
+          channelId: 'private-room',
+          networkKey: 'net-a',
+          name: '私密房间',
+          ownerPeerId: 'peer-a',
+          isPrivate: true,
+          joined: true,
+          archived: false,
+          createdAt: now,
+          updatedAt: now,
+        ),
+        ChatChannel(
+          channelId: 'archived-room',
+          networkKey: 'net-a',
+          name: '已归档房间',
+          ownerPeerId: 'peer-a',
+          isPrivate: false,
+          joined: true,
+          archived: true,
+          createdAt: now,
+          updatedAt: now,
+        ),
+      ];
+
+      final syncable =
+          channels.where(chatChannelShouldSyncOnHandshake).toList();
+
+      expect(
+        syncable.map((channel) => channel.channelId).toList(),
+        ['lobby:net-a', 'public-room'],
+      );
+      expect(
+        buildPublicChannelAnnouncementPayload(syncable.last),
+        {
+          'channelId': 'public-room',
+          'name': '公开房间',
+          'ownerPeerId': 'peer-a',
+          'isPrivate': false,
+        },
+      );
+    });
   });
 
   group('RemoteAssistSession', () {

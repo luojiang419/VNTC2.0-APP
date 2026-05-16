@@ -112,10 +112,8 @@ class SystemTrayManager {
     // 显示主界面
     menuItems.add(MenuItemLabel(
       label: '显示主界面',
-      onClicked: (menuItem) async {
-        await windowManager.show();
-        await windowManager.setSkipTaskbar(false);
-        await windowManager.focus();
+      onClicked: (menuItem) {
+        windowManager.show();
       },
     ));
 

@@ -212,8 +212,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
         dataFingerprintVerification: _dataFingerprintVerification == 'OPEN',
         encryptionAlgorithm: _encryptionAlgorithm,
         deviceID: _deviceIDController.text,
-        virtualNetworkCardName:
-            Platform.isAndroid ? '' : _virtualNetworkCardNameController.text,
+        virtualNetworkCardName: _virtualNetworkCardNameController.text,
         mtu: int.tryParse(_mtuController.text) ?? 1410,
         ports: _portGroupControllers
             .map((controller) => controller.text)
@@ -658,15 +657,14 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
                         ],
                       ),
                       const SizedBox(height: 16),
-                      if (!Platform.isAndroid)
-                        _buildTextFormField(
-                          _virtualNetworkCardNameController,
-                          '虚拟网卡名称',
-                          10,
-                        ),
+                      _buildTextFormField(
+                        _virtualNetworkCardNameController,
+                        '虚拟网卡名称',
+                        10,
+                      ),
                       _buildTextFormField(
                         _mtuController,
-                        Platform.isAndroid ? 'VPN MTU' : '虚拟网卡mtu',
+                        '虚拟网卡mtu',
                         null,
                         (value) {
                           if (value == null || value.isEmpty) {

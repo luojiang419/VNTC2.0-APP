@@ -138,16 +138,28 @@ python3 -m py_compile client_server.py vnt_panel/*.py vntc_panel/*.py
 
 ```text
 VntcApp1.0/
+├── android/         # Android 客户端工程
+├── assets/
+├── docs/screenshots/
+├── integration_test/
+├── ios/             # iOS / VPN Extension / Widget
 ├── lib/             # Flutter 页面、配置管理、多连接状态管理
+├── linux/
+├── macos/
 ├── rust/            # 官方 VNT Rust 核心桥接
 ├── rust_builder/    # Flutter Rust FFI 插件构建层
-├── windows/         # Windows Runner、UAC 提权、wintun.dll 打包
-├── assets/
 ├── scripts/
-└── docs/screenshots/
+├── test/
+├── third_party/
+├── vendor/
+├── web/
+├── windows/         # Windows Runner、UAC 提权、wintun.dll 打包
+└── windows_launcher/
 ```
 
-当前目录已经移除官方 `VntApp` 的 UI 层，改为迁移 `vntc2.0/static_client/` 的 Linux 控制台页面风格，并保留 Windows 原生桌面开发所需的底层能力。当前已补上：
+当前 `VntcApp1.0/` 已同步为完整跨平台客户端源码目录，不再只有 Windows 相关代码，Android / iOS / macOS / Linux / Web / Rust bridge / packaging scripts 已一并补齐。项目在保留 Windows 桌面能力的同时，也保留了多平台客户端工程结构。
+
+当前已补上：
 
 - 自动复制架构匹配的 `wintun.dll`
 - Windows Runner 管理员权限声明

@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:ui';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -69,18 +70,35 @@ void main() {
   });
 
   group('Distribution config', () {
-    test('清洗分发配置时移除机器相关字段', () {
+    test('清洗分发配置时移除机器相关字段并净化预置网络配置', () {
       final sanitized = DataPersistence.sanitizeWindowsDistributionConfigMap({
         'window-x': 123,
         'window-y': 456,
         'window-width': 1000,
         'window-height': 700,
         'vnt-unique-id-key': 'device-id',
+        'vnt-install-registration-id': 'install-1',
+        'vnt-identity-refreshed-at': '2026-05-07T00:00:00Z',
         'is-auto-start': true,
         'is-always-on-top': true,
         'is-close-app': false,
         'default-key': 'abc',
-        'data-key': ['x'],
+        'data-key': [
+          jsonEncode({
+            'itemKey': 'cfg-1',
+            'ip': '10.10.10.16',
+            'device_id': 'device-id',
+            'token': 'abc',
+          }),
+        ],
+        'data-key-native': jsonEncode([
+          jsonEncode({
+            'itemKey': 'cfg-1',
+            'ip': '10.10.10.16',
+            'device_id': 'device-id',
+            'token': 'abc',
+          }),
+        ]),
       });
 
       expect(sanitized.containsKey('window-x'), isFalse);
@@ -88,11 +106,24 @@ void main() {
       expect(sanitized.containsKey('window-width'), isFalse);
       expect(sanitized.containsKey('window-height'), isFalse);
       expect(sanitized.containsKey('vnt-unique-id-key'), isFalse);
+      expect(sanitized.containsKey('vnt-install-registration-id'), isFalse);
+      expect(sanitized.containsKey('vnt-identity-refreshed-at'), isFalse);
       expect(sanitized.containsKey('is-auto-start'), isFalse);
       expect(sanitized.containsKey('is-always-on-top'), isFalse);
       expect(sanitized.containsKey('is-close-app'), isFalse);
       expect(sanitized['default-key'], 'abc');
-      expect(sanitized['data-key'], ['x']);
+      final dataKeyEntry =
+          jsonDecode((sanitized['data-key'] as List).single as String) as Map;
+      expect(dataKeyEntry['ip'], '');
+      expect(dataKeyEntry['device_id'], '');
+      expect(dataKeyEntry['token'], 'abc');
+
+      final nativeList =
+          jsonDecode(sanitized['data-key-native'] as String) as List;
+      final nativeEntry = jsonDecode(nativeList.single as String) as Map;
+      expect(nativeEntry['ip'], '');
+      expect(nativeEntry['device_id'], '');
+      expect(nativeEntry['token'], 'abc');
     });
   });
 }

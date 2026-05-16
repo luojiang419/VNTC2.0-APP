@@ -1,0 +1,9 @@
+.idea/
+.vscode/
+.VSCodeCounter/
+build/
+tmp/
+target/
+**/*.rs.bk
+Cargo.lock
+wintun.dll

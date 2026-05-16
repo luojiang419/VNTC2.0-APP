@@ -58,14 +58,6 @@ abstract class CargoKitBuildTask extends DefaultTask {
         def manifestDir = Paths.get(project.buildscript.sourceFile.parent, project.cargokit.manifestDir)
 
         def rootProjectDir = project.rootProject.projectDir
-        def localProperties = new Properties()
-        def localPropertiesFile = new File(rootProjectDir, "local.properties")
-        if (localPropertiesFile.exists()) {
-            localPropertiesFile.withInputStream { stream ->
-                localProperties.load(stream)
-            }
-        }
-        def flutterRoot = localProperties.getProperty("flutter.sdk")
         
         if (!Os.isFamily(Os.FAMILY_WINDOWS)) {
             project.exec {
@@ -88,9 +80,6 @@ abstract class CargoKitBuildTask extends DefaultTask {
             environment "CARGOKIT_MIN_SDK_VERSION", minSdkVersion
             environment "CARGOKIT_TARGET_PLATFORMS", targetPlatforms.join(",")
             environment "CARGOKIT_JAVA_HOME", System.properties['java.home']
-            if (flutterRoot != null && !flutterRoot.trim().isEmpty()) {
-                environment "FLUTTER_ROOT", flutterRoot
-            }
         }
     }
 }
@@ -99,145 +88,87 @@ class CargoKitPlugin implements Plugin<Project> {
 
     static String file;
 
-    private static final Map<String, String> ABI_TO_TARGET = [
-        "armeabi-v7a": "android-arm",
-        "arm64-v8a"  : "android-arm64",
-        "x86"        : "android-x86",
-        "x86_64"     : "android-x64",
-    ]
-
-    private static final List<String> DEFAULT_TARGET_PLATFORMS = [
-        "android-arm",
-        "android-arm64",
-        "android-x64",
-    ]
-
-    private Project findFlutterAppProject(Project rootProject) {
-        def appProject = rootProject.findProject(":app")
-        if (appProject != null) {
-            return appProject
-        }
-        return _findFlutterAppProject(rootProject.childProjects)
+    private Plugin findFlutterPlugin(Project rootProject) {
+        _findFlutterPlugin(rootProject.childProjects)
     }
 
-    private Project _findFlutterAppProject(Map projects) {
+   private Plugin _findFlutterPlugin(Map projects) {
         for (project in projects) {
-            def candidate = project.value
-            if (candidate.plugins.hasPlugin("com.android.application")) {
-                return candidate
+            for (plugin in project.value.getPlugins()) {
+                if (plugin.class.name == "FlutterPlugin") {
+                    return plugin;
+                }
             }
-            def nested = _findFlutterAppProject(candidate.childProjects)
-            if (nested != null) {
-                return nested
-            }
-        }
-        return null
-    }
-
-    private int parseCompileSdkVersion(def compileSdkVersion) {
-        if (compileSdkVersion == null) {
-            return 36
-        }
-        def value = compileSdkVersion.toString()
-        if (value.startsWith("android-")) {
-            return value.substring(8) as int
-        }
-        return value as int
-    }
-
-    private List<String> resolveTargetPlatforms(Project flutterAppProject, String buildType) {
-        def platforms = []
-        def abiFilters = flutterAppProject.android.defaultConfig.ndk?.abiFilters
-        abiFilters?.each { abi ->
-            def target = ABI_TO_TARGET[abi?.toString()]
-            if (target != null && !platforms.contains(target)) {
-                platforms.add(target)
+            def plugin = _findFlutterPlugin(project.value.childProjects);
+            if (plugin != null) {
+                return plugin;
             }
         }
-        if (platforms.isEmpty()) {
-            def platformsProperty = flutterAppProject.findProperty("target-platform")?.toString()
-            if (platformsProperty != null && !platformsProperty.trim().isEmpty()) {
-                platformsProperty.split(",")
-                    .collect { it.trim() }
-                    .findAll { !it.isEmpty() }
-                    .each { platform ->
-                        if (!DEFAULT_TARGET_PLATFORMS.contains(platform) && platform != "android-x86") {
-                            throw new GradleException("Invalid platform: ${platform}")
-                        }
-                        if (!platforms.contains(platform)) {
-                            platforms.add(platform)
-                        }
-                    }
-            }
-        }
-        if (platforms.isEmpty()) {
-            platforms.addAll(DEFAULT_TARGET_PLATFORMS)
-        }
-        if (buildType == "debug" && !platforms.contains("android-x86")) {
-            platforms.add("android-x86")
-        }
-        return platforms
+        return null;
     }
 
     @Override
     void apply(Project project) {
+        def plugin = findFlutterPlugin(project.rootProject);
+
         project.extensions.create("cargokit", CargoKitExtension)
 
-        def flutterAppProject = findFlutterAppProject(project.rootProject)
-        if (flutterAppProject == null) {
-            print("Flutter app project not found, CargoKit plugin will not be applied.")
+        if (plugin == null) {
+            print("Flutter plugin not found, CargoKit plugin will not be applied.")
             return;
         }
 
-        def configured = false
-        flutterAppProject.plugins.withId("dev.flutter.flutter-gradle-plugin") {
-            configured = true
-            def cargoBuildDir = "${project.buildDir}/build"
+        def cargoBuildDir = "${project.buildDir}/build"
 
-            flutterAppProject.android.applicationVariants.all { variant ->
-                final buildType = variant.buildType.name
-                def cargoOutputDir = "${project.buildDir}/jniLibs/${buildType}"
-                def jniLibs = project.android.sourceSets.maybeCreate(buildType).jniLibs
-                jniLibs.srcDir(new File(cargoOutputDir))
+        plugin.project.android.applicationVariants.all { variant ->
 
-                project.afterEvaluate {
-                    def taskName = "cargokitCargoBuild${project.cargokit.libname.capitalize()}${buildType.capitalize()}"
-                    if (project.tasks.findByName(taskName)) {
-                        return
-                    }
+            final buildType = variant.buildType.name
 
-                    if (flutterAppProject.android.ndkVersion == null) {
-                        throw new GradleException("Please set 'android.ndkVersion' in 'app/build.gradle'.")
-                    }
+            def cargoOutputDir = "${project.buildDir}/jniLibs/${buildType}";
+            def jniLibs = project.android.sourceSets.maybeCreate(buildType).jniLibs;
+            jniLibs.srcDir(new File(cargoOutputDir))
 
-                    def task = project.tasks.create(taskName, CargoKitBuildTask.class) {
-                        buildMode = buildType
-                        buildDir = cargoBuildDir
-                        outputDir = cargoOutputDir
-                        ndkVersion = flutterAppProject.android.ndkVersion
-                        sdkDirectory = flutterAppProject.android.sdkDirectory
-                        minSdkVersion = flutterAppProject.android.defaultConfig.minSdkVersion.apiLevel as int
-                        compileSdkVersion = parseCompileSdkVersion(flutterAppProject.android.compileSdkVersion)
-                        targetPlatforms = resolveTargetPlatforms(flutterAppProject, buildType)
-                        pluginFile = CargoKitPlugin.file
-                    }
+            def platforms = plugin.getTargetPlatforms().collect()
 
-                    def mergeTaskName = "merge${buildType.capitalize()}NativeLibs"
-                    def onTask = { newTask ->
-                        if (newTask.name == mergeTaskName) {
-                            newTask.dependsOn task
-                            newTask.outputs.upToDateWhen { false }
-                        }
-                    }
-                    project.tasks.each onTask
-                    project.tasks.whenTaskAdded(onTask)
-                }
+            // Same thing addFlutterDependencies does in flutter.gradle
+            if (buildType == "debug") {
+                platforms.add("android-x86")
+                platforms.add("android-x64")
             }
-        }
 
-        project.gradle.projectsEvaluated {
-            if (!configured) {
-                print("Flutter plugin not found, CargoKit plugin will not be applied.")
+            // The task name depends on plugin properties, which are not available
+            // at this point
+            project.getGradle().afterProject {
+                def taskName = "cargokitCargoBuild${project.cargokit.libname.capitalize()}${buildType.capitalize()}";
+
+                if (project.tasks.findByName(taskName)) {
+                    return
+                }
+
+                if (plugin.project.android.ndkVersion == null) {
+                    throw new GradleException("Please set 'android.ndkVersion' in 'app/build.gradle'.")
+                }
+
+                def task = project.tasks.create(taskName, CargoKitBuildTask.class) {
+                    buildMode = variant.buildType.name
+                    buildDir = cargoBuildDir
+                    outputDir = cargoOutputDir
+                    ndkVersion = plugin.project.android.ndkVersion
+                    sdkDirectory = plugin.project.android.sdkDirectory
+                    minSdkVersion = plugin.project.android.defaultConfig.minSdkVersion.apiLevel as int
+                    compileSdkVersion = plugin.project.android.compileSdkVersion.substring(8) as int
+                    targetPlatforms = platforms
+                    pluginFile = CargoKitPlugin.file
+                }
+                def onTask = { newTask ->
+                    if (newTask.name == "merge${buildType.capitalize()}NativeLibs") {
+                        newTask.dependsOn task
+                        // Fix gradle 7.4.2 not picking up JNI library changes
+                        newTask.outputs.upToDateWhen { false }
+                    }
+                }
+                project.tasks.each onTask
+                project.tasks.whenTaskAdded onTask
             }
         }
     }

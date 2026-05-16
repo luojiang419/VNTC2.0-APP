@@ -95,6 +95,42 @@ class ChatIds {
   }
 }
 
+const Duration chatPeerOnlineFreshness = Duration(seconds: 12);
+
+bool chatMatchesNetworkScope(String networkKey, String? scopedNetworkKey) {
+  final normalizedScope = scopedNetworkKey?.trim() ?? '';
+  if (normalizedScope.isEmpty) {
+    return true;
+  }
+  return networkKey == normalizedScope;
+}
+
+bool chatPeerIsEffectivelyOnline(
+  ChatPeer peer, {
+  DateTime? now,
+  Duration freshness = chatPeerOnlineFreshness,
+}) {
+  if (!peer.isOnline) {
+    return false;
+  }
+  final delta = (now ?? DateTime.now()).difference(peer.lastSeenAt).abs();
+  return delta <= freshness;
+}
+
+bool chatChannelShouldSyncOnHandshake(ChatChannel channel) {
+  return !channel.isPrivate && !channel.archived;
+}
+
+Map<String, dynamic> buildPublicChannelAnnouncementPayload(
+    ChatChannel channel) {
+  return {
+    'channelId': channel.channelId,
+    'name': channel.name,
+    'ownerPeerId': channel.ownerPeerId,
+    'isPrivate': false,
+  };
+}
+
 class ChatPeer {
   final String peerId;
   final String networkKey;

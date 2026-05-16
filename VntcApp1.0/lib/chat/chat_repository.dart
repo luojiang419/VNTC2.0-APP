@@ -597,7 +597,7 @@ class ChatRepository {
   }
 
   Future<String> computeSha256(String filePath) async {
-    final digest = sha256.convert(await File(filePath).readAsBytes());
+    final digest = await sha256.bind(File(filePath).openRead()).first;
     return digest.toString();
   }
 

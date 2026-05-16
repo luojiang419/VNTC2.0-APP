@@ -44,6 +44,29 @@ abstract class ChatNetworkDelegate {
       [StackTrace? stackTrace]);
 }
 
+class ChatBroadcastResult {
+  const ChatBroadcastResult({
+    required this.attemptedCount,
+    required this.successCount,
+    required this.failedIps,
+  });
+
+  const ChatBroadcastResult.empty()
+      : attemptedCount = 0,
+        successCount = 0,
+        failedIps = const [];
+
+  final int attemptedCount;
+  final int successCount;
+  final List<String> failedIps;
+
+  bool get hasSuccess => successCount > 0;
+
+  bool get hasFailures => failedIps.isNotEmpty;
+
+  bool get allFailed => attemptedCount > 0 && successCount == 0;
+}
+
 class ChatNetworkService {
   ChatNetworkService({
     required this.networkKey,
@@ -287,20 +310,44 @@ class ChatNetworkService {
     }
   }
 
-  Future<void> broadcastEnvelope({
+  Future<ChatBroadcastResult> broadcastEnvelope({
     required Iterable<String> remoteIps,
     required ChatEnvelope envelope,
   }) async {
-    for (final ip in remoteIps.toSet()) {
-      if (ip == localVirtualIp) {
-        continue;
-      }
+    final targetIps = remoteIps.toSet().where((ip) => ip != localVirtualIp);
+    if (targetIps.isEmpty) {
+      return const ChatBroadcastResult.empty();
+    }
+
+    var successCount = 0;
+    final failedIps = <String>[];
+    for (final ip in targetIps) {
       try {
         await sendEnvelope(remoteIp: ip, envelope: envelope);
+        successCount++;
       } catch (error, stackTrace) {
-        delegate.onNetworkWarning(networkKey, error, stackTrace);
+        failedIps.add(ip);
+        await ChatLogger.instance.warn(
+          'network.broadcast',
+          '广播控制消息发送失败',
+          networkKey: networkKey,
+          extra: {
+            'remoteIp': ip,
+            'type': envelope.type.name,
+            'messageId': envelope.messageId,
+            'conversationId': envelope.conversationId,
+            'channelId': envelope.channelId,
+            'error': error.toString(),
+            'stackTrace': stackTrace.toString(),
+          },
+        );
       }
     }
+    return ChatBroadcastResult(
+      attemptedCount: targetIps.length,
+      successCount: successCount,
+      failedIps: failedIps,
+    );
   }
 
   Future<void> sendAttachment({

@@ -157,7 +157,7 @@ class VntBox {
         punchModel: config.punchModel,
         ports: config.ports.isEmpty ? null : Uint16List.fromList(config.ports),
         firstLatency: config.firstLatency,
-        deviceName: (Platform.isAndroid || config.virtualNetworkCardName.isEmpty)
+        deviceName: config.virtualNetworkCardName.isEmpty
             ? null
             : config.virtualNetworkCardName,
         useChannelType: config.coreUseChannelType,
