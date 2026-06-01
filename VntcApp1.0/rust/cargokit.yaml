@@ -1,0 +1,8 @@
+# Cargokit 配置文件
+# Android 构建需要使用支持 Cargo.lock v4 的工具链，避免继续卡在 1.77.2 的旧 Cargo 解析阶段。
+
+cargo:
+  release:
+    toolchain: "1.95.0"
+  debug:
+    toolchain: "1.95.0"

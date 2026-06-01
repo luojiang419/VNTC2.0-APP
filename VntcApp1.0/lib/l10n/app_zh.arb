@@ -1,0 +1,7 @@
+{
+  "@@locale": "zh",
+  "appTitle": "VNT App 2.0",
+  "@appTitle": {
+    "description": "应用标题"
+  }
+}

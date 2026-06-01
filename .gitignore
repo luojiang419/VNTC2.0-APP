@@ -1,40 +1,18 @@
+# ===== 根目录排除 =====
+
 # 构建产物
 build/
 dist/
 output/
 
-# 发行包和运行时二进制
+# 发行包
 Release_*/
 backup/
 
-# 二进制和大型文件
-*.dll
-*.exe
-*.so
-*.lib
-*.exp
-*.pdb
-*.dat
-*.bin
-*.png
-*.jpg
-*.jpeg
-*.ico
-*.otf
-*.ttf
-*.zip
-*.msi
-*.jar
-*.mp3
-*.wav
-*.mp4
-*.frag
-
-# 项目资料（截图等大文件）
+# 项目资料
 项目资料/
-
-# 旧客户端发行包
 VNT虚拟组网2.0客户端/
+安卓版客户端/
 
 # IDE
 .vscode/
@@ -50,39 +28,88 @@ _tmp_*/
 项目开发计划/
 进度快照/
 
-# Rust 编译缓存
-target/
+# 工具链和外部源码
+toolchains/
+vntcrustdesk-src/
 
-# Flutter
-.dart_tool/
-.flutter-plugins
-.flutter-plugins-dependencies
-.pub-cache/
-.pub/
+# Python
+__pycache__/
+
+# ===== VntcApp1.0 排除 =====
+
+# 构建产物（VntcApp1.0 自己的 .gitignore 也会处理）
+VntcApp1.0/build/
+VntcApp1.0/dist/
+VntcApp1.0/output/
+VntcApp1.0/Release_*/
+
+# Windows 生成文件
+VntcApp1.0/windows/flutter/ephemeral/
+VntcApp1.0/windows/flutter/generated_*
+VntcApp1.0/windows/runner/Release/
+
+# Android 大文件
+VntcApp1.0/android/app/src/main/jniLibs/
+VntcApp1.0/android/.gradle/
+VntcApp1.0/android/app/build/
+VntcApp1.0/android/app/debug/
+VntcApp1.0/android/app/profile/
+VntcApp1.0/android/app/release/
+VntcApp1.0/android/local.properties
+
+# iOS/macOS 生成文件
+VntcApp1.0/ios/Flutter/Flutter.framework/
+VntcApp1.0/ios/Pods/
+VntcApp1.0/macos/Flutter/ephemeral/
+VntcApp1.0/linux/flutter/ephemeral/
+
+# Rust 编译缓存
+VntcApp1.0/rust/target/
+
+# Flutter 缓存
+VntcApp1.0/.dart_tool/
+VntcApp1.0/.flutter-plugins
+VntcApp1.0/.flutter-plugins-dependencies
+
+# YY-Thunks（大型依赖）
+VntcApp1.0/yy-thunks/
+
+# GitHub Actions 大文件
+VntcApp1.0/.github/patches/
+
+# 第三方运行时（rustdesk 二进制）
+VntcApp1.0/third_party/rustdesk/
+VntcApp1.0/rustdesk_runtime/
+
+# 工具文件
+VntcApp1.0/gen_snapshot.exe
+VntcApp1.0/flutter_windows.dll.pdb
+VntcApp1.0/output.zip
+
+# 配置数据（运行时生成）
+VntcApp1.0/config/config.json
 
 # 日志
 *.log
 logs/
 
-# 配置数据（运行时生成）
-config/config.json
-
-# 嵌入式 git 仓库
+# ===== 嵌入式仓库（暂不作为 submodule） =====
 vnts2.0windows/
 vntc2.0windows/
-VntcApp1.0/
 
-# GitHub workflow patches 中的大文件
-.github/patches/*.zip
+# ===== 大文件排除（全局） =====
+*.pdb
+*.lib
+*.exp
+*.apk
+*.gz
+*.tar
+*.msi
+*.jar
+*.zip
 
-# 工具链
-toolchains/
-
-# Python
-__pycache__/
-
-# 安卓包
-安卓版客户端/
-
-# RustDesk 源码
-vntcrustdesk-src/
+# ===== 服务端二进制目录 =====
+vnts2.0服务端/
+vnts2.0/linux/vnts2
+vnts2.0/packages/
+vnts2.0服务端开发包/windows-deploy/vnts2.exe
