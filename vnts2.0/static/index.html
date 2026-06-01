@@ -1,0 +1,404 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>VNTS 2.0 Control Panel</title>
+    <script>
+      (() => {
+        const key = "vnt_panel_theme";
+        let preference = "system";
+        try {
+          const stored = window.localStorage.getItem(key);
+          if (stored === "dark" || stored === "light") {
+            preference = stored;
+          }
+        } catch (error) {
+          preference = "system";
+        }
+        const systemDark =
+          typeof window.matchMedia === "function" &&
+          window.matchMedia("(prefers-color-scheme: dark)").matches;
+        const resolved = preference === "system" ? (systemDark ? "dark" : "light") : preference;
+        document.documentElement.setAttribute("data-theme", resolved);
+        document.documentElement.setAttribute("data-theme-source", preference);
+      })();
+    </script>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="page-shell">
+      <div class="ambient ambient-left"></div>
+      <div class="ambient ambient-right"></div>
+
+      <aside class="sidebar">
+        <div class="brand-card reveal">
+          <p class="eyebrow">VNT Operations</p>
+          <h1>VNTS 2.0 控制台</h1>
+          <p class="brand-copy">
+            统一管理启动、配置、日志与运行状态，专门为你的
+            <code>vnts2.service</code> 打造。
+          </p>
+          <div class="service-mini">
+            <span class="dot" id="navStatusDot"></span>
+            <span id="navStatusText">等待连接</span>
+          </div>
+        </div>
+
+        <nav class="nav-card reveal">
+          <button class="nav-link" data-scroll-target="overview">总览</button>
+          <button class="nav-link" data-scroll-target="configSection">参数配置</button>
+          <button class="nav-link" data-scroll-target="advancedSection">高级 TOML</button>
+          <button class="nav-link" data-scroll-target="logsSection">实时日志</button>
+          <button class="nav-link" data-scroll-target="settingsSection">设置</button>
+        </nav>
+
+        <section class="info-card reveal">
+          <p class="card-label">当前服务</p>
+          <strong id="serviceNameMini">vnts2.service</strong>
+          <p class="muted" id="configPathMini">/root/vnts2/config.toml</p>
+        </section>
+
+        <section class="info-card reveal">
+          <p class="card-label">会话</p>
+          <div class="session-row">
+            <span id="sessionUser">未登录</span>
+            <button class="ghost-button" id="logoutButton" type="button">退出</button>
+          </div>
+        </section>
+
+        <section class="info-card reveal">
+          <p class="card-label">主题</p>
+          <div class="theme-row">
+            <span class="theme-meta" id="themeModeText">跟随系统</span>
+            <button class="ghost-button" id="themeToggleButton" type="button">切换主题</button>
+          </div>
+        </section>
+      </aside>
+
+      <main class="main-shell" id="appShell">
+        <section class="hero reveal" id="overview">
+          <div class="hero-panels">
+            <article class="glass-panel primary-panel reveal">
+              <div class="panel-topline">
+                <span class="card-label">服务状态</span>
+                <button class="ghost-button" id="refreshOverviewButton" type="button">
+                  刷新
+                </button>
+              </div>
+              <div class="status-block">
+                <span class="status-badge pending" id="serviceBadge">Checking</span>
+                <h3 id="serviceHeadline">正在获取服务状态</h3>
+                <p id="serviceSubline" class="muted">请稍候，面板正在同步 systemd 信息。</p>
+              </div>
+              <div class="metric-grid">
+                <div class="metric-card">
+                  <span class="metric-label">PID</span>
+                  <strong id="metricPid">-</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-label">运行时长</span>
+                  <strong id="metricElapsed">-</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-label">CPU</span>
+                  <strong id="metricCpu">-</strong>
+                </div>
+                <div class="metric-card">
+                  <span class="metric-label">内存</span>
+                  <strong id="metricMemory">-</strong>
+                </div>
+              </div>
+              <div class="action-row">
+                <button class="accent-button" data-service-action="start" type="button">启动</button>
+                <button class="secondary-button" data-service-action="restart" type="button">重启</button>
+                <button class="danger-button" data-service-action="stop" type="button">停止</button>
+              </div>
+            </article>
+
+            <article class="glass-panel summary-panel reveal">
+              <div class="panel-topline">
+                <span class="card-label">部署摘要</span>
+              </div>
+              <ul class="summary-list">
+                <li>
+                  <span>配置文件</span>
+                  <strong id="summaryConfigPath">/root/vnts2/config.toml</strong>
+                </li>
+                <li>
+                  <span>systemd 单元</span>
+                  <strong id="summaryServiceName">vnts2.service</strong>
+                </li>
+                <li>
+                  <span>备份目录</span>
+                  <strong id="summaryBackupDir">/root/vnts2/.backups</strong>
+                </li>
+                <li>
+                  <span>监听概览</span>
+                  <strong id="summaryEndpoints">等待载入</strong>
+                </li>
+              </ul>
+            </article>
+          </div>
+        </section>
+
+        <section class="section-grid" id="configSection">
+          <article class="content-panel wide reveal">
+            <div class="section-header">
+              <div>
+                <p class="eyebrow">Structured Config</p>
+                <h3>常用参数面板</h3>
+              </div>
+              <div class="section-actions">
+                <button class="ghost-button" id="reloadConfigButton" type="button">重载配置</button>
+                <button class="accent-button" id="saveStructuredButton" type="button">保存</button>
+                <button class="secondary-button" id="saveStructuredRestartButton" type="button">
+                  保存并重启
+                </button>
+              </div>
+            </div>
+
+            <form id="structuredForm" class="form-grid">
+              <div class="field-card">
+                <label for="tcpBind">TCP 监听</label>
+                <input id="tcpBind" name="tcp_bind" placeholder="0.0.0.0:2222" />
+              </div>
+              <div class="field-card">
+                <label for="quicBind">QUIC 监听</label>
+                <input id="quicBind" name="quic_bind" placeholder="0.0.0.0:2222" />
+              </div>
+              <div class="field-card">
+                <label for="wsBind">WebSocket 监听</label>
+                <input id="wsBind" name="ws_bind" placeholder="0.0.0.0:2222" />
+              </div>
+              <div class="field-card">
+                <label for="webBind">Web 管理端</label>
+                <input id="webBind" name="web_bind" placeholder="0.0.0.0:29871" />
+              </div>
+
+              <div class="field-card">
+                <label for="network">默认网段</label>
+                <input id="network" name="network" placeholder="10.26.0.0/24" />
+              </div>
+              <div class="field-card">
+                <label for="leaseDuration">租约时长（秒）</label>
+                <input id="leaseDuration" name="lease_duration" type="number" min="1" />
+              </div>
+              <div class="field-card">
+                <label for="username">Web 用户名</label>
+                <input id="username" name="username" placeholder="admin" />
+              </div>
+              <div class="field-card">
+                <label for="password">Web 密码</label>
+                <input id="password" name="password" placeholder="admin" />
+              </div>
+
+              <div class="field-card">
+                <label for="cert">TLS 证书路径</label>
+                <input id="cert" name="cert" placeholder="cert.pem" />
+              </div>
+              <div class="field-card">
+                <label for="key">TLS 私钥路径</label>
+                <input id="key" name="key" placeholder="key.pem" />
+              </div>
+              <div class="field-card">
+                <label for="serverQuicBind">服务互联端口</label>
+                <input id="serverQuicBind" name="server_quic_bind" placeholder="0.0.0.0:29873" />
+                <p class="hint">
+                  只用于多台 VNTS 服务端互联，不是客户端接入地址。单机部署可以留空；客户端请连接
+                  <code>quic://115.231.35.105:2225</code> 这一类接入地址。
+                </p>
+              </div>
+              <div class="field-card checkbox-card">
+                <label class="checkbox-row">
+                  <input id="persistence" name="persistence" type="checkbox" />
+                  <span>启用数据持久化</span>
+                </label>
+              </div>
+
+              <div class="field-card span-2">
+                <label for="whiteList">网络编号白名单</label>
+                <textarea id="whiteList" name="white_list" rows="4" placeholder="每行一个 token"></textarea>
+              </div>
+              <div class="field-card span-2">
+                <label for="peerServers">互联服务器列表</label>
+                <textarea id="peerServers" name="peer_servers" rows="4" placeholder="每行一个 host:port"></textarea>
+                <p class="hint">
+                  只有在需要把当前服务器和其他 VNTS 服务端互联时才填写，每行一个
+                  <code>host:port</code>。单机部署保持为空即可。
+                </p>
+              </div>
+              <div class="field-card span-4">
+                <label for="serverToken">服务互联验证码</label>
+                <input id="serverToken" name="server_token" placeholder="your-secret-token" />
+                <p class="hint">
+                  仅多服务端互联时需要，参与互联的服务器必须保持一致。单机部署可以留空。
+                </p>
+              </div>
+            </form>
+
+            <div class="subsection">
+              <div class="subsection-header">
+                <div>
+                  <p class="eyebrow">Custom Networks</p>
+                  <h4>自定义虚拟网段</h4>
+                </div>
+                <button class="ghost-button" id="addCustomNetButton" type="button">新增网段</button>
+              </div>
+              <div id="customNetsList" class="custom-net-list"></div>
+            </div>
+          </article>
+
+          <article class="content-panel reveal">
+            <div class="section-header compact">
+              <div>
+                <p class="eyebrow">Service Meta</p>
+                <h3>运行信息</h3>
+              </div>
+            </div>
+            <dl class="meta-list">
+              <div>
+                <dt>Active State</dt>
+                <dd id="metaActiveState">-</dd>
+              </div>
+              <div>
+                <dt>Sub State</dt>
+                <dd id="metaSubState">-</dd>
+              </div>
+              <div>
+                <dt>Load State</dt>
+                <dd id="metaLoadState">-</dd>
+              </div>
+              <div>
+                <dt>启动时间</dt>
+                <dd id="metaActiveSince">-</dd>
+              </div>
+              <div>
+                <dt>配置更新时间</dt>
+                <dd id="metaConfigUpdatedAt">-</dd>
+              </div>
+              <div>
+                <dt>进程命令</dt>
+                <dd id="metaCommand">-</dd>
+              </div>
+            </dl>
+          </article>
+        </section>
+
+        <section class="section-grid" id="advancedSection">
+          <article class="content-panel wide reveal">
+            <div class="section-header">
+              <div>
+                <p class="eyebrow">Advanced Editor</p>
+                <h3>原始 TOML 编辑器</h3>
+              </div>
+              <div class="section-actions">
+                <button class="ghost-button" id="resetRawButton" type="button">恢复当前版本</button>
+                <button class="accent-button" id="saveRawButton" type="button">保存 TOML</button>
+                <button class="secondary-button" id="saveRawRestartButton" type="button">
+                  保存并重启
+                </button>
+              </div>
+            </div>
+            <textarea id="rawEditor" class="code-editor" spellcheck="false"></textarea>
+            <p class="hint">
+              结构化保存会只输出面板支持的字段；如果你保留了额外参数，建议在这里直接修改并保存。
+            </p>
+          </article>
+        </section>
+
+        <section class="section-grid" id="logsSection">
+          <article class="content-panel wide reveal">
+            <div class="section-header">
+              <div>
+                <p class="eyebrow">Live Journal</p>
+                <h3>实时日志监控</h3>
+              </div>
+              <div class="section-actions">
+                <button class="ghost-button" id="refreshLogsButton" type="button">刷新快照</button>
+                <div class="stream-pill" id="streamState">流连接中</div>
+              </div>
+            </div>
+            <pre id="logConsole" class="log-console"></pre>
+          </article>
+        </section>
+
+        <section class="section-grid" id="settingsSection">
+          <article class="content-panel wide reveal">
+            <div class="section-header">
+              <div>
+                <p class="eyebrow">Settings</p>
+                <h3>登录设置</h3>
+              </div>
+              <div class="section-actions">
+                <button class="accent-button" id="saveAccountButton" type="button">保存账号密码</button>
+              </div>
+            </div>
+            <form class="form-grid">
+              <div class="field-card">
+                <label for="accountUsername">登录账号</label>
+                <input id="accountUsername" placeholder="luojiang" />
+              </div>
+              <div class="field-card">
+                <label for="accountPassword">新密码</label>
+                <input id="accountPassword" type="password" placeholder="输入新密码" />
+              </div>
+              <div class="field-card">
+                <label for="accountPasswordConfirm">确认新密码</label>
+                <input id="accountPasswordConfirm" type="password" placeholder="再次输入新密码" />
+              </div>
+              <div class="field-card">
+                <label>当前生效账号</label>
+                <div class="field-value" id="accountCurrentUsername">-</div>
+              </div>
+              <div class="field-card span-2">
+                <label>账号文件</label>
+                <div class="field-value" id="accountFilePath">-</div>
+              </div>
+              <div class="field-card span-2">
+                <label>最近更新时间</label>
+                <div class="field-value" id="accountUpdatedAt">-</div>
+              </div>
+            </form>
+            <p class="hint">保存后立即生效，不需要重启面板服务。</p>
+          </article>
+        </section>
+      </main>
+    </div>
+
+    <div class="login-overlay" id="loginOverlay">
+      <form class="login-card" id="loginForm">
+        <p class="eyebrow">Protected Access</p>
+        <h2>登录 VNTS 控制面板</h2>
+        <p class="muted">这个界面可以直接控制服务启停与配置，请先完成认证。</p>
+        <label>
+          <span>用户名</span>
+          <input id="loginUsername" autocomplete="username" placeholder="admin" required />
+        </label>
+        <label>
+          <span>密码</span>
+          <input
+            id="loginPassword"
+            type="password"
+            autocomplete="current-password"
+            placeholder="请输入密码"
+            required
+          />
+        </label>
+        <button class="accent-button block" type="submit">进入控制台</button>
+        <p class="error-text" id="loginError"></p>
+      </form>
+    </div>
+
+    <template id="customNetTemplate">
+      <div class="custom-net-row">
+        <input class="custom-net-name" placeholder="net1" />
+        <input class="custom-net-cidr" placeholder="10.25.0.0/24" />
+        <button class="danger-button small" type="button">删除</button>
+      </div>
+    </template>
+
+    <div class="toast-stack" id="toastStack"></div>
+    <script src="/app.js"></script>
+  </body>
+</html>

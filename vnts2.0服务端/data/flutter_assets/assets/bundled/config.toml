@@ -1,0 +1,9 @@
+tcp_bind = "0.0.0.0:2222"
+quic_bind = "0.0.0.0:2222"
+ws_bind = "0.0.0.0:2222"
+network = "10.26.0.0/24"
+white_list = ["game"]
+lease_duration = 86400
+persistence = true
+
+[custom_nets]
