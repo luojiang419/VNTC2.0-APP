@@ -1,0 +1,483 @@
+name: VntApp
+
+on:
+  push:
+    branches:
+      - flutter
+  workflow_dispatch:
+    inputs:
+      rebuild_android_so:
+        description: '是否重新打包安卓so库？'
+        required: false
+        type: boolean
+        default: false  
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: ${{ matrix.NAME }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+
+          - NAME: vntApp-android
+            OS: ubuntu-latest
+            flutter-version: 3.22.0
+
+          - NAME: vntApp-windows
+            OS: windows-2022
+            flutter-version: 3.24.5
+
+          - NAME: vntApp-macOS
+            OS: macos-latest
+            flutter-version: 3.24.5
+
+          - NAME: vntApp-IOS
+            OS: macos-14
+            flutter-version: 3.24.5
+
+          - NAME: vntApp-linux-x86_64
+            OS: ubuntu-latest
+            flutter-version: 3.24.5
+            DOCKER_PLATFORM: linux/amd64
+            DOCKER_IMAGE: ubuntu:18.04
+            APPIMAGE_ARCH: x86_64
+            BUNDLE_DIR: build/linux/x64/release/bundle
+
+          #- NAME: vntApp-linux-arm64
+          #  OS: ubuntu-latest
+          #  flutter-version: 3.24.5
+          #  DOCKER_PLATFORM: linux/arm64
+          #  DOCKER_IMAGE: arm64v8/ubuntu:18.04
+          #  APPIMAGE_ARCH: aarch64
+          #  BUNDLE_DIR: build/linux/arm64/release/bundle
+
+    runs-on: ${{ matrix.OS }}
+    steps:
+      - uses: actions/checkout@main
+        with:
+         ref: flutter
+
+      - name: 设置 Xcode 版本
+        if: matrix.NAME == 'vntApp-IOS'
+        uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: '16.2'
+        
+      - name: 设置JDK环境
+        if: matrix.NAME == 'vntApp-android'
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'microsoft'
+          java-version: 17
+          
+      - name: 设置NDK环境
+        if: matrix.NAME == 'vntApp-android' && github.event.inputs.rebuild_android_so == 'true'
+        #if: matrix.NAME == 'vntApp-android'
+        run: |
+           wget -q https://dl.google.com/android/repository/android-ndk-r26d-linux.zip
+           unzip -q android-ndk-r26d-linux.zip -d /opt/ndk
+
+      - name: 设置Flutter环境
+        if: "!startsWith(matrix.NAME, 'vntApp-linux')"
+        uses: subosito/flutter-action@v2.12.0 #https://github.com/subosito/flutter-action/issues/277
+        with:
+          channel: stable
+          flutter-version: ${{ matrix.flutter-version }}
+
+      - name: 固定 Rust 版本 1.77.2
+        if: "!startsWith(matrix.NAME, 'vntApp-linux')"
+        shell: bash
+        run: |
+          echo "========================================="
+          echo "🔧 开始配置 Rust 1.77.2"
+          echo "========================================="
+          
+          rustup set auto-self-update disable
+          rustup toolchain install 1.77.2
+          rustup default 1.77.2
+          rustup component add rust-src --toolchain 1.77.2
+          
+          echo ""
+          echo "✅ Rust 版本配置完成："
+
+          rustc -V
+          
+          echo ""
+          echo "📋 已安装的工具链："
+          
+          rustup toolchain list
+          
+          echo "========================================="
+
+      - name: 缓存 Flutter 依赖
+        if: matrix.NAME == 'vntApp-macOS'
+        uses: actions/cache@main
+        with:
+          path: ~/.pub-cache
+          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          restore-keys: |
+            ${{ runner.os }}-pub-
+
+      - name: 缓存 Flutter / Pub / Gradle（Windows 7 引擎版）
+        if: matrix.NAME == 'vntApp-windows'
+        uses: actions/cache@main
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ${{ runner.tool_cache }}/flutter
+          key: >
+            windows-flutter-win7-engine-
+            ${{ matrix.flutter-version }}-
+            ${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            windows-flutter-win7-engine-
+
+      - name: 缓存 Flutter / Pub / Gradle（标准版）
+        if: matrix.NAME != 'vntApp-windows'
+        uses: actions/cache@main
+        with:
+          path: |
+            ~/.pub-cache
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            ${{ runner.tool_cache }}/flutter
+          key: >
+            ${{ runner.os }}-flutter-
+            ${{ matrix.flutter-version }}-
+            ${{ hashFiles('pubspec.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-flutter-
+
+      - name: 判断是否已应用 Windows 7 引擎
+        if: matrix.NAME == 'vntApp-windows'
+        id: win7_engine
+        shell: pwsh
+        run: |
+          $flag = "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/.win7_engine_applied"
+          if (Test-Path $flag) {
+            echo "applied=true" >> $Env:GITHUB_OUTPUT
+          } else {
+            echo "applied=false" >> $Env:GITHUB_OUTPUT
+          }
+
+      - name: 替换 Flutter 引擎为支持 Windows 7 的版本
+        if: matrix.NAME == 'vntApp-windows' && steps.win7_engine.outputs.applied != 'true'
+        shell: pwsh
+        run: |
+          flutter doctor -v
+          flutter precache --windows
+          
+          Expand-Archive -Path ".github/patches/windows-x64-release.zip" -DestinationPath "windows-x64-release"
+          
+          Copy-Item -Path "windows-x64-release/*" -Destination "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/bin/cache/artifacts/engine/windows-x64-release/" -Recurse -Force
+          
+          New-Item -ItemType File -Path "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/.win7_engine_applied" -Force
+            
+      - name: 打补丁以启用 Dropdown Menu 过滤支持
+        if: matrix.NAME == 'vntApp-windows' && steps.win7_engine.outputs.applied != 'true'
+        shell: bash
+        run: |
+          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
+          cd $(dirname $(dirname $(which flutter)))
+          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || true
+          
+      - name: Install Android rust target
+        if: matrix.NAME == 'vntApp-android'
+        run: |
+           rustup target add aarch64-linux-android
+           rustup target add armv7-linux-androideabi
+           rustup target add x86_64-linux-android
+           rustup target add i686-linux-android
+           sed -i 's|main|Android|' rust/Cargo.toml
+           
+           # rust/flutter_rust_bridge_codegen --version
+
+           # echo "生成桥接代码"
+           # cargo install cargo-expand
+           # rust/flutter_rust_bridge_codegen generate
+
+           # echo "列出生成的文件"
+           # find lib/src/rust -type f
+           # find rust/src -name "frb_generated.rs"
+
+      - name: 是否重新打包安卓so库？
+        if: matrix.NAME == 'vntApp-android' && github.event.inputs.rebuild_android_so == 'true'
+        #if: matrix.NAME == 'vntApp-android'
+        run: |
+           cd rust
+           rm -rf .cargo/config
+           
+           export PATH=/opt/ndk/android-ndk-r26d:/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH  
+           cat >>./.cargo/config <<EOF
+            [target.armv7-linux-androideabi]
+            ar = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+            linker = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang"
+
+            [target.aarch64-linux-android]
+            ar = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+            linker = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android21-clang"
+
+            [target.i686-linux-android]
+            ar = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+            linker = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang"
+
+            [target.x86_64-linux-android]
+            ar = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-ar"
+            linker = "/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/x86_64-linux-android21-clang"
+           EOF
+           echo -e "\n\033[1;32m构建 aarch64-linux-android\033[0m\n"
+           cargo build --target aarch64-linux-android --release
+           mv -f target/aarch64-linux-android/release/*.so ../android/app/src/main/jniLibs/arm64-v8a/librust_lib_vnt_app.so
+          
+           cargo clean
+           echo -e "\n\033[1;32m构建 x86_64-linux-android\033[0m\n"
+           cargo build --target x86_64-linux-android --release
+           mv -f target/x86_64-linux-android/release/*.so ../android/app/src/main/jniLibs/x86_64/librust_lib_vnt_app.so
+          
+           cargo clean
+           echo -e "\n\033[1;32m构建 i686-linux-android\033[0m\n"
+           export CC_i686_linux_android="/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang"
+           export CC="/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/i686-linux-android21-clang"
+           cargo build --target i686-linux-android --release 
+           mv -f target/i686-linux-android/release/*.so ../android/app/src/main/jniLibs/x86/librust_lib_vnt_app.so
+
+           cargo clean
+           echo -e "\n\033[1;32m构建 armv7-linux-androideabi\033[0m\n"
+           export CC_armv7_linux_androideabi="/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang"
+           export CC="/opt/ndk/android-ndk-r26d/toolchains/llvm/prebuilt/linux-x86_64/bin/armv7a-linux-androideabi21-clang"
+           cargo build --target armv7-linux-androideabi --release
+           mv -f target/armv7-linux-androideabi/release/*.so ../android/app/src/main/jniLibs/armeabi-v7a/librust_lib_vnt_app.so
+
+      - name: 构建 Android vntAPP
+        if: matrix.NAME == 'vntApp-android'
+        run: |
+         #sed -i 's|branch = "1.2.x"|rev = "501a9e8"|' rust/Cargo.toml
+         
+         flutter clean
+         flutter doctor -v
+         flutter pub get
+         flutter build apk --release 
+         find . -type f -name "*.apk"
+         mkdir -p /opt/vntAPP
+         mv -f build/app/outputs/apk/release/app-release.apk app-release.apk
+         #mv -f build/app/outputs/flutter-apk/app-release.apk app-release.apk
+
+         if [ -n "${{ secrets.KEYSTORE_PASSWORD }}" ] && [ -n "${{ secrets.KEYSTORE_BASE64 }}" ]; then
+           echo "使用仓库密钥签名"
+           echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > keystore.jks
+           keystore_path="keystore.jks"
+           password="${{ secrets.KEYSTORE_PASSWORD }}"
+         else
+           echo "生成临时密钥签名"
+           keystore_path="keystore.jks"
+           password=vntAPP
+           keytool -genkeypair \
+            -v \
+            -keystore "$keystore_path" \
+            -storepass "$password" \
+            -alias key \
+            -keypass "$password" \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android, OU=Android, O=Android, L=BeiJing, ST=BeiJing, C=CN"
+         fi
+          
+         /usr/local/lib/android/sdk/build-tools/34.0.0/apksigner sign \
+           --ks "$keystore_path" \
+           --ks-key-alias key \
+           --ks-pass pass:$password \
+           --key-pass pass:$password \
+           --out vntApp-android.apk \
+           --in app-release.apk \
+           --v1-signing-enabled true \
+           --v2-signing-enabled true \
+           --v3-signing-enabled true \
+           --v4-signing-enabled true
+
+      - name: 构建 Windows vntAPP
+        if: matrix.NAME == 'vntApp-windows'
+        shell: pwsh
+        run: |
+          flutter pub get
+          flutter build windows --release -v
+
+          echo "构建完成，开始列出生成的文件"
+          Get-ChildItem build\windows\x64\runner\Release
+
+          Set-Location build\windows\x64\runner\Release
+
+          Compress-Archive -Path * -DestinationPath $Env:GITHUB_WORKSPACE/vntApp-windows.zip -Force
+          
+      - name: macOS 同步 Rust API 参数
+        if: matrix.NAME == 'vntApp-macOS'
+        shell: bash
+        run: |
+          rustup target add aarch64-apple-darwin
+          rustup target add x86_64-apple-darwin
+
+      - name: 修复 tun-rs 代码（macOS/iOS）
+        if: matrix.NAME == 'vntApp-macOS' || matrix.NAME == 'vntApp-IOS'
+        shell: bash
+        run: |
+          echo "预下载依赖以触发 tun-rs 下载"
+          cd rust
+          cargo fetch || true
+          
+          echo "修复 tun-rs size_of 导入问题"
+          TUN_FILE=$(find ~/.cargo/registry/src -name "mod.rs" -path "*/tun-rs-*/src/platform/macos/tap/mod.rs" 2>/dev/null | head -1)
+          if [ -n "$TUN_FILE" ] && [ -f "$TUN_FILE" ]; then
+            echo "找到文件: $TUN_FILE"
+            echo 'use std::mem::size_of;' | sed -i '' '35r /dev/stdin' "$TUN_FILE" || \
+            sed -i '' '35a\
+          use std::mem::size_of;' "$TUN_FILE"
+            echo "✅ 已修复"
+          else
+            echo "⚠️ 未找到 tun-rs 文件，可能还未下载"
+          fi
+          cd ..
+
+      - name: 构建 macOS 应用
+        if: matrix.NAME == 'vntApp-macOS'
+        run: |
+          # 构建 Flutter macOS 应用
+          flutter pub get
+          flutter build macos --release -v
+
+          APP_PATH="build/macos/Build/Products/Release/vnt_app.app"
+          DMG_PATH="vnt_APP.dmg"
+
+          echo "构建完成，产物位于：$APP_PATH"
+
+          # 确保可执行文件有正确的权限
+          echo "设置可执行权限..."
+          chmod +x "$APP_PATH/Contents/MacOS/vnt_app"
+
+          # 代码签名（用 ad-hoc 签名）
+          echo "对应用进行代码签名..."
+          codesign --force --deep --timestamp=none --preserve-metadata=identifier,entitlements,flags --sign - "$APP_PATH"
+
+          # 验证签名
+          echo "验证代码签名..."
+          codesign --verify --verbose "$APP_PATH"
+
+          # 验证 .app 结构
+          echo "验证应用结构..."
+          ls -la "$APP_PATH/Contents/MacOS/"
+
+          # 检查 entitlements 是否正确（仅显示，不影响构建）
+          if [ -f "$APP_PATH/Contents/Info.plist" ]; then
+            echo "Info.plist 存在"
+            plutil -p "$APP_PATH/Contents/Info.plist" | grep -E "(NSLocalNetworkUsageDescription|NSSystemExtensionUsageDescription)" || echo "警告：权限说明可能缺失"
+          fi
+
+          # 使用专用脚本创建带背景的 DMG
+          echo "创建 DMG 安装包..."
+          chmod +x macos/create_dmg.sh
+          bash macos/create_dmg.sh "$APP_PATH" "$DMG_PATH"
+
+          echo "DMG 创建完成：$DMG_PATH"
+          ls -lh "$DMG_PATH"
+
+      - name: 构建 IPA
+        if: matrix.NAME == 'vntApp-IOS'
+        run: |
+          set -e  # 任何一步出错就停止
+          
+          rustup target add aarch64-apple-ios
+          
+          echo "0. 清理 Xcode 缓存"
+          rm -rf ~/Library/Developer/Xcode/DerivedData
+          rm -rf ios/Pods
+          rm -rf ios/Podfile.lock
+          rm -rf ios/.symlinks
+          rm -rf ios/Flutter/Flutter.framework
+          rm -rf ios/Flutter/App.framework
+          rm -rf build/ios
+          flutter clean
+
+          echo "1. 获取 Flutter 依赖"
+          # cd rust
+          # echo "1.2 测试ios库是否正常"
+          # cargo check --target aarch64-apple-ios
+          # cd ../
+
+          flutter pub get
+
+          echo "2. 安装 iOS Pods 依赖"
+          cd ios
+          pod install --repo-update
+          cd ..
+
+          echo "3. 开始构建"
+          flutter build ios --release --no-codesign -v
+          
+          echo "4. 创建 Payload 目录（IPA 必须结构）"
+          cd build/ios/iphoneos
+          rm -rf Payload
+          mkdir Payload
+          mv Runner.app Payload/
+          
+          echo "5. 打包成 IPA"
+          zip -r vntAPP.ipa Payload
+          
+          echo "完成：IPA 已生成"
+
+      - name: 设置 QEMU（Linux arm64 跨架构）
+        if: startsWith(matrix.NAME, 'vntApp-linux')
+        uses: docker/setup-qemu-action@master
+
+      - name: 构建 Linux AppImage（Docker Ubuntu 18.04）
+        if: startsWith(matrix.NAME, 'vntApp-linux')
+        run: |
+          chmod +x linux/build_linux_appimage.sh
+          docker run --rm --platform ${{ matrix.DOCKER_PLATFORM }} \
+            -v "${{ github.workspace }}:/workspace" \
+            -v "${HOME}/.pub-cache:/root/.pub-cache" \
+            -e PUB_CACHE=/root/.pub-cache \
+            -e APPIMAGETOOL_ARCH=${{ matrix.APPIMAGE_ARCH }} \
+            -w /workspace \
+            ${{ matrix.DOCKER_IMAGE }} \
+            bash /workspace/linux/build_linux_appimage.sh \
+              ${{ matrix.BUNDLE_DIR }} ${{ matrix.APPIMAGE_ARCH }}
+
+      - name: Archive artifact
+        uses: actions/upload-artifact@main
+        with:
+          name: ${{ matrix.NAME }}
+          path: |
+            ${{ matrix.NAME == 'vntApp-android' && 'vntApp-android.apk' || '' }}
+            ${{ matrix.NAME == 'vntApp-windows' && 'vntApp-windows.zip' || '' }}
+            ${{ matrix.NAME == 'vntApp-macOS' && 'vnt_APP.dmg' || '' }}
+            ${{ matrix.NAME == 'vntApp-IOS' && 'build/ios/iphoneos/vntAPP.ipa' || '' }}
+            ${{ matrix.NAME == 'vntApp-linux-x86_64' && 'vntApp-linux-x86_64.AppImage' || '' }}
+            ${{ matrix.NAME == 'vntApp-linux-arm64' && 'vntApp-linux-aarch64.AppImage' || '' }}
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./artifacts
+      - name: List
+        run: find ./artifacts
+
+
+
+
+
+
