@@ -1,7 +1,0 @@
-{
-  "@@locale": "en",
-  "appTitle": "VNT App",
-  "@appTitle": {
-    "description": "The application title"
-  }
-}
