@@ -1,0 +1,14 @@
+[Unit]
+Description=VNT Server 2.0
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/root/vnts2
+ExecStart=/root/vnts2/vnts2 -c /root/vnts2/config.toml
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

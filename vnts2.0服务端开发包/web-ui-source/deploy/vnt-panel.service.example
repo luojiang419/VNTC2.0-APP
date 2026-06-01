@@ -1,0 +1,24 @@
+[Unit]
+Description=VNTS 2.0 Control Panel
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/vnt-panel
+Environment=VNT_PANEL_HOST=0.0.0.0
+Environment=VNT_PANEL_PORT=2223
+Environment=VNT_PANEL_USERNAME=luojiang
+Environment=VNT_PANEL_PASSWORD=luojiang
+Environment=VNT_PANEL_SECRET=replace-with-a-long-random-string
+Environment=VNT_PANEL_AUTH_FILE=/opt/vnt-panel/data/vnts-auth.json
+Environment=VNT_SERVICE_NAME=vnts2.service
+Environment=VNT_CONFIG_PATH=/root/vnts2/config.toml
+Environment=VNT_CONFIG_BACKUP_DIR=/root/vnts2/.backups
+ExecStart=/usr/bin/python3 /opt/vnt-panel/server.py
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target
