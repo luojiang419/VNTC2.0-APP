@@ -23,6 +23,8 @@ class RemoteAssistHealthService {
     if (!Platform.isWindows) {
       return const RemoteAssistHealthStatus(
         supported: false,
+        platform: RemoteAssistPlatform.unsupported,
+        supportedRoles: <String>[],
         vntConnected: false,
         runtimeAvailable: false,
         serviceInstalled: false,
@@ -40,6 +42,13 @@ class RemoteAssistHealthService {
         networkCidrs: <String>[],
         executablePath: '',
         runtimeVersion: '',
+        controllerAvailable: false,
+        controlledServiceRunning: false,
+        notificationPermissionGranted: false,
+        screenCapturePermissionGranted: false,
+        accessibilityPermissionGranted: false,
+        overlayPermissionGranted: false,
+        batteryOptimizationIgnored: false,
         issues: <String>['当前平台暂不支持远程协助'],
       );
     }
@@ -120,6 +129,11 @@ class RemoteAssistHealthService {
 
     return RemoteAssistHealthStatus(
       supported: true,
+      platform: RemoteAssistPlatform.windows,
+      supportedRoles: const <String>[
+        RemoteAssistConstants.capabilityController,
+        RemoteAssistConstants.capabilityControlled,
+      ],
       vntConnected: vntConnected,
       runtimeAvailable: executablePath.isNotEmpty,
       serviceInstalled:
@@ -138,6 +152,13 @@ class RemoteAssistHealthService {
       networkCidrs: networkCidrs,
       executablePath: executablePath,
       runtimeVersion: runtimeVersion,
+      controllerAvailable: executablePath.isNotEmpty,
+      controlledServiceRunning: runtimeReady,
+      notificationPermissionGranted: false,
+      screenCapturePermissionGranted: false,
+      accessibilityPermissionGranted: false,
+      overlayPermissionGranted: false,
+      batteryOptimizationIgnored: false,
       issues: issues,
     );
   }

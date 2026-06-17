@@ -148,6 +148,8 @@ class RemoteAssistPresenceService {
             virtualIp: context.virtualIp,
             networkName: context.networkName,
             version: context.version,
+            platform: context.platform,
+            supportedRoles: context.supportedRoles,
             capabilities: context.capabilities,
             sentAtEpochMs: DateTime.now().millisecondsSinceEpoch,
           ).toJson(),

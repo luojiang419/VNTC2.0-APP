@@ -112,6 +112,20 @@ class CargoKitPlugin implements Plugin<Project> {
         "android-x64",
     ]
 
+    private boolean parseTruthy(def value) {
+        if (value == null) {
+            return false
+        }
+        def normalized = value.toString().trim().toLowerCase()
+        return normalized in ["1", "true", "yes", "on"]
+    }
+
+    private boolean shouldUsePrebuiltAndroidRust(Project flutterAppProject) {
+        def propertyValue = flutterAppProject.rootProject.findProperty("vnt.usePrebuiltRustAndroid")
+        def envValue = System.getenv("VNT_USE_PREBUILT_RUST_ANDROID")
+        return parseTruthy(propertyValue) || parseTruthy(envValue)
+    }
+
     private Project findFlutterAppProject(Project rootProject) {
         def appProject = rootProject.findProject(":app")
         if (appProject != null) {
@@ -201,6 +215,11 @@ class CargoKitPlugin implements Plugin<Project> {
                 jniLibs.srcDir(new File(cargoOutputDir))
 
                 project.afterEvaluate {
+                    if (shouldUsePrebuiltAndroidRust(flutterAppProject)) {
+                        println("CargoKit: 检测到预编译 Android Rust 库开关，跳过 ${buildType} 变体的 Rust 重编。")
+                        return
+                    }
+
                     def taskName = "cargokitCargoBuild${project.cargokit.libname.capitalize()}${buildType.capitalize()}"
                     if (project.tasks.findByName(taskName)) {
                         return

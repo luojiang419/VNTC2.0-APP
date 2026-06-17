@@ -22,8 +22,23 @@ class RemoteAssistConstants {
       'scripts/uninstall_vntcrustdesk.ps1';
 
   static const String capabilityWindows = 'remote_assist_windows';
+  static const String capabilityAndroid = 'remote_assist_android';
   static const String capabilityController = 'remote_assist_controller';
   static const String capabilityControlled = 'remote_assist_controlled';
+
+  static const String androidPermissionNotification = 'notification';
+  static const String androidPermissionScreenCapture = 'screen_capture';
+  static const String androidPermissionAccessibility = 'accessibility';
+  static const String androidPermissionOverlay = 'overlay';
+  static const String androidPermissionBatteryOptimization =
+      'battery_optimization';
+
+  static const String androidSettingsNotifications = 'notifications';
+  static const String androidSettingsScreenCapture = 'screen_capture';
+  static const String androidSettingsAccessibility = 'accessibility';
+  static const String androidSettingsOverlay = 'overlay';
+  static const String androidSettingsBatteryOptimization =
+      'battery_optimization';
 
   static const String presencePacketType = 'vntc_remote_assist_presence';
 

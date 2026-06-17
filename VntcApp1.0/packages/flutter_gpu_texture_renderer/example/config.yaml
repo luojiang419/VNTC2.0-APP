@@ -1,0 +1,7 @@
+name: NativeLibrary
+output: 'lib/generated_bindings.dart'
+headers:
+  entry-points:
+    - 'ffi.h'
+
+# dart run ffigen --config config.yaml

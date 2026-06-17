@@ -6,20 +6,20 @@ import 'package:flutter/foundation.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 
 import 'remote_assist_constants.dart';
-import 'remote_assist_health_service.dart';
-import 'remote_assist_launcher.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
+import 'remote_assist_platform_adapter.dart';
 import 'remote_assist_presence_service.dart';
 import 'remote_assist_utils.dart';
+import 'remote_assist_windows_adapter.dart';
+import 'remote_assist_unsupported_adapter.dart';
 
 class RemoteAssistManager extends ChangeNotifier {
   RemoteAssistManager._();
 
   static final RemoteAssistManager instance = RemoteAssistManager._();
 
-  final RemoteAssistLauncher _launcher = RemoteAssistLauncher.instance;
-  final RemoteAssistHealthService _healthService = RemoteAssistHealthService();
+  final RemoteAssistPlatformAdapter _adapter = _createAdapter();
   final RemoteAssistPresenceService _presenceService =
       RemoteAssistPresenceService();
 
@@ -27,8 +27,6 @@ class RemoteAssistManager extends ChangeNotifier {
   bool _started = false;
   bool _stopping = false;
   bool _refreshing = false;
-  bool _firewallSyncSucceeded = false;
-  String _lastFirewallStateKey = '';
 
   RemoteAssistHealthStatus _health = RemoteAssistHealthStatus.initial();
   DateTime? _lastRefreshAt;
@@ -43,6 +41,13 @@ class RemoteAssistManager extends ChangeNotifier {
   RemoteAssistHealthStatus get health => _health;
   List<RemoteAssistPeer> get peers => UnmodifiableListView(_peers);
 
+  static RemoteAssistPlatformAdapter _createAdapter() {
+    if (Platform.isWindows) {
+      return RemoteAssistWindowsAdapter();
+    }
+    return const RemoteAssistUnsupportedAdapter();
+  }
+
   Future<void> start() async {
     if (_started) {
       return;
@@ -50,11 +55,7 @@ class RemoteAssistManager extends ChangeNotifier {
     _started = true;
     _stopping = false;
 
-    if (!Platform.isWindows) {
-      notifyListeners();
-      return;
-    }
-
+    await _adapter.start();
     await refresh();
     _refreshTimer = Timer.periodic(
       RemoteAssistConstants.refreshInterval,
@@ -68,7 +69,7 @@ class RemoteAssistManager extends ChangeNotifier {
     _refreshTimer?.cancel();
     _refreshTimer = null;
     await _presenceService.stop();
-    await _healthService.shutdownBackgroundSilently();
+    await _adapter.stop();
     _basePeers = const [];
     _peers = const [];
     _localNodes = const [];
@@ -159,26 +160,22 @@ class RemoteAssistManager extends ChangeNotifier {
         return;
       }
 
-      await _healthService.warmUpBackgroundSilently();
-      if (!_started || _stopping) {
-        return;
-      }
-      await _syncPresence();
-      if (!_started || _stopping) {
-        return;
-      }
-      await _syncFirewallIfNeeded();
+      await _adapter.refreshState();
       if (!_started || _stopping) {
         return;
       }
 
-      _health = await _healthService.collectStatus(
+      await _syncPresence();
+      if (!_started || _stopping) {
+        return;
+      }
+
+      _health = await _adapter.collectStatus(
         vntConnected: _localNodes.isNotEmpty,
         localVirtualIps:
             _localNodes.map((node) => node.virtualIp).toList(growable: false),
         networkCidrs: _networkCidrs,
         presenceRunning: _presenceService.isRunning,
-        firewallSyncSucceeded: _firewallSyncSucceeded,
       );
       _peers = _mergePeers();
       _lastRefreshAt = DateTime.now();
@@ -198,21 +195,38 @@ class RemoteAssistManager extends ChangeNotifier {
       throw ArgumentError('请输入有效的 IPv4 地址');
     }
 
-    await _healthService.ensureBackgroundReady();
-    await _launcher.openRemoteDesktop(
-      targetAddress: '$trimmedIp:${RemoteAssistConstants.directAccessPort}',
+    await _adapter.launchController(
+      trimmedIp,
       password: password,
     );
   }
 
   Future<void> configureAccessPassword(String password) async {
-    await _healthService.ensureBackgroundReady();
-    await _launcher.configureAccessPassword(password);
+    await _adapter.configureAccessPassword(password);
     await refresh();
   }
 
   Future<void> repair() async {
-    await _healthService.repair(remoteCidrs: _networkCidrs);
+    await _adapter.repair(remoteCidrs: _networkCidrs);
+    await refresh();
+  }
+
+  Future<void> requestPermission(String permission) async {
+    await _adapter.requestPermission(permission);
+    await refresh();
+  }
+
+  Future<void> openSystemSettings(String section) async {
+    await _adapter.openSystemSettings(section);
+  }
+
+  Future<void> startControlledService() async {
+    await _adapter.startControlledService();
+    await refresh();
+  }
+
+  Future<void> stopControlledService() async {
+    await _adapter.stopControlledService();
     await refresh();
   }
 
@@ -223,7 +237,7 @@ class RemoteAssistManager extends ChangeNotifier {
       return;
     }
 
-    final version = await _launcher.resolveVersion();
+    final version = await _adapter.resolveVersion();
     final contexts = _localNodes
         .map(
           (node) => RemoteAssistPresenceContext(
@@ -231,11 +245,9 @@ class RemoteAssistManager extends ChangeNotifier {
             virtualIp: node.virtualIp,
             networkName: node.networkName,
             version: version,
-            capabilities: const [
-              RemoteAssistConstants.capabilityWindows,
-              RemoteAssistConstants.capabilityController,
-              RemoteAssistConstants.capabilityControlled,
-            ],
+            platform: _adapter.platform,
+            supportedRoles: _adapter.supportedRoles,
+            capabilities: _adapter.presenceCapabilities,
             peerVirtualIps: node.peerVirtualIps,
           ),
         )
@@ -248,18 +260,6 @@ class RemoteAssistManager extends ChangeNotifier {
         _peers = _mergePeers();
         notifyListeners();
       },
-    );
-  }
-
-  Future<void> _syncFirewallIfNeeded() async {
-    final nextKey = '${_localNodes.isNotEmpty}|${_networkCidrs.join(",")}';
-    if (nextKey == _lastFirewallStateKey) {
-      return;
-    }
-    _lastFirewallStateKey = nextKey;
-    _firewallSyncSucceeded = await _healthService.syncFirewallRules(
-      enabled: _localNodes.isNotEmpty,
-      remoteCidrs: _networkCidrs,
     );
   }
 
@@ -277,6 +277,8 @@ class RemoteAssistManager extends ChangeNotifier {
         networkName: peer.networkName,
         status: peer.status,
         isOnline: peer.isOnline,
+        platform: presence?.platform ?? RemoteAssistPlatform.unsupported,
+        supportedRoles: presence?.supportedRoles ?? const <String>[],
         capabilities: presence?.capabilities ?? const <String>[],
         version: presence?.version ?? '',
         hasPresence: presence != null,

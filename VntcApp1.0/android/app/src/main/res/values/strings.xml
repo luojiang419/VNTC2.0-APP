@@ -3,4 +3,5 @@
     <string name="app_name">VNT</string>
     <string name="widget_small_description">VNT 快捷开关</string>
     <string name="widget_large_description">VNT 状态面板</string>
+    <string name="remote_assist_accessibility_description">允许通过 VNT 远程协助控制本机触摸和输入操作</string>
 </resources>

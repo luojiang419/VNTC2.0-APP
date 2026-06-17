@@ -31,6 +31,7 @@ android {
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
+        coreLibraryDesugaringEnabled true
     }
 
     kotlinOptions {
@@ -60,8 +61,14 @@ android {
     }
     sourceSets {
         main {
-            // Rust Android so 统一由 rust_builder/CargoKit 输出提供，避免继续打包仓库内历史预置 so。
-            jniLibs.srcDirs = []
+            // 主业务 Rust so 继续由 rust_builder/CargoKit 的 buildType sourceSet 注入，
+            // 这里额外挂入内置远控控制端 so。
+            jniLibs.srcDirs = ['src/main/rustdeskJniLibs']
+        }
+    }
+    packagingOptions {
+        jniLibs {
+            pickFirsts += ['**/libc++_shared.so']
         }
     }
 }
@@ -69,6 +76,7 @@ android {
 dependencies {
     // 添加AndroidX核心库，确保FileProvider正常工作
     implementation 'androidx.core:core:1.12.0'
+    coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
 }
 
 flutter {

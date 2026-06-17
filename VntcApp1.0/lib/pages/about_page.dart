@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
@@ -13,14 +14,9 @@ class AboutPage extends StatefulWidget {
 }
 
 class _AboutPageState extends State<AboutPage> {
-  // 硬编码版本号
-  final String _version = '1.2.17';
-  final String _buildNumber = '1';
-
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = Theme.of(context).primaryColor;
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 600;
 
@@ -184,7 +180,7 @@ class _AboutPageState extends State<AboutPage> {
                 borderRadius: BorderRadius.circular(context.cardRadius),
               ),
               child: Text(
-                'v$_version',
+                AppVersion.displayVersion,
                 style: TextStyle(
                   fontSize: context.fontBody,
                   fontWeight: FontWeight.w500,

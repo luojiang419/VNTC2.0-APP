@@ -8,6 +8,7 @@ import 'package:screen_retriever/screen_retriever.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
+import 'package:vnt_app/app_navigation.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/src/rust/frb_generated.dart';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
@@ -24,6 +25,7 @@ import 'package:vnt_app/utils/system_tray_icon_path.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/config_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
+import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 
 final SystemTray systemTray = SystemTray();
@@ -354,8 +356,9 @@ class _VntAppState extends State<VntApp> {
       customThemeColor: _customThemeColor,
       setCustomThemeColor: _setCustomThemeColor,
       child: MaterialApp(
+        navigatorKey: appNavigatorKey,
         debugShowCheckedModeBanner: false,
-        title: AppVersion.productName,
+        title: AppVersion.windowTitle,
         // 添加本地化支持
         localizationsDelegates: const [
           GlobalMaterialLocalizations.delegate,
@@ -410,7 +413,12 @@ class _MainAppState extends State<MainApp> with WindowListener {
       _systemTrayInitialization = Future<bool>.value(false);
     }
 
-    unawaited(RemoteAssistManager.instance.start());
+    if (ChatManager.instance.supported) {
+      unawaited(ChatManager.instance.start());
+    }
+    if (!Platform.isAndroid) {
+      unawaited(RemoteAssistManager.instance.start());
+    }
 
     // 设置Android启动回调
     // 当从磁贴点击启动时，自动连接指定配置或默认配置
@@ -518,6 +526,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   Future<void> _prepareForAppExit() async {
+    await ChatManager.instance.stop();
     await RemoteAssistManager.instance.stop();
     await vntManager.removeAll();
   }

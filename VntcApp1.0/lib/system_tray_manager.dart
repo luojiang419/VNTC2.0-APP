@@ -5,6 +5,7 @@ import 'package:window_manager/window_manager.dart';
 import 'package:vnt_app/data_persistence.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/network_config.dart';
+import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
@@ -137,6 +138,7 @@ class SystemTrayManager {
     menuItems.add(MenuItemLabel(
       label: '退出',
       onClicked: (menuItem) async {
+        await ChatManager.instance.stop();
         await RemoteAssistManager.instance.stop();
         if (vntManager.hasConnection()) {
           await vntManager.removeAll();

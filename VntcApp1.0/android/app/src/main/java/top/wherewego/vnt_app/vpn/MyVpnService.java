@@ -77,6 +77,10 @@ public class MyVpnService extends VpnService {
         }
     }
 
+    public static boolean protectSocketFd(int fd) {
+        return vpnService != null && fd > 0 && vpnService.protect(fd);
+    }
+
     private int startVpn(DeviceConfig config) throws PackageManager.NameNotFoundException {
         // 先关闭可能存在的旧 VPN 接口
         if (vpnInterface != null) {
@@ -98,8 +102,6 @@ public class MyVpnService extends VpnService {
                 .setBlocking(false)
                 .setMtu(config.mtu)
                 .addAddress(ip, prefixLength)
-                // 自己的流量不走网卡
-                .addDisallowedApplication("top.wherewego.vnt_app")
                 .addRoute(ipRoute, prefixLength);
         if (config.externalRoute != null) {
             for (DeviceConfig.Route routeItem : config.externalRoute) {

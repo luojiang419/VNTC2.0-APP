@@ -13,6 +13,70 @@ subprojects {
     project.evaluationDependsOn(":app")
 }
 
+def applyMissingNamespace = { Project subproject ->
+    if (!(subproject.plugins.hasPlugin("com.android.application")
+            || subproject.plugins.hasPlugin("com.android.library"))) {
+        return
+    }
+
+    def androidExt = subproject.extensions.findByName("android")
+    if (androidExt == null || !androidExt.hasProperty("namespace")) {
+        return
+    }
+
+    def currentNamespace = androidExt.namespace
+    if (currentNamespace != null && currentNamespace.toString().trim()) {
+        return
+    }
+
+    def manifestFile = androidExt.sourceSets?.main?.manifest?.srcFile
+    if (manifestFile == null || !manifestFile.exists()) {
+        return
+    }
+
+    def manifestText = manifestFile.getText("UTF-8")
+    def manifestMatcher = manifestText =~ /package="([^"]+)"/
+    if (manifestMatcher.find()) {
+        androidExt.namespace = manifestMatcher.group(1)
+    }
+}
+
+def applyLegacyJvmTarget = { Project subproject ->
+    if (subproject.name == "app") {
+        return
+    }
+    if (!(subproject.plugins.hasPlugin("com.android.application")
+            || subproject.plugins.hasPlugin("com.android.library"))) {
+        return
+    }
+
+    def androidExt = subproject.extensions.findByName("android")
+    if (androidExt == null) {
+        return
+    }
+
+    if (androidExt.hasProperty("compileOptions")) {
+        androidExt.compileOptions.sourceCompatibility = JavaVersion.VERSION_1_8
+        androidExt.compileOptions.targetCompatibility = JavaVersion.VERSION_1_8
+    }
+
+    if (androidExt.hasProperty("kotlinOptions")) {
+        androidExt.kotlinOptions.jvmTarget = "1.8"
+    }
+}
+
+subprojects { subproject ->
+    if (subproject.state.executed) {
+        applyMissingNamespace(subproject)
+        applyLegacyJvmTarget(subproject)
+    } else {
+        subproject.afterEvaluate {
+            applyMissingNamespace(subproject)
+            applyLegacyJvmTarget(subproject)
+        }
+    }
+}
+
 tasks.register("clean", Delete) {
     delete rootProject.buildDir
 }
