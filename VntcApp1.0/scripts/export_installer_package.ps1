@@ -231,10 +231,11 @@ $iconPathForIss = Convert-ToInnoPath -Path $iconDest
 $outputDirForIss = Convert-ToInnoPath -Path $installerRoot
 
 $issContent = @"
-#define MyAppBaseName "VNT App"
-#define MyAppName "VNT App $currentBuildVersion"
+#define MyAppInstallDirBaseName "VNT App"
+#define MyAppName "VNTC APP2.0"
+#define MyAppVersionedName "VNTC APP2.0 v$currentBuildVersion"
 #define MyAppVersion "$currentBuildVersion"
-#define MyAppPublisher "VNT App"
+#define MyAppPublisher "VNTC APP2.0"
 #define MyAppExeName "vnt_app.exe"
 #define MyAppSourceDir "$sourceDirForIss"
 #define MyAppIcon "$iconPathForIss"
@@ -245,8 +246,8 @@ AppName={#MyAppName}
 AppVersion={#MyAppVersion}
 AppVerName={#MyAppName}
 AppPublisher={#MyAppPublisher}
-DefaultDirName={autopf}\{#MyAppBaseName}
-DefaultGroupName={#MyAppBaseName}
+DefaultDirName={autopf}\{#MyAppInstallDirBaseName}
+DefaultGroupName={#MyAppName}
 AllowNoIcons=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
@@ -256,6 +257,7 @@ SolidCompression=yes
 WizardStyle=modern
 SetupIconFile={#MyAppIcon}
 UninstallDisplayIcon={app}\{#MyAppExeName}
+UninstallDisplayName={#MyAppVersionedName}
 OutputDir=$outputDirForIss
 OutputBaseFilename=VNT_App_${currentBuildVersion}_Windows_Setup
 DisableProgramGroupPage=no

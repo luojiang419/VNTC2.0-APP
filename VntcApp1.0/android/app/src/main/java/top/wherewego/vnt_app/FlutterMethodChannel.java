@@ -18,6 +18,7 @@ import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodChannel;
 import top.wherewego.vnt_app.vpn.DeviceConfig;
 import top.wherewego.vnt_app.vpn.IpUtils;
+import top.wherewego.vnt_app.vpn.MyVpnService;
 
 public class FlutterMethodChannel {
     private static final String CHANNEL = "top.wherewego.vnt/vpn";
@@ -70,6 +71,10 @@ public class FlutterMethodChannel {
                         case "stopVpn":
                             callback.stopVpn();
                             result.success(null);
+                            break;
+                        case "protectVpnSocketFd":
+                            Integer fd = call.argument("fd");
+                            result.success(fd != null && MyVpnService.protectSocketFd(fd));
                             break;
                         case "moveTaskToBack":
                             callback.moveToBack();

@@ -11,6 +11,7 @@ import 'package:vnt_app/pages/config_list_page.dart';
 import 'package:vnt_app/pages/settings_page.dart';
 import 'package:vnt_app/pages/about_page.dart';
 import 'package:vnt_app/pages/remote_assist_page.dart';
+import 'package:vnt_app/pages/chat_page.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'dart:isolate';
@@ -38,29 +39,54 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   VoidCallback? _refreshConfigList;
   VoidCallback? _refreshSettings;
 
-  // 导航项配置
-  static const List<_NavItem> _navItems = [
-    _NavItem(
-        icon: Icons.dashboard_outlined,
-        activeIcon: Icons.dashboard,
-        label: '仪表盘',
-        mobileLabel: '总览'),
-    _NavItem(
-        icon: Icons.link_outlined,
-        activeIcon: Icons.link,
-        label: '链接状态',
-        mobileLabel: '链接'),
-    _NavItem(
-        icon: Icons.folder_outlined, activeIcon: Icons.folder, label: '配置'),
-    _NavItem(
-        icon: Icons.settings_outlined, activeIcon: Icons.settings, label: '设置'),
-    _NavItem(
-        icon: Icons.support_agent_outlined,
-        activeIcon: Icons.support_agent,
-        label: '远程协助',
-        mobileLabel: '协助'),
-    _NavItem(icon: Icons.info_outline, activeIcon: Icons.info, label: '关于'),
-  ];
+  bool get _showChatPage => !Platform.isAndroid;
+  bool get _showRemoteAssistPage => !Platform.isAndroid;
+
+  List<_NavItem> get _navItems => [
+        const _NavItem(
+            icon: Icons.dashboard_outlined,
+            activeIcon: Icons.dashboard,
+            label: '仪表盘',
+            mobileLabel: '总览'),
+        const _NavItem(
+            icon: Icons.link_outlined,
+            activeIcon: Icons.link,
+            label: '链接状态',
+            mobileLabel: '链接'),
+        if (_showChatPage)
+          const _NavItem(
+              icon: Icons.forum_outlined,
+              activeIcon: Icons.forum,
+              label: '聊天室',
+              mobileLabel: '聊天'),
+        if (_showRemoteAssistPage)
+          const _NavItem(
+              icon: Icons.support_agent_outlined,
+              activeIcon: Icons.support_agent,
+              label: '远程协助',
+              mobileLabel: '协助'),
+        const _NavItem(
+            icon: Icons.folder_outlined, activeIcon: Icons.folder, label: '配置'),
+        const _NavItem(
+            icon: Icons.settings_outlined,
+            activeIcon: Icons.settings,
+            label: '设置'),
+        const _NavItem(
+            icon: Icons.info_outline, activeIcon: Icons.info, label: '关于'),
+      ];
+
+  int get _configIndex {
+    var index = 2;
+    if (_showChatPage) {
+      index += 1;
+    }
+    if (_showRemoteAssistPage) {
+      index += 1;
+    }
+    return index;
+  }
+
+  int get _settingsIndex => _configIndex + 1;
 
   @override
   void initState() {
@@ -841,8 +867,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       children: [
         // 0: 仪表盘
         DashboardPage(
-          onNavigateToConfig: () => setState(() => _selectedIndex = 2),
-          onNavigateToSettings: () => setState(() => _selectedIndex = 3),
+          onNavigateToConfig: () => setState(() => _selectedIndex = _configIndex),
+          onNavigateToSettings: () =>
+              setState(() => _selectedIndex = _settingsIndex),
           onDisconnect: () async {
             // 获取所有连接的key
             final keys = vntManager.map.keys.toList();
@@ -886,7 +913,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             }
             // 没有默认配置，跳转到配置页面
             debugPrint('No default config found, navigating to config page');
-            setState(() => _selectedIndex = 2);
+            setState(() => _selectedIndex = _configIndex);
           },
         ),
         // 1: 链接状态
@@ -898,7 +925,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                 }
               : null,
         ),
-        // 2: 配置
+        if (_showChatPage) const ChatPage(),
+        if (_showRemoteAssistPage) const RemoteAssistPage(),
+        // 配置
         ConfigListPage(
           onConfigSelected: (config) {
             setState(() {
@@ -914,7 +943,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             _refreshSettings?.call();
           },
         ),
-        // 3: 设置
+        // 5: 设置
         SettingsPage(
           themeMode: themeProvider?.themeMode ?? ThemeMode.system,
           onThemeModeChanged: (mode) {
@@ -928,9 +957,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             _refreshSettings = callback;
           },
         ),
-        // 4: 远程协助
-        const RemoteAssistPage(),
-        // 5: 关于
+        // 6: 关于
         const AboutPage(),
       ],
     );

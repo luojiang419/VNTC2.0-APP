@@ -3,7 +3,7 @@ class AppVersion {
 
   static const String baseTitle = String.fromEnvironment(
     'APP_BASE_TITLE',
-    defaultValue: 'VNT App',
+    defaultValue: 'VNTC APP2.0',
   );
   static const String buildVersion = String.fromEnvironment(
     'APP_BUILD_VERSION',
@@ -27,11 +27,13 @@ class AppVersion {
       : explicitDisplayVersion;
 
   static String get productName => explicitProductName.isEmpty
-      ? '$baseTitle $buildVersion'
+      ? baseTitle
       : explicitProductName;
 
   static String get windowTitle =>
-      explicitWindowTitle.isEmpty ? productName : explicitWindowTitle;
+      explicitWindowTitle.isEmpty
+          ? '$productName $displayVersion'
+          : explicitWindowTitle;
 
   static String get trayTooltip => '$windowTitle - Virtual Network Tool';
 }

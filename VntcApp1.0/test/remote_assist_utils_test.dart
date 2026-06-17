@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
 import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
 
@@ -35,7 +36,14 @@ void main() {
       virtualIp: '10.0.0.2',
       networkName: '默认网络',
       version: '1.0.0',
-      capabilities: ['remote_assist_windows'],
+      platform: RemoteAssistPlatform.windows,
+      supportedRoles: <String>[
+        RemoteAssistConstants.capabilityController,
+      ],
+      capabilities: <String>[
+        'remote_assist_windows',
+        RemoteAssistConstants.capabilityController,
+      ],
       sentAtEpochMs: 123,
     );
 
@@ -47,7 +55,36 @@ void main() {
     expect(decoded.virtualIp, announcement.virtualIp);
     expect(decoded.networkName, announcement.networkName);
     expect(decoded.version, announcement.version);
+    expect(decoded.platform, announcement.platform);
+    expect(decoded.supportedRoles, announcement.supportedRoles);
     expect(decoded.capabilities, announcement.capabilities);
     expect(decoded.sentAtEpochMs, announcement.sentAtEpochMs);
+  });
+
+  test('presence announcement derives supported roles from legacy capability payload', () {
+    final decoded = RemoteAssistPresenceAnnouncement.fromJson(
+      const <String, dynamic>{
+        'displayName': 'Android-1',
+        'virtualIp': '10.0.0.8',
+        'networkName': '默认网络',
+        'version': '1.0.0',
+        'platform': 'android',
+        'capabilities': <String>[
+          RemoteAssistConstants.capabilityAndroid,
+          RemoteAssistConstants.capabilityController,
+          RemoteAssistConstants.capabilityControlled,
+        ],
+        'sentAtEpochMs': 321,
+      },
+    );
+
+    expect(decoded.platform, RemoteAssistPlatform.android);
+    expect(
+      decoded.supportedRoles,
+      const <String>[
+        RemoteAssistConstants.capabilityController,
+        RemoteAssistConstants.capabilityControlled,
+      ],
+    );
   });
 }

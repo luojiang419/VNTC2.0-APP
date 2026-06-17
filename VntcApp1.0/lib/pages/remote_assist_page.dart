@@ -1,5 +1,7 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
 import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
@@ -52,9 +54,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       }
       showTopToast(
         context,
-        accessPassword.isEmpty
-            ? '已拉起远程协助窗口，等待对方确认'
-            : '已拉起远程协助窗口，正在尝试使用访问密码连接',
+        accessPassword.isEmpty ? '已拉起远程协助窗口，等待对方确认' : '已拉起远程协助窗口，正在尝试使用访问密码连接',
         isSuccess: true,
       );
     } catch (error) {
@@ -127,9 +127,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       }
       showTopToast(
         context,
-        password.isEmpty
-            ? '已清空远程密码，后续需要本机手动接受协助'
-            : '已设置远程密码，后续可通过密码无人值守协助',
+        password.isEmpty ? '已清空远程密码，后续需要本机手动接受协助' : '已设置远程密码，后续可通过密码无人值守协助',
         isSuccess: true,
       );
     } catch (error) {
@@ -139,6 +137,34 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       showTopToast(context, '远程密码设置失败: $error', isSuccess: false);
     } finally {
       controller.dispose();
+    }
+  }
+
+  Future<void> _toggleControlledService() async {
+    final shouldStop = _manager.health.controlledServiceRunning;
+    try {
+      if (shouldStop) {
+        await _manager.stopControlledService();
+      } else {
+        await _manager.startControlledService();
+      }
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        shouldStop ? '已停止 Android 受控服务' : '已启动 Android 受控服务',
+        isSuccess: true,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        shouldStop ? '停止受控服务失败: $error' : '启动受控服务失败: $error',
+        isSuccess: false,
+      );
     }
   }
 
@@ -157,6 +183,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
             final peers = _manager.peers
                 .where((peer) => peer.isOnline)
                 .toList(growable: false);
+            final useAndroidLayout = health.isAndroid ||
+                defaultTargetPlatform == TargetPlatform.android;
             return RefreshIndicator(
               onRefresh: () => _manager.refresh(),
               child: ListView(
@@ -164,9 +192,19 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 children: [
                   _buildHeader(isDark),
                   SizedBox(height: context.spacingLarge),
-                  _buildConnectCard(isDark, health),
+                  if (useAndroidLayout) ...[
+                    _buildAndroidControllerCard(isDark, health, peers),
+                    SizedBox(height: context.spacingLarge),
+                    _buildAndroidControlledCard(isDark, health),
+                    SizedBox(height: context.spacingLarge),
+                    _buildAndroidPermissionCard(isDark, health),
+                  ] else ...[
+                    _buildConnectCard(isDark, health),
+                    SizedBox(height: context.spacingLarge),
+                    _buildPeerList(isDark, peers),
+                  ],
                   SizedBox(height: context.spacingLarge),
-                  _buildPeerList(isDark, peers),
+                  if (useAndroidLayout) _buildPeerList(isDark, peers),
                 ],
               ),
             );
@@ -211,7 +249,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 ),
               ),
               Text(
-                '基于 VNT 虚拟 IP 直连 vntcrustdesk，支持访问密码无人值守或手动接受',
+                '基于 VNT 虚拟 IP 管理远程协助连接与受控服务状态',
                 style: TextStyle(
                   fontSize: context.fontBody,
                   color: isDark
@@ -236,6 +274,323 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildAndroidControllerCard(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+    List<RemoteAssistPeer> peers,
+  ) {
+    final primaryColor = Theme.of(context).primaryColor;
+    return Container(
+      padding: EdgeInsets.all(context.cardPadding),
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '控制别人',
+            style: TextStyle(
+              fontSize: context.fontLarge,
+              fontWeight: FontWeight.w700,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+          SizedBox(height: context.spacingSmall),
+          Text(
+            '使用 VNT 虚拟 IP 直接打开内置远控会话。同一个 APK 内即可完成组网、聊天和远程协助。',
+            style: TextStyle(
+              fontSize: context.fontSmall,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          TextField(
+            controller: _targetIpController,
+            decoration: InputDecoration(
+              labelText: '目标虚拟 IP',
+              hintText: '例如 10.26.0.8',
+              suffixIcon: IconButton(
+                tooltip: '粘贴',
+                onPressed: () async {
+                  final data = await Clipboard.getData(Clipboard.kTextPlain);
+                  final pasted = data?.text?.trim() ?? '';
+                  if (pasted.isNotEmpty) {
+                    _targetIpController.text = pasted;
+                  }
+                },
+                icon: const Icon(Icons.content_paste_go),
+              ),
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          TextField(
+            controller: _targetPasswordController,
+            obscureText: true,
+            decoration: const InputDecoration(
+              labelText: '访问密码',
+              hintText: '可选，留空则等待对方手动接受',
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: health.canLaunch ? _launchRemoteAssist : null,
+                  icon: const Icon(Icons.computer),
+                  label: const Text('发起协助'),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              SizedBox(width: context.spacingSmall),
+              TextButton(
+                onPressed:
+                    peers.isEmpty ? null : () => _selectPeer(peers.first),
+                child: const Text('填入首个在线设备'),
+              ),
+            ],
+          ),
+          if (!health.controllerAvailable) ...[
+            SizedBox(height: context.spacingMedium),
+            _buildWarningBox(
+              isDark,
+              '当前安装包未包含适用于本机架构的内置控制端，请使用 arm64 真机安装包后再发起协助。',
+            ),
+          ] else if (!health.vntConnected) ...[
+            SizedBox(height: context.spacingMedium),
+            _buildWarningBox(
+              isDark,
+              '当前还未连接 VNT 虚拟网络。先建立组网连接后，Android 控制端才能通过虚拟 IP 发起协助。',
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAndroidControlledCard(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+  ) {
+    final primaryColor = Theme.of(context).primaryColor;
+    return Container(
+      padding: EdgeInsets.all(context.cardPadding),
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '让别人控制我',
+            style: TextStyle(
+              fontSize: context.fontLarge,
+              fontWeight: FontWeight.w700,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+          SizedBox(height: context.spacingSmall),
+          Text(
+            health.supportsControlledRole
+                ? '启动受控服务后，Windows 端可通过你的 VNT 虚拟 IP 发起协助。建议先完成下方全部权限。'
+                : '当前版本先收口 Android 控制端链路，Android 作为受控端的真实 RustDesk host 会话尚未接入，因此这里仅保留状态预检，不再对外宣称可被控制。',
+            style: TextStyle(
+              fontSize: context.fontSmall,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          _buildStatusLine(
+            isDark,
+            '本机虚拟 IP',
+            health.localVirtualIps.isEmpty
+                ? '--'
+                : health.localVirtualIps.join(', '),
+          ),
+          _buildStatusLine(
+            isDark,
+            '虚拟网段',
+            health.networkCidrs.isEmpty ? '--' : health.networkCidrs.join(', '),
+          ),
+          _buildStatusLine(
+            isDark,
+            '受控能力',
+            health.supportsControlledRole
+                ? (health.controlledReady ? '已就绪' : '未就绪')
+                : '当前版本未开放',
+          ),
+          _buildStatusLine(
+            isDark,
+            '运行时版本',
+            health.runtimeVersion.isEmpty ? '--' : health.runtimeVersion,
+          ),
+          SizedBox(height: context.spacingMedium),
+          Wrap(
+            spacing: context.spacingSmall,
+            runSpacing: context.spacingSmall,
+            children: [
+              _buildChip(
+                isDark,
+                label: health.vntConnected ? 'VNT 已连接' : 'VNT 未连接',
+                isActive: health.vntConnected,
+              ),
+              _buildChip(
+                isDark,
+                label: health.supportsControlledRole
+                    ? (health.screenCapturePermissionGranted
+                        ? '录屏已授权'
+                        : '录屏未授权')
+                    : '受控端暂未开放',
+                isActive: health.supportsControlledRole
+                    ? health.screenCapturePermissionGranted
+                    : false,
+              ),
+              _buildChip(
+                isDark,
+                label: health.supportsControlledRole
+                    ? (health.accessibilityPermissionGranted
+                        ? '无障碍已开启'
+                        : '无障碍未开启')
+                    : '仅控制端已接入',
+                isActive: health.supportsControlledRole
+                    ? health.accessibilityPermissionGranted
+                    : health.controllerReady,
+              ),
+            ],
+          ),
+          SizedBox(height: context.spacingMedium),
+          if (!health.supportsControlledRole)
+            _buildWarningBox(
+              isDark,
+              '这轮修复已停止把 Android 端误判为“可被控制”。在真正 host 链路接入前，Windows 或其他设备不会再被误导去连接当前 Android 端。',
+            )
+          else
+            Row(
+              children: [
+                Expanded(
+                  child: ElevatedButton.icon(
+                    onPressed: health.controlledServiceRunning ||
+                            health.canStartControlledService
+                        ? _toggleControlledService
+                        : null,
+                    icon: Icon(
+                      health.controlledServiceRunning
+                          ? Icons.stop_circle_outlined
+                          : Icons.play_circle_outline,
+                    ),
+                    label: Text(
+                      health.controlledServiceRunning ? '停止受控服务' : '启动受控服务',
+                    ),
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: primaryColor,
+                      foregroundColor: Colors.white,
+                    ),
+                  ),
+                ),
+                SizedBox(width: context.spacingSmall),
+                OutlinedButton(
+                  onPressed: _showAccessPasswordDialog,
+                  child: const Text('设置访问密码'),
+                ),
+              ],
+            ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildAndroidPermissionCard(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+  ) {
+    return Container(
+      padding: EdgeInsets.all(context.cardPadding),
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '权限与系统',
+            style: TextStyle(
+              fontSize: context.fontLarge,
+              fontWeight: FontWeight.w700,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          _buildPermissionTile(
+            isDark,
+            title: '通知权限',
+            granted: health.notificationPermissionGranted,
+            actionLabel: '打开',
+            onTap: () => _manager.requestPermission(
+              RemoteAssistConstants.androidPermissionNotification,
+            ),
+          ),
+          _buildPermissionTile(
+            isDark,
+            title: '屏幕录制',
+            granted: health.screenCapturePermissionGranted,
+            actionLabel: '授权',
+            onTap: () => _manager.requestPermission(
+              RemoteAssistConstants.androidPermissionScreenCapture,
+            ),
+          ),
+          _buildPermissionTile(
+            isDark,
+            title: '无障碍控制',
+            granted: health.accessibilityPermissionGranted,
+            actionLabel: '设置',
+            onTap: () => _manager.openSystemSettings(
+              RemoteAssistConstants.androidSettingsAccessibility,
+            ),
+          ),
+          _buildPermissionTile(
+            isDark,
+            title: '悬浮窗',
+            granted: health.overlayPermissionGranted,
+            actionLabel: '设置',
+            onTap: () => _manager.openSystemSettings(
+              RemoteAssistConstants.androidSettingsOverlay,
+            ),
+          ),
+          _buildPermissionTile(
+            isDark,
+            title: '电池优化白名单',
+            granted: health.batteryOptimizationIgnored,
+            actionLabel: '设置',
+            onTap: () => _manager.openSystemSettings(
+              RemoteAssistConstants.androidSettingsBatteryOptimization,
+            ),
+          ),
+          if (health.issues.isNotEmpty) ...[
+            SizedBox(height: context.spacingMedium),
+            _buildWarningBox(isDark, health.issues.join('\n')),
+          ],
+        ],
+      ),
     );
   }
 
@@ -315,6 +670,113 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
             ],
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildPermissionTile(
+    bool isDark, {
+    required String title,
+    required bool granted,
+    required String actionLabel,
+    required VoidCallback onTap,
+  }) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: context.spacingSmall),
+      child: Container(
+        padding: EdgeInsets.all(context.spacingMedium),
+        decoration: BoxDecoration(
+          color: isDark
+              ? Colors.white.withOpacity(0.04)
+              : Colors.black.withOpacity(0.02),
+          borderRadius: BorderRadius.circular(context.cardRadius),
+        ),
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: TextStyle(
+                      fontSize: context.fontMedium,
+                      fontWeight: FontWeight.w600,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
+                    ),
+                  ),
+                  SizedBox(height: context.spacingXXSmall),
+                  Text(
+                    granted ? '已完成' : '待处理',
+                    style: TextStyle(
+                      fontSize: context.fontSmall,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            TextButton(onPressed: onTap, child: Text(actionLabel)),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildStatusLine(bool isDark, String label, String value) {
+    return Padding(
+      padding: EdgeInsets.only(bottom: context.spacingSmall),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          SizedBox(
+            width: 88,
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: context.fontSmall,
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
+              ),
+            ),
+          ),
+          SizedBox(width: context.spacingSmall),
+          Expanded(
+            child: Text(
+              value,
+              style: TextStyle(
+                fontSize: context.fontSmall,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildWarningBox(bool isDark, String text) {
+    return Container(
+      width: double.infinity,
+      padding: EdgeInsets.all(context.spacingMedium),
+      decoration: BoxDecoration(
+        color: Colors.orange.withOpacity(0.12),
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: context.fontSmall,
+          height: 1.45,
+          color: Colors.orange[isDark ? 200 : 900],
+        ),
       ),
     );
   }
@@ -433,6 +895,18 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                             : AppTheme.lightTextSecondary,
                       ),
                     ),
+                    if (peer.hasPresence) ...[
+                      SizedBox(height: context.spacingXXSmall),
+                      Text(
+                        _buildPeerCapabilitySummary(peer),
+                        style: TextStyle(
+                          fontSize: context.fontXSmall,
+                          color: isDark
+                              ? AppTheme.darkTextSecondary
+                              : AppTheme.lightTextSecondary,
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -446,7 +920,9 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                   ),
                   SizedBox(height: context.spacingXXSmall),
                   Text(
-                    peer.hasPresence ? '可复制并连接' : '等待 Presence',
+                    peer.hasPresence
+                        ? '${_platformLabel(peer.platform)} · 可复制并连接'
+                        : '等待 Presence',
                     style: TextStyle(
                       fontSize: context.fontXSmall,
                       color: isDark
@@ -461,6 +937,31 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         ),
       ),
     );
+  }
+
+  String _buildPeerCapabilitySummary(RemoteAssistPeer peer) {
+    final roles = <String>[];
+    if (peer.canControlOthers) {
+      roles.add('可发起控制');
+    }
+    if (peer.canBeControlled) {
+      roles.add('可被控');
+    }
+    if (roles.isEmpty) {
+      roles.add('能力未知');
+    }
+    return '${_platformLabel(peer.platform)} · ${roles.join(' / ')}';
+  }
+
+  String _platformLabel(RemoteAssistPlatform platform) {
+    switch (platform) {
+      case RemoteAssistPlatform.windows:
+        return 'Windows';
+      case RemoteAssistPlatform.android:
+        return 'Android';
+      case RemoteAssistPlatform.unsupported:
+        return '未知平台';
+    }
   }
 
   Widget _buildChip(
@@ -493,5 +994,4 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       ),
     );
   }
-
 }

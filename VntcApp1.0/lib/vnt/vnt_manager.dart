@@ -43,7 +43,6 @@ class MacOSPrivilegeManager {
         return false;
       }
 
-
       // 构建 AppleScript 脚本
       // 如果需要显示提示，添加友好的提示信息
       String script;
@@ -58,7 +57,8 @@ end tell
 ''';
       } else {
         // 直接请求权限，不显示额外提示
-        script = 'do shell script "\\"$executablePath\\" > /dev/null 2>&1 &" with administrator privileges';
+        script =
+            'do shell script "\\"$executablePath\\" > /dev/null 2>&1 &" with administrator privileges';
       }
 
       final result = await Process.run('osascript', ['-e', script]);
@@ -157,9 +157,10 @@ class VntBox {
         punchModel: config.punchModel,
         ports: config.ports.isEmpty ? null : Uint16List.fromList(config.ports),
         firstLatency: config.firstLatency,
-        deviceName: (Platform.isAndroid || config.virtualNetworkCardName.isEmpty)
-            ? null
-            : config.virtualNetworkCardName,
+        deviceName:
+            (Platform.isAndroid || config.virtualNetworkCardName.isEmpty)
+                ? null
+                : config.virtualNetworkCardName,
         useChannelType: config.coreUseChannelType,
         packetLossRate: config.simulatedPacketLossRate == 0
             ? null
@@ -300,7 +301,8 @@ class VntManager {
 
       // macOS 权限检查：如果没有权限，请求重新启动
       if (Platform.isMacOS) {
-        final needsRestart = await MacOSPrivilegeManager.checkAndRequestPrivilege();
+        final needsRestart =
+            await MacOSPrivilegeManager.checkAndRequestPrivilege();
         if (needsRestart) {
           // 已经开始重启流程，抛出异常通知 UI
           throw Exception('需要管理员权限，app 正在重新启动...');
@@ -468,6 +470,14 @@ class VntAppCall {
 
   static Future<void> stopVpn() async {
     return await VntAppCall.channel.invokeMethod('stopVpn');
+  }
+
+  static Future<bool> protectVpnSocketFd(int fd) async {
+    return await VntAppCall.channel.invokeMethod(
+          'protectVpnSocketFd',
+          <String, dynamic>{'fd': fd},
+        ) ??
+        false;
   }
 
   /// 更新磁贴和小组件状态（仅 iOS/Android）

@@ -52,8 +52,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
   @override
   void initState() {
     super.initState();
-    _remoteAssistManager.start();
-    _remoteAssistManager.refresh();
+    if (!Platform.isAndroid) {
+      _remoteAssistManager.start();
+      _remoteAssistManager.refresh();
+    }
     _tabController = TabController(length: 2, vsync: this);
     _updateDevices();
     _timer = Timer.periodic(const Duration(seconds: 2), (_) {
@@ -130,25 +132,29 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   isWideScreen ? context.spacingXLarge : context.spacingMedium),
               child: _buildHeader(isDark, isWideScreen, hasConnection),
             ),
-            Padding(
-              padding: EdgeInsets.only(
-                left: isWideScreen ? context.spacingXLarge : context.spacingMedium,
-                right:
-                    isWideScreen ? context.spacingXLarge : context.spacingMedium,
-                bottom: isWideScreen
-                    ? context.spacingMedium
-                    : context.spacingSmall,
+            if (!Platform.isAndroid)
+              Padding(
+                padding: EdgeInsets.only(
+                  left: isWideScreen
+                      ? context.spacingXLarge
+                      : context.spacingMedium,
+                  right: isWideScreen
+                      ? context.spacingXLarge
+                      : context.spacingMedium,
+                  bottom: isWideScreen
+                      ? context.spacingMedium
+                      : context.spacingSmall,
+                ),
+                child: AnimatedBuilder(
+                  animation: _remoteAssistManager,
+                  builder: (context, _) {
+                    return _buildRemoteAssistPanel(
+                      isDark,
+                      _remoteAssistManager.health,
+                    );
+                  },
+                ),
               ),
-              child: AnimatedBuilder(
-                animation: _remoteAssistManager,
-                builder: (context, _) {
-                  return _buildRemoteAssistPanel(
-                    isDark,
-                    _remoteAssistManager.health,
-                  );
-                },
-              ),
-            ),
 
             // Tab导航栏
             if (hasConnection)
@@ -334,6 +340,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     final primaryColor = Theme.of(context).primaryColor;
     final statusColor = _remoteAssistStatusColor(health);
     final statusLabel = _remoteAssistStatusLabel(health);
+    final actionIcon =
+        health.isAndroid ? Icons.sync : Icons.build_circle_outlined;
 
     return Container(
       decoration: BoxDecoration(
@@ -443,10 +451,15 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   Align(
                     alignment: Alignment.centerRight,
                     child: ElevatedButton.icon(
-                      onPressed:
-                          health.canAttemptRepair ? _repairRemoteAssist : null,
-                      icon: const Icon(Icons.build_circle_outlined),
-                      label: const Text('安装/修复'),
+                      onPressed: health.isAndroid
+                          ? (_remoteAssistManager.refreshing
+                              ? null
+                              : () => _remoteAssistManager.refresh())
+                          : (health.canAttemptRepair
+                              ? _repairRemoteAssist
+                              : null),
+                      icon: Icon(actionIcon),
+                      label: Text(health.primaryActionLabel),
                       style: ElevatedButton.styleFrom(
                         backgroundColor: primaryColor,
                         foregroundColor: Colors.white,
@@ -454,94 +467,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                     ),
                   ),
                   SizedBox(height: context.spacingMedium),
-                  Wrap(
-                    spacing: context.spacingSmall,
-                    runSpacing: context.spacingSmall,
-                    children: [
-                      _buildRemoteAssistChip(
-                        isDark,
-                        label: health.vntConnected ? 'VNT 已连接' : 'VNT 未连接',
-                        isActive: health.vntConnected,
-                      ),
-                      _buildRemoteAssistChip(
-                        isDark,
-                        label: health.runtimeAvailable
-                            ? 'vntcrustdesk 已安装'
-                            : 'vntcrustdesk 缺失',
-                        isActive: health.runtimeAvailable,
-                      ),
-                      _buildRemoteAssistChip(
-                        isDark,
-                        label: health.serviceRunning ? '服务运行中' : '服务未运行',
-                        isActive: health.serviceRunning,
-                      ),
-                      _buildRemoteAssistChip(
-                        isDark,
-                        label: health.portListening ? '49999 监听中' : '49999 未监听',
-                        isActive: health.portListening,
-                      ),
-                      _buildRemoteAssistChip(
-                        isDark,
-                        label: health.presenceRunning
-                            ? 'Presence 已启动'
-                            : 'Presence 未启动',
-                        isActive: health.presenceRunning,
-                      ),
-                    ],
-                  ),
-                  SizedBox(height: context.spacingMedium),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '本机虚拟 IP',
-                    health.localVirtualIps.isEmpty
-                        ? '--'
-                        : health.localVirtualIps.join(', '),
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '虚拟网段',
-                    health.networkCidrs.isEmpty
-                        ? '--'
-                        : health.networkCidrs.join(', '),
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '运行时版本',
-                    health.runtimeVersion.isEmpty ? '--' : health.runtimeVersion,
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '安装方式',
-                    health.installationModeDescription,
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '修复能力',
-                    health.bundledRepairAvailable
-                        ? '可自动安装并修复远程协助组件'
-                        : (health.runtimeAvailable || health.serviceInstalled
-                            ? '可检查现有安装，但当前目录不含自动补装资源'
-                            : '当前目录仅能检测，无法自动补装'),
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '防火墙规则',
-                    health.firewallTcpRulePresent &&
-                            health.firewallUdpRulePresent
-                        ? (health.firewallSyncSucceeded ? '已存在并已尝试同步' : '已存在')
-                        : '缺失或未同步',
-                  ),
-                  _buildRemoteAssistInfoRow(
-                    isDark,
-                    '管理员权限',
-                    health.hasAdminPrivileges ? '当前进程已提权' : '当前进程未提权',
-                  ),
-                  if (health.executablePath.isNotEmpty)
-                    _buildRemoteAssistInfoRow(
-                      isDark,
-                      '可执行文件',
-                      health.executablePath,
-                    ),
+                  if (health.isAndroid)
+                    _buildAndroidRemoteAssistDetails(isDark, health)
+                  else
+                    _buildWindowsRemoteAssistDetails(isDark, health),
                   if (health.issues.isNotEmpty) ...[
                     SizedBox(height: context.spacingMedium),
                     Container(
@@ -549,8 +478,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       padding: EdgeInsets.all(context.spacingMedium),
                       decoration: BoxDecoration(
                         color: Colors.orange.withOpacity(0.12),
-                        borderRadius:
-                            BorderRadius.circular(context.cardRadius),
+                        borderRadius: BorderRadius.circular(context.cardRadius),
                       ),
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -579,7 +507,204 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     );
   }
 
+  Widget _buildWindowsRemoteAssistDetails(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: context.spacingSmall,
+          runSpacing: context.spacingSmall,
+          children: [
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.vntConnected ? 'VNT 已连接' : 'VNT 未连接',
+              isActive: health.vntConnected,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.runtimeAvailable
+                  ? 'vntcrustdesk 已安装'
+                  : 'vntcrustdesk 缺失',
+              isActive: health.runtimeAvailable,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.serviceRunning ? '服务运行中' : '服务未运行',
+              isActive: health.serviceRunning,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.portListening ? '49999 监听中' : '49999 未监听',
+              isActive: health.portListening,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.presenceRunning ? 'Presence 已启动' : 'Presence 未启动',
+              isActive: health.presenceRunning,
+            ),
+          ],
+        ),
+        SizedBox(height: context.spacingMedium),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '本机虚拟 IP',
+          health.localVirtualIps.isEmpty
+              ? '--'
+              : health.localVirtualIps.join(', '),
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '虚拟网段',
+          health.networkCidrs.isEmpty ? '--' : health.networkCidrs.join(', '),
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '运行时版本',
+          health.runtimeVersion.isEmpty ? '--' : health.runtimeVersion,
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '安装方式',
+          health.installationModeDescription,
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '修复能力',
+          health.bundledRepairAvailable
+              ? '可自动安装并修复远程协助组件'
+              : (health.runtimeAvailable || health.serviceInstalled
+                  ? '可检查现有安装，但当前目录不含自动补装资源'
+                  : '当前目录仅能检测，无法自动补装'),
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '防火墙规则',
+          health.firewallTcpRulePresent && health.firewallUdpRulePresent
+              ? (health.firewallSyncSucceeded ? '已存在并已尝试同步' : '已存在')
+              : '缺失或未同步',
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '管理员权限',
+          health.hasAdminPrivileges ? '当前进程已提权' : '当前进程未提权',
+        ),
+        if (health.executablePath.isNotEmpty)
+          _buildRemoteAssistInfoRow(
+            isDark,
+            '可执行文件',
+            health.executablePath,
+          ),
+      ],
+    );
+  }
+
+  Widget _buildAndroidRemoteAssistDetails(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+  ) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Wrap(
+          spacing: context.spacingSmall,
+          runSpacing: context.spacingSmall,
+          children: [
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.vntConnected ? 'VNT 已连接' : 'VNT 未连接',
+              isActive: health.vntConnected,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.controllerReady ? '控制端已就绪' : '控制端未就绪',
+              isActive: health.controllerReady,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.supportsControlledRole
+                  ? (health.controlledReady ? '受控端已就绪' : '受控端未就绪')
+                  : '受控端暂未开放',
+              isActive: health.controlledReady,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.supportsControlledRole
+                  ? (health.permissionsReady ? '受控权限已齐备' : '受控权限未齐备')
+                  : '控制端链路排查中',
+              isActive: health.supportsControlledRole
+                  ? health.permissionsReady
+                  : health.controllerReady,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.supportsControlledRole
+                  ? (health.listenerReady ? '监听已就绪' : '监听未就绪')
+                  : '未再宣称可被控制',
+              isActive:
+                  health.supportsControlledRole ? health.listenerReady : false,
+            ),
+            _buildRemoteAssistChip(
+              isDark,
+              label: health.presenceRunning ? 'Presence 已启动' : 'Presence 未启动',
+              isActive: health.presenceRunning,
+            ),
+          ],
+        ),
+        SizedBox(height: context.spacingMedium),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '本机虚拟 IP',
+          health.localVirtualIps.isEmpty
+              ? '--'
+              : health.localVirtualIps.join(', '),
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '虚拟网段',
+          health.networkCidrs.isEmpty ? '--' : health.networkCidrs.join(', '),
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '运行时版本',
+          health.runtimeVersion.isEmpty ? '--' : health.runtimeVersion,
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '组件形态',
+          health.installationModeDescription,
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '通知权限',
+          health.notificationPermissionGranted ? '已授予' : '未授予',
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '悬浮窗权限',
+          health.overlayPermissionGranted ? '已授予' : '未授予',
+        ),
+        _buildRemoteAssistInfoRow(
+          isDark,
+          '电池优化',
+          health.batteryOptimizationIgnored ? '已加入白名单' : '建议加入白名单',
+        ),
+      ],
+    );
+  }
+
   Color _remoteAssistStatusColor(RemoteAssistHealthStatus health) {
+    if (health.isAndroid) {
+      if (health.controllerReady && health.controlledReady) {
+        return Colors.green;
+      }
+      if (health.controllerReady || health.vntConnected) {
+        return Colors.orange;
+      }
+      return Colors.redAccent;
+    }
     if (health.canLaunch && health.issues.isEmpty) {
       return Colors.green;
     }
@@ -590,6 +715,18 @@ class _LinkStatusPageState extends State<LinkStatusPage>
   }
 
   String _remoteAssistStatusLabel(RemoteAssistHealthStatus health) {
+    if (health.isAndroid) {
+      if (health.controllerReady && health.controlledReady) {
+        return 'Android 双向远控链路已就绪，可发起控制也可等待他人接入';
+      }
+      if (health.controllerReady && !health.supportsControlledRole) {
+        return 'Android 控制端链路已就绪；受控端已明确降级，当前版本不再误报“可被控制”';
+      }
+      if (health.controllerReady || health.vntConnected) {
+        return 'Android 远控链路已部分接通，正在以控制端为主做联调';
+      }
+      return 'Android 远控未就绪，点击展开查看权限与服务状态';
+    }
     if (health.canLaunch && health.issues.isEmpty) {
       return '远程协助已就绪，点击展开查看详细状态';
     }

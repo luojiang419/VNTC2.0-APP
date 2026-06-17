@@ -1,5 +1,26 @@
 import 'remote_assist_constants.dart';
 
+enum RemoteAssistPlatform {
+  windows('windows'),
+  android('android'),
+  unsupported('unsupported');
+
+  const RemoteAssistPlatform(this.token);
+
+  final String token;
+
+  static RemoteAssistPlatform fromToken(String? value) {
+    switch (value?.trim().toLowerCase()) {
+      case 'windows':
+        return RemoteAssistPlatform.windows;
+      case 'android':
+        return RemoteAssistPlatform.android;
+      default:
+        return RemoteAssistPlatform.unsupported;
+    }
+  }
+}
+
 class RemoteAssistRuntimeManifest {
   const RemoteAssistRuntimeManifest({
     required this.executablePath,
@@ -38,6 +59,8 @@ class RemoteAssistPresenceAnnouncement {
     required this.virtualIp,
     required this.networkName,
     required this.version,
+    required this.platform,
+    required this.supportedRoles,
     required this.capabilities,
     required this.sentAtEpochMs,
   });
@@ -46,11 +69,14 @@ class RemoteAssistPresenceAnnouncement {
   final String virtualIp;
   final String networkName;
   final String version;
+  final RemoteAssistPlatform platform;
+  final List<String> supportedRoles;
   final List<String> capabilities;
   final int sentAtEpochMs;
 
   factory RemoteAssistPresenceAnnouncement.fromJson(Map<String, dynamic> json) {
     final rawCapabilities = json['capabilities'];
+    final rawSupportedRoles = json['supportedRoles'];
     final capabilities = rawCapabilities is List
         ? rawCapabilities.map((item) => item.toString()).toList()
         : const <String>[];
@@ -59,6 +85,15 @@ class RemoteAssistPresenceAnnouncement {
       virtualIp: (json['virtualIp'] ?? '').toString(),
       networkName: (json['networkName'] ?? '').toString(),
       version: (json['version'] ?? '').toString(),
+      platform: RemoteAssistPlatform.fromToken(json['platform']?.toString()),
+      supportedRoles: rawSupportedRoles is List
+          ? rawSupportedRoles.map((item) => item.toString()).toList(
+                growable: false,
+              )
+          : capabilities.where((item) {
+              return item == RemoteAssistConstants.capabilityController ||
+                  item == RemoteAssistConstants.capabilityControlled;
+            }).toList(growable: false),
       capabilities: capabilities,
       sentAtEpochMs: int.tryParse('${json['sentAtEpochMs']}') ?? 0,
     );
@@ -71,6 +106,8 @@ class RemoteAssistPresenceAnnouncement {
       'virtualIp': virtualIp,
       'networkName': networkName,
       'version': version,
+      'platform': platform.token,
+      'supportedRoles': supportedRoles,
       'capabilities': capabilities,
       'sentAtEpochMs': sentAtEpochMs,
     };
@@ -83,6 +120,8 @@ class RemoteAssistPresenceContext {
     required this.virtualIp,
     required this.networkName,
     required this.version,
+    required this.platform,
+    required this.supportedRoles,
     required this.capabilities,
     required this.peerVirtualIps,
   });
@@ -91,6 +130,8 @@ class RemoteAssistPresenceContext {
   final String virtualIp;
   final String networkName;
   final String version;
+  final RemoteAssistPlatform platform;
+  final List<String> supportedRoles;
   final List<String> capabilities;
   final List<String> peerVirtualIps;
 }
@@ -103,6 +144,8 @@ class RemoteAssistPeer {
     required this.networkName,
     required this.status,
     required this.isOnline,
+    required this.platform,
+    required this.supportedRoles,
     required this.capabilities,
     required this.version,
     required this.hasPresence,
@@ -115,15 +158,25 @@ class RemoteAssistPeer {
   final String networkName;
   final String status;
   final bool isOnline;
+  final RemoteAssistPlatform platform;
+  final List<String> supportedRoles;
   final List<String> capabilities;
   final String version;
   final bool hasPresence;
   final DateTime? lastSeen;
+
+  bool get canControlOthers =>
+      supportedRoles.contains(RemoteAssistConstants.capabilityController);
+
+  bool get canBeControlled =>
+      supportedRoles.contains(RemoteAssistConstants.capabilityControlled);
 }
 
 class RemoteAssistHealthStatus {
   const RemoteAssistHealthStatus({
     required this.supported,
+    required this.platform,
+    required this.supportedRoles,
     required this.vntConnected,
     required this.runtimeAvailable,
     required this.serviceInstalled,
@@ -141,10 +194,19 @@ class RemoteAssistHealthStatus {
     required this.networkCidrs,
     required this.executablePath,
     required this.runtimeVersion,
+    required this.controllerAvailable,
+    required this.controlledServiceRunning,
+    required this.notificationPermissionGranted,
+    required this.screenCapturePermissionGranted,
+    required this.accessibilityPermissionGranted,
+    required this.overlayPermissionGranted,
+    required this.batteryOptimizationIgnored,
     required this.issues,
   });
 
   final bool supported;
+  final RemoteAssistPlatform platform;
+  final List<String> supportedRoles;
   final bool vntConnected;
   final bool runtimeAvailable;
   final bool serviceInstalled;
@@ -162,11 +224,20 @@ class RemoteAssistHealthStatus {
   final List<String> networkCidrs;
   final String executablePath;
   final String runtimeVersion;
+  final bool controllerAvailable;
+  final bool controlledServiceRunning;
+  final bool notificationPermissionGranted;
+  final bool screenCapturePermissionGranted;
+  final bool accessibilityPermissionGranted;
+  final bool overlayPermissionGranted;
+  final bool batteryOptimizationIgnored;
   final List<String> issues;
 
   factory RemoteAssistHealthStatus.initial() {
     return const RemoteAssistHealthStatus(
       supported: true,
+      platform: RemoteAssistPlatform.unsupported,
+      supportedRoles: <String>[],
       vntConnected: false,
       runtimeAvailable: false,
       serviceInstalled: false,
@@ -184,20 +255,88 @@ class RemoteAssistHealthStatus {
       networkCidrs: <String>[],
       executablePath: '',
       runtimeVersion: '',
+      controllerAvailable: false,
+      controlledServiceRunning: false,
+      notificationPermissionGranted: false,
+      screenCapturePermissionGranted: false,
+      accessibilityPermissionGranted: false,
+      overlayPermissionGranted: false,
+      batteryOptimizationIgnored: false,
       issues: <String>[],
     );
   }
 
-  bool get canLaunch => supported && vntConnected && runtimeAvailable;
+  bool get isWindows => platform == RemoteAssistPlatform.windows;
+  bool get isAndroid => platform == RemoteAssistPlatform.android;
+
+  bool get supportsControllerRole =>
+      supportedRoles.contains(RemoteAssistConstants.capabilityController);
+
+  bool get supportsControlledRole =>
+      supportedRoles.contains(RemoteAssistConstants.capabilityControlled);
+
+  bool get controllerReady =>
+      supported &&
+      vntConnected &&
+      controllerAvailable &&
+      supportsControllerRole;
+
+  bool get listenerReady =>
+      isWindows ? portListening : supportsControlledRole && portListening;
+
+  bool get permissionsReady {
+    if (!isAndroid || !supportsControlledRole) {
+      return !isAndroid;
+    }
+    return notificationPermissionGranted &&
+        screenCapturePermissionGranted &&
+        accessibilityPermissionGranted &&
+        overlayPermissionGranted &&
+        batteryOptimizationIgnored;
+  }
+
+  bool get controlledReady {
+    if (!supportsControlledRole) {
+      return false;
+    }
+    if (isAndroid) {
+      return supported &&
+          vntConnected &&
+          controlledServiceRunning &&
+          listenerReady &&
+          permissionsReady;
+    }
+    return supported && controlledServiceRunning && listenerReady;
+  }
+
+  bool get canLaunch => controllerReady;
 
   bool get bundledRepairAvailable =>
       bundledInstallerAvailable && bundledBootstrapAvailable;
 
-  bool get canAttemptRepair =>
-      supported &&
-      (runtimeAvailable || serviceInstalled || bundledRepairAvailable);
+  bool get canAttemptRepair => isAndroid
+      ? supported
+      : supported &&
+          (runtimeAvailable || serviceInstalled || bundledRepairAvailable);
+
+  bool get canStartControlledService =>
+      supported && vntConnected && supportsControlledRole;
+
+  bool get needsAndroidPermissionGuidance =>
+      isAndroid &&
+      supportsControlledRole &&
+      (!notificationPermissionGranted ||
+          !screenCapturePermissionGranted ||
+          !accessibilityPermissionGranted ||
+          !overlayPermissionGranted ||
+          !batteryOptimizationIgnored);
 
   String get installationModeDescription {
+    if (isAndroid) {
+      return supportsControlledRole
+          ? '当前应用内置 Android 远控组件'
+          : '当前应用内置 Android 控制端组件';
+    }
     if (managedInstall) {
       return '受当前安装器管理';
     }
@@ -209,4 +348,6 @@ class RemoteAssistHealthStatus {
     }
     return '当前目录未携带远程协助安装组件';
   }
+
+  String get primaryActionLabel => isAndroid ? '同步状态' : '安装/修复';
 }
