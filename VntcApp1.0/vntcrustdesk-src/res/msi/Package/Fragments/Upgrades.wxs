@@ -1,0 +1,13 @@
+﻿<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs">
+	<Fragment>
+
+		<Property Id="UpgradesFile" Value="1" />
+
+		<!--$UpgradeStart$-->
+			<Upgrade Id="de847dbd-cf9d-4202-91db-c846ed302a91">
+				<UpgradeVersion Property="OLD_VERSION_FOUND" Minimum="1.0.0" Maximum="1.99.99" IncludeMinimum="yes" IncludeMaximum="yes" OnlyDetect="no" IgnoreRemoveFailure="yes" MigrateFeatures="yes" />
+			</Upgrade>
+		<!--$UpgradeEnd$-->
+
+	</Fragment>
+</Wix>

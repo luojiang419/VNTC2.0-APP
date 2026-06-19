@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Include xmlns="http://wixtoolset.org/schemas/v4/wxs">
+
+	<!--$PreVarsStart$-->
+	<?define Version="1.4.6.29676582" ?>
+	<?define Manufacturer="VNTC" ?>
+	<?define Product="VNTC RustDesk" ?>
+	<?define Description="VNTC RustDesk Installer" ?>
+	<?define ProductLower="vntcrustdesk" ?>
+	<?define ExecutableName="vntcrustdesk" ?>
+	<?define ServiceName="vntcrustdesk" ?>
+	<?define InstallDirName="VNTC RustDesk" ?>
+	<?define ConfigName="VNTC RustDesk" ?>
+	<?define UriScheme="vntcrustdesk" ?>
+	<?define RuntimeBrokerName="RuntimeBroker_vntcrustdesk.exe" ?>
+	<?define RegKeyRoot=".$(var.ProductLower)" ?>
+	<?define RegKeyInstall="$(var.RegKeyRoot)\Install" ?>
+	<?define BuildDir="D:\Myproject\vnt2.0\vntcrustdesk-src\vntcrustdesk" ?>
+	<?define BuildDate="2026-06-05 00:53" ?>
+
+	<!-- The UpgradeCode must be consistent for each product. ! -->
+	<?define UpgradeCode = "1ea5982a-b7a9-5386-8f65-a669bacfb323" ?>
+	<!--$PreVarsEnd$-->
+
+</Include>

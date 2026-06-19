@@ -35,7 +35,6 @@ migrate_working_dir/
 /backup/
 /temp/
 /configure-access-password/
-/vntcrustdesk-src/
 /rust/target/
 /android/.kotlin/
 /windows/flutter/generated_config.cmake
