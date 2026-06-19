@@ -30,7 +30,7 @@ _tmp_*/
 
 # 工具链和外部源码
 toolchains/
-vntcrustdesk-src/
+/vntcrustdesk-src/
 
 # Python
 __pycache__/
