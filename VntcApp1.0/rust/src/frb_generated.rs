@@ -937,7 +937,8 @@ fn wire__crate__api__vnt_api__init_log_with_path_impl(
             deserializer.end();
             transform_result_sse::<_, flutter_rust_bridge::for_generated::anyhow::Error>(
                 (move || {
-                    let output_ok = crate::api::vnt_api::init_log_with_path(api_log_dir, api_config_path)?;
+                    let output_ok =
+                        crate::api::vnt_api::init_log_with_path(api_log_dir, api_config_path)?;
                     Ok(output_ok)
                 })(),
             )

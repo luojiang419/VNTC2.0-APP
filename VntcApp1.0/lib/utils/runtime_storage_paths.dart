@@ -14,7 +14,7 @@ class RuntimeStoragePaths {
     required String fallbackBasePath,
     required bool Function(String directoryPath) canWriteToDirectory,
   }) {
-    final executableDir = path.dirname(executablePath);
+    final executableDir = path.windows.dirname(executablePath);
     if (canWriteToDirectory(executableDir)) {
       return executableDir;
     }
@@ -23,7 +23,7 @@ class RuntimeStoragePaths {
         (localAppDataPath != null && localAppDataPath.isNotEmpty)
             ? localAppDataPath
             : fallbackBasePath;
-    return path.join(fallbackBase, windowsAppFolderName);
+    return path.windows.join(fallbackBase, windowsAppFolderName);
   }
 
   static String resolveRuntimeRootPathSync() {
@@ -48,8 +48,40 @@ class RuntimeStoragePaths {
   }
 
   static String resolveBundledPathSync(String relativePath) {
-    final executableDir = path.dirname(Platform.resolvedExecutable);
+    return resolveBundledPathForExecutable(
+      executablePath: Platform.resolvedExecutable,
+      relativePath: relativePath,
+      isMacOS: Platform.isMacOS,
+    );
+  }
+
+  static String resolveBundledPathForExecutable({
+    required String executablePath,
+    required String relativePath,
+    required bool isMacOS,
+  }) {
+    if (isMacOS) {
+      final resourcesPath = resolveMacosResourcesPathForExecutable(
+        executablePath,
+      );
+      if (resourcesPath != null) {
+        return path.join(resourcesPath, relativePath);
+      }
+    }
+
+    final executableDir = path.dirname(executablePath);
     return path.join(executableDir, relativePath);
+  }
+
+  static String? resolveMacosResourcesPathForExecutable(
+    String executablePath,
+  ) {
+    final executableDir = path.dirname(executablePath);
+    final contentsDir = path.dirname(executableDir);
+    if (path.basename(contentsDir) != 'Contents') {
+      return null;
+    }
+    return path.join(contentsDir, 'Resources');
   }
 
   static bool canWriteToDirectorySync(String directoryPath) {

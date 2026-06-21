@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/foundation.dart';
 import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:sqflite/sqflite.dart';
@@ -157,15 +158,32 @@ CREATE TABLE sync_checkpoints (
   }
 
   Future<String> _resolveDefaultChatRootDirectoryPath() async {
-    if (Platform.isAndroid || Platform.isIOS) {
+    if (Platform.isAndroid || Platform.isIOS || Platform.isMacOS) {
       final supportDirectory = await getApplicationSupportDirectory();
-      return path.join(supportDirectory.path, 'chat');
+      return resolveDefaultChatRootDirectoryPathForPlatform(
+        useApplicationSupportDirectory: true,
+        applicationSupportDirectoryPath: supportDirectory.path,
+        configDirectoryPath: '',
+      );
     }
 
-    return path.join(
-      RuntimeStoragePaths.resolveConfigDirectoryPathSync(),
-      'chat',
+    return resolveDefaultChatRootDirectoryPathForPlatform(
+      useApplicationSupportDirectory: false,
+      applicationSupportDirectoryPath: '',
+      configDirectoryPath: RuntimeStoragePaths.resolveConfigDirectoryPathSync(),
     );
+  }
+
+  @visibleForTesting
+  static String resolveDefaultChatRootDirectoryPathForPlatform({
+    required bool useApplicationSupportDirectory,
+    required String applicationSupportDirectoryPath,
+    required String configDirectoryPath,
+  }) {
+    final rootPath = useApplicationSupportDirectory
+        ? applicationSupportDirectoryPath
+        : configDirectoryPath;
+    return path.join(rootPath, 'chat');
   }
 
   Future<List<ChatConversation>> loadConversations() async {

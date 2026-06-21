@@ -22,6 +22,7 @@ import 'package:vnt_app/utils/window_restore_guard.dart';
 import 'package:vnt_app/utils/log_utils.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 import 'package:vnt_app/utils/system_tray_icon_path.dart';
+import 'package:vnt_app/utils/text_editing_shortcuts.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/config_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
@@ -374,6 +375,11 @@ class _VntAppState extends State<VntApp> {
         theme: AppTheme.createLightTheme(_customThemeColor),
         darkTheme: AppTheme.createDarkTheme(_customThemeColor),
         themeMode: _themeMode,
+        builder: (context, child) {
+          return VntTextEditingShortcuts(
+            child: child ?? const SizedBox.shrink(),
+          );
+        },
         home: PopScope(
           canPop: false,
           onPopInvoked: (didPop) {

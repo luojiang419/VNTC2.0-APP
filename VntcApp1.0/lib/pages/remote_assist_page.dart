@@ -153,7 +153,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       }
       showTopToast(
         context,
-        shouldStop ? '已停止 Android 受控服务' : '已启动 Android 受控服务',
+        shouldStop ? '已停止受控服务' : '已启动受控服务',
         isSuccess: true,
       );
     } catch (error) {
@@ -201,6 +201,10 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                   ] else ...[
                     _buildConnectCard(isDark, health),
                     SizedBox(height: context.spacingLarge),
+                    if (health.isMacOS) ...[
+                      _buildMacosControlledCard(isDark, health),
+                      SizedBox(height: context.spacingLarge),
+                    ],
                     _buildPeerList(isDark, peers),
                   ],
                   SizedBox(height: context.spacingLarge),
@@ -594,6 +598,151 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     );
   }
 
+  Widget _buildMacosControlledCard(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+  ) {
+    final primaryColor = Theme.of(context).primaryColor;
+    return Container(
+      padding: EdgeInsets.all(context.cardPadding),
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text(
+            '本机受控服务',
+            style: TextStyle(
+              fontSize: context.fontLarge,
+              fontWeight: FontWeight.w700,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+          SizedBox(height: context.spacingSmall),
+          Text(
+            '启动内置 VNTC RustDesk 后，其他设备可通过你的 VNT 虚拟 IP 和 49999 端口发起远程协助。',
+            style: TextStyle(
+              fontSize: context.fontSmall,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
+            ),
+          ),
+          SizedBox(height: context.spacingMedium),
+          _buildStatusLine(
+            isDark,
+            '组件状态',
+            health.installationModeDescription,
+          ),
+          _buildStatusLine(
+            isDark,
+            '运行时版本',
+            health.runtimeVersion.isEmpty ? '--' : health.runtimeVersion,
+          ),
+          _buildStatusLine(
+            isDark,
+            '本机虚拟 IP',
+            health.localVirtualIps.isEmpty
+                ? '--'
+                : health.localVirtualIps.join(', '),
+          ),
+          _buildStatusLine(
+            isDark,
+            '受控监听',
+            health.portListening ? '49999 已监听' : '49999 未监听',
+          ),
+          SizedBox(height: context.spacingMedium),
+          Wrap(
+            spacing: context.spacingSmall,
+            runSpacing: context.spacingSmall,
+            children: [
+              _buildChip(
+                isDark,
+                label: health.vntConnected ? 'VNT 已连接' : 'VNT 未连接',
+                isActive: health.vntConnected,
+              ),
+              _buildChip(
+                isDark,
+                label: health.runtimeAvailable ? '远控组件已找到' : '远控组件缺失',
+                isActive: health.runtimeAvailable,
+              ),
+              _buildChip(
+                isDark,
+                label: health.controlledServiceRunning ? '受控服务运行中' : '受控服务未启动',
+                isActive: health.controlledServiceRunning,
+              ),
+            ],
+          ),
+          SizedBox(height: context.spacingMedium),
+          Row(
+            children: [
+              Expanded(
+                child: ElevatedButton.icon(
+                  onPressed: health.runtimeAvailable &&
+                          (health.controlledServiceRunning ||
+                              health.canStartControlledService)
+                      ? _toggleControlledService
+                      : null,
+                  icon: Icon(
+                    health.controlledServiceRunning
+                        ? Icons.stop_circle_outlined
+                        : Icons.play_circle_outline,
+                  ),
+                  label: Text(
+                    health.controlledServiceRunning ? '停止受控服务' : '启动受控服务',
+                  ),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: primaryColor,
+                    foregroundColor: Colors.white,
+                  ),
+                ),
+              ),
+              SizedBox(width: context.spacingSmall),
+              OutlinedButton(
+                onPressed:
+                    health.runtimeAvailable ? _showAccessPasswordDialog : null,
+                child: const Text('设置访问密码'),
+              ),
+            ],
+          ),
+          SizedBox(height: context.spacingMedium),
+          Wrap(
+            spacing: context.spacingSmall,
+            runSpacing: context.spacingSmall,
+            children: [
+              OutlinedButton(
+                onPressed: () => _manager.openSystemSettings(
+                  RemoteAssistConstants.macosSettingsScreenRecording,
+                ),
+                child: const Text('屏幕录制权限'),
+              ),
+              OutlinedButton(
+                onPressed: () => _manager.openSystemSettings(
+                  RemoteAssistConstants.macosSettingsAccessibility,
+                ),
+                child: const Text('辅助功能权限'),
+              ),
+              OutlinedButton(
+                onPressed: () => _manager.openSystemSettings(
+                  RemoteAssistConstants.macosSettingsMicrophone,
+                ),
+                child: const Text('麦克风权限'),
+              ),
+            ],
+          ),
+          if (health.issues.isNotEmpty) ...[
+            SizedBox(height: context.spacingMedium),
+            _buildWarningBox(isDark, health.issues.join('\n')),
+          ],
+        ],
+      ),
+    );
+  }
+
   Widget _buildConnectCard(bool isDark, RemoteAssistHealthStatus health) {
     final primaryColor = Theme.of(context).primaryColor;
     return Container(
@@ -959,6 +1108,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         return 'Windows';
       case RemoteAssistPlatform.android:
         return 'Android';
+      case RemoteAssistPlatform.macos:
+        return 'macOS';
       case RemoteAssistPlatform.unsupported:
         return '未知平台';
     }

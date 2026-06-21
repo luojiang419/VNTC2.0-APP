@@ -7,6 +7,11 @@ class RemoteAssistConstants {
   static const String serviceName = 'vntcrustdesk';
   static const String executableName = 'vntcrustdesk.exe';
   static const String managedBy = 'VNT App 2.0';
+  static const String macosAppBundleName = 'VNTC RustDesk.app';
+  static const String macosBundledAppRelativePath =
+      'remote_assist/VNTC RustDesk.app';
+  static const String macosManifestRelativePath =
+      'remote_assist/vntcrustdesk_manifest.json';
 
   static const String tcpFirewallRuleName = 'VNTC Remote Assist TCP 49999';
   static const String udpFirewallRuleName =
@@ -23,6 +28,7 @@ class RemoteAssistConstants {
 
   static const String capabilityWindows = 'remote_assist_windows';
   static const String capabilityAndroid = 'remote_assist_android';
+  static const String capabilityMacos = 'remote_assist_macos';
   static const String capabilityController = 'remote_assist_controller';
   static const String capabilityControlled = 'remote_assist_controlled';
 
@@ -39,6 +45,10 @@ class RemoteAssistConstants {
   static const String androidSettingsOverlay = 'overlay';
   static const String androidSettingsBatteryOptimization =
       'battery_optimization';
+
+  static const String macosSettingsScreenRecording = 'screen_recording';
+  static const String macosSettingsAccessibility = 'accessibility';
+  static const String macosSettingsMicrophone = 'microphone';
 
   static const String presencePacketType = 'vntc_remote_assist_presence';
 

@@ -27,7 +27,7 @@ void main() {
 
       expect(
         resolved,
-        path.join(r'C:\Users\Test\AppData\Local', 'VNT App 2.0'),
+        path.windows.join(r'C:\Users\Test\AppData\Local', 'VNT App 2.0'),
       );
     });
 
@@ -41,7 +41,39 @@ void main() {
         canWriteToDirectory: (_) => false,
       );
 
-      expect(resolved, path.join(r'D:\Temp', 'VNT App 2.0'));
+      expect(resolved, path.windows.join(r'D:\Temp', 'VNT App 2.0'));
+    });
+  });
+
+  group('RuntimeStoragePaths.resolveBundledPathForExecutable', () {
+    test('uses Contents/Resources for macOS app bundles', () {
+      final resolved = RuntimeStoragePaths.resolveBundledPathForExecutable(
+        executablePath: '/Applications/vnt_app.app/Contents/MacOS/vnt_app',
+        relativePath: 'remote_assist/VNTC RustDesk.app',
+        isMacOS: true,
+      );
+
+      expect(
+        resolved,
+        path.join(
+          '/Applications/vnt_app.app/Contents/Resources',
+          'remote_assist',
+          'VNTC RustDesk.app',
+        ),
+      );
+    });
+
+    test('uses executable directory outside macOS app bundles', () {
+      final resolved = RuntimeStoragePaths.resolveBundledPathForExecutable(
+        executablePath: '/tmp/vnt_app',
+        relativePath: 'remote_assist/VNTC RustDesk.app',
+        isMacOS: true,
+      );
+
+      expect(
+        resolved,
+        path.join('/tmp', 'remote_assist', 'VNTC RustDesk.app'),
+      );
     });
   });
 }

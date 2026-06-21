@@ -8,6 +8,7 @@ import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'remote_assist_constants.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
+import 'remote_assist_macos_adapter.dart';
 import 'remote_assist_platform_adapter.dart';
 import 'remote_assist_presence_service.dart';
 import 'remote_assist_utils.dart';
@@ -44,6 +45,9 @@ class RemoteAssistManager extends ChangeNotifier {
   static RemoteAssistPlatformAdapter _createAdapter() {
     if (Platform.isWindows) {
       return RemoteAssistWindowsAdapter();
+    }
+    if (Platform.isMacOS) {
+      return RemoteAssistMacosAdapter();
     }
     return const RemoteAssistUnsupportedAdapter();
   }

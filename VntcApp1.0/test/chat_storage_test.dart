@@ -116,4 +116,44 @@ void main() {
     expect(afterRead?.unreadCount, 0);
     expect(unreadAfterRead, 0);
   });
+
+  group('默认聊天室存储目录', () {
+    test('macOS 类平台使用应用支持目录，避免写入根目录 /config', () {
+      final resolved =
+          ChatStorage.resolveDefaultChatRootDirectoryPathForPlatform(
+        useApplicationSupportDirectory: true,
+        applicationSupportDirectoryPath:
+            path.join('/Users/test/Library/Application Support', 'vnt_app'),
+        configDirectoryPath: path.join(path.separator, 'config'),
+      );
+
+      expect(
+        resolved,
+        path.join(
+          '/Users/test/Library/Application Support',
+          'vnt_app',
+          'chat',
+        ),
+      );
+      expect(resolved, isNot(path.join(path.separator, 'config', 'chat')));
+    });
+
+    test('Windows 便携式场景继续使用 config 目录', () {
+      final resolved =
+          ChatStorage.resolveDefaultChatRootDirectoryPathForPlatform(
+        useApplicationSupportDirectory: false,
+        applicationSupportDirectoryPath:
+            path.join('/Users/test/Library/Application Support', 'vnt_app'),
+        configDirectoryPath: path.windows.join(
+          r'C:\Apps\VNT App 2.0',
+          'config',
+        ),
+      );
+
+      expect(
+        resolved,
+        path.join(path.windows.join(r'C:\Apps\VNT App 2.0', 'config'), 'chat'),
+      );
+    });
+  });
 }

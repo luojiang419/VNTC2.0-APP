@@ -5,9 +5,11 @@
 *.swp
 .DS_Store
 .atom/
+.build/
 .buildlog/
 .history
 .svn/
+.swiftpm/
 migrate_working_dir/
 
 # IntelliJ related
@@ -34,6 +36,7 @@ migrate_working_dir/
 /output/
 /backup/
 /temp/
+/third_party/vntcrustdesk/macos/dist/
 /configure-access-password/
 /rust/target/
 /android/.kotlin/

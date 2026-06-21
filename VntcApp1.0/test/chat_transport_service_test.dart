@@ -23,6 +23,55 @@ void main() {
     expect(left, right);
   });
 
+  test('聊天室大厅ID忽略传输协议差异', () {
+    final tcpHallId = buildHallId(
+      connectServer: 'tcp://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.0',
+    );
+    final quicHallId = buildHallId(
+      connectServer: 'quic://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.0',
+    );
+
+    expect(tcpHallId, quicHallId);
+    expect(tcpHallId, 'hall:115.231.35.105:2225|10.10.10.0');
+  });
+
+  test('旧大厅ID可归一化为跨平台稳定ID', () {
+    expect(
+      normalizeChatHallId('hall:tcp://115.231.35.105:2225|10.10.10.0'),
+      'hall:115.231.35.105:2225|10.10.10.0',
+    );
+    expect(
+      normalizeChatHallId('hall:quic://115.231.35.105:2225|10.10.10.0'),
+      'hall:115.231.35.105:2225|10.10.10.0',
+    );
+    expect(
+      buildDirectConversationId(
+        hallId: 'hall:quic://115.231.35.105:2225|10.10.10.0',
+        firstVirtualIp: '10.10.10.6',
+        secondVirtualIp: '10.10.10.2',
+      ),
+      'dm:hall:115.231.35.105:2225|10.10.10.0:10.10.10.2|10.10.10.6',
+    );
+    expect(
+      buildLegacyDirectConversationId(
+        hallId: 'hall:quic://115.231.35.105:2225|10.10.10.0',
+        firstVirtualIp: '10.10.10.6',
+        secondVirtualIp: '10.10.10.2',
+      ),
+      'dm:hall:quic://115.231.35.105:2225|10.10.10.0:10.10.10.2|10.10.10.6',
+    );
+    expect(
+      buildLegacyRoomId(
+        hallId: 'hall:quic://115.231.35.105:2225|10.10.10.0',
+        creatorVirtualIp: '10.10.10.6',
+        roomToken: 'room-token',
+      ),
+      'room:hall:quic://115.231.35.105:2225|10.10.10.0:10.10.10.6:room-token',
+    );
+  });
+
   test('聊天TCP传输服务可以收发文本消息', () async {
     final service = ChatTransportService();
     final completer = Completer<ChatTransportPacket>();
@@ -66,7 +115,8 @@ void main() {
         packet: packet,
         port: port,
       );
-      final received = await completer.future.timeout(const Duration(seconds: 3));
+      final received =
+          await completer.future.timeout(const Duration(seconds: 3));
       expect(received.type, 'message');
       expect(received.message?.text, 'transport ok');
     } finally {
@@ -131,7 +181,8 @@ void main() {
         packet: packet,
         port: port,
       );
-      final received = await completer.future.timeout(const Duration(seconds: 3));
+      final received =
+          await completer.future.timeout(const Duration(seconds: 3));
       expect(received.message?.attachment?.fileName, 'sample.txt');
       expect(received.attachmentBase64, 'aGVsbG8gd29ybGQ=');
     } finally {
