@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as path;
 import 'package:record/record.dart';
@@ -241,32 +242,51 @@ class _ChatPageState extends State<ChatPage>
 
   Widget _buildHallTab(BuildContext context, bool isDark) {
     if (_manager.halls.isEmpty) {
+      final hasVntConnection = _manager.hasActiveVntConnections;
+      final startupIssue = _manager.chatStartupIssue;
+      final baseMessage = hasVntConnection
+          ? _manager.lastVntConnectionIssue == null
+              ? '已检测到 VNT 连接，正在读取 VNT 大厅和虚拟组网状态。'
+              : '已检测到 VNT 连接，但还没有可用于聊天室的虚拟 IP 或网段：${_manager.lastVntConnectionIssue}'
+          : '先去连接一个虚拟组网配置，聊天室才会出现公共大厅和在线用户。';
       return _buildEmptyState(
         context,
         isDark,
-        title: '尚未连接任何 VNT 大厅',
-        message: '先去连接一个虚拟组网配置，聊天室才会出现公共大厅和在线用户。',
-        icon: Icons.wifi_off_outlined,
+        title: hasVntConnection ? '正在读取 VNT 大厅' : '尚未连接任何 VNT 大厅',
+        message:
+            startupIssue == null ? baseMessage : '$baseMessage\n$startupIssue',
+        icon: hasVntConnection
+            ? Icons.wifi_find_outlined
+            : Icons.wifi_off_outlined,
       );
     }
 
     final selectedHallId = _manager.selectedHallId ?? _manager.halls.first.id;
     final selectedConversation = _resolveHallConversation(selectedHallId);
     final layoutIsWide = MediaQuery.of(context).size.width >= 1080;
+    final startupIssue = _manager.chatStartupIssue;
 
     if (layoutIsWide) {
-      return Row(
+      return Column(
         children: [
-          SizedBox(
-            width: context.w(280),
-            child: _buildHallUsersPanel(context, isDark, selectedHallId),
-          ),
+          if (startupIssue != null)
+            _buildStartupIssueBanner(context, isDark, startupIssue),
           Expanded(
-            child: _buildHallContent(
-              context,
-              isDark,
-              selectedHallId,
-              selectedConversation,
+            child: Row(
+              children: [
+                SizedBox(
+                  width: context.w(280),
+                  child: _buildHallUsersPanel(context, isDark, selectedHallId),
+                ),
+                Expanded(
+                  child: _buildHallContent(
+                    context,
+                    isDark,
+                    selectedHallId,
+                    selectedConversation,
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -275,6 +295,8 @@ class _ChatPageState extends State<ChatPage>
 
     return Column(
       children: [
+        if (startupIssue != null)
+          _buildStartupIssueBanner(context, isDark, startupIssue),
         SizedBox(
           height: context.w(220),
           child: _buildHallUsersPanel(context, isDark, selectedHallId),
@@ -288,6 +310,55 @@ class _ChatPageState extends State<ChatPage>
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildStartupIssueBanner(
+    BuildContext context,
+    bool isDark,
+    String message,
+  ) {
+    final warningColor = Colors.orange.shade700;
+    return Container(
+      width: double.infinity,
+      margin: EdgeInsets.fromLTRB(
+        context.spacingLarge,
+        context.spacingMedium,
+        context.spacingLarge,
+        0,
+      ),
+      padding: EdgeInsets.symmetric(
+        horizontal: context.spacingMedium,
+        vertical: context.spacingSmall,
+      ),
+      decoration: BoxDecoration(
+        color: warningColor.withValues(alpha: isDark ? 0.16 : 0.10),
+        borderRadius: BorderRadius.circular(context.cardRadius),
+        border: Border.all(
+          color: warningColor.withValues(alpha: isDark ? 0.42 : 0.28),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.warning_amber_rounded,
+            color: warningColor,
+            size: context.iconMedium,
+          ),
+          SizedBox(width: context.spacingSmall),
+          Expanded(
+            child: Text(
+              message,
+              style: TextStyle(
+                fontSize: context.fontSmall,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -1284,14 +1355,35 @@ class _ChatPageState extends State<ChatPage>
             ),
           ),
           Expanded(
-            child: TextField(
-              controller: _textController,
-              minLines: 1,
-              maxLines: 5,
-              decoration: const InputDecoration(
-                hintText: '输入消息后按发送',
+            child: Shortcuts(
+              shortcuts: const <ShortcutActivator, Intent>{
+                SingleActivator(
+                  LogicalKeyboardKey.enter,
+                  includeRepeats: false,
+                ): _SubmitChatComposerIntent(),
+                SingleActivator(
+                  LogicalKeyboardKey.numpadEnter,
+                  includeRepeats: false,
+                ): _SubmitChatComposerIntent(),
+              },
+              child: Actions(
+                actions: <Type, Action<Intent>>{
+                  _SubmitChatComposerIntent: _SubmitChatComposerAction(
+                    shouldHandle: _shouldHandleComposerSubmitShortcut,
+                    onSubmit: () => _submitComposerFromKeyboard(conversation),
+                  ),
+                },
+                child: TextField(
+                  controller: _textController,
+                  keyboardType: TextInputType.multiline,
+                  textInputAction: TextInputAction.newline,
+                  minLines: 1,
+                  maxLines: 5,
+                  decoration: const InputDecoration(
+                    hintText: '输入消息后按发送',
+                  ),
+                ),
               ),
-              onSubmitted: (_) => _sendCurrentText(conversation),
             ),
           ),
           SizedBox(width: context.spacingSmall),
@@ -1310,8 +1402,8 @@ class _ChatPageState extends State<ChatPage>
       context,
       isDark,
       title: '当前平台暂未接入聊天室',
-      message: '按照当前实现计划，聊天室首版优先覆盖 Windows 桌面端。',
-      icon: Icons.desktop_windows_outlined,
+      message: '聊天室当前支持 Windows 和 macOS 桌面端。',
+      icon: Icons.desktop_mac_outlined,
     );
   }
 
@@ -1496,6 +1588,21 @@ class _ChatPageState extends State<ChatPage>
     } finally {
       controller.dispose();
     }
+  }
+
+  bool _shouldHandleComposerSubmitShortcut() {
+    final composing = _textController.value.composing;
+    return !composing.isValid || composing.isCollapsed;
+  }
+
+  void _submitComposerFromKeyboard(ChatConversation conversation) {
+    if (!_shouldHandleComposerSubmitShortcut()) {
+      return;
+    }
+    if (_textController.text.trim().isEmpty) {
+      return;
+    }
+    unawaited(_sendCurrentText(conversation));
   }
 
   Future<void> _sendCurrentText(ChatConversation conversation) async {
@@ -1774,5 +1881,35 @@ class _ChatPageState extends State<ChatPage>
       return '$partialLabel（成功 ${result.deliveredRecipients}/${result.attemptedRecipients}）';
     }
     return '$failureLabel（成功 ${result.deliveredRecipients}/${result.attemptedRecipients}）';
+  }
+}
+
+class _SubmitChatComposerIntent extends Intent {
+  const _SubmitChatComposerIntent();
+}
+
+class _SubmitChatComposerAction extends Action<_SubmitChatComposerIntent> {
+  _SubmitChatComposerAction({
+    required this.shouldHandle,
+    required this.onSubmit,
+  });
+
+  final bool Function() shouldHandle;
+  final VoidCallback onSubmit;
+
+  @override
+  bool isEnabled(_SubmitChatComposerIntent intent) {
+    return shouldHandle();
+  }
+
+  @override
+  bool consumesKey(_SubmitChatComposerIntent intent) {
+    return shouldHandle();
+  }
+
+  @override
+  Object? invoke(_SubmitChatComposerIntent intent) {
+    onSubmit();
+    return null;
   }
 }

@@ -40,7 +40,11 @@ impl InternalNatInbound {
         };
         let (ip_stack, ip_stack_send, ip_stack_recv) = tcp_ip::ip_stack(ip_stack_config)?;
         #[cfg(not(target_os = "android"))]
-        icmp_nat::start_icmp_nat(task_group, &ip_stack, no_tun, network.clone()).await?;
+        if let Err(err) =
+            icmp_nat::start_icmp_nat(task_group, &ip_stack, no_tun, network.clone()).await
+        {
+            log::warn!("icmp nat disabled: {err:?}");
+        }
         tcp_nat::start_tcp_nat(task_group, &ip_stack, no_tun, network.clone()).await?;
         udp_nat::start_udp_nat(task_group, &ip_stack).await?;
         task_group.spawn(async move {

@@ -132,7 +132,11 @@ class VntBox {
     required this.vntConfig,
     required this.networkConfig,
   });
-  static Future<VntBox> create(NetworkConfig config, SendPort uiCall) async {
+  static Future<VntBox> create(
+    NetworkConfig config,
+    SendPort uiCall, {
+    VoidCallback? onConnectionChanged,
+  }) async {
     final compatibleServerList = config.v2CompatibleServerList;
     final compatibleServerAddress = compatibleServerList.isNotEmpty
         ? compatibleServerList.join('\n')
@@ -173,6 +177,7 @@ class VntBox {
         disableRelay: config.disableRelay);
     var vntCall = VntApiCallback(successFn: () {
       uiCall.send('success');
+      onConnectionChanged?.call();
     }, createTunFn: (info) {
       // uiCall.send(info);
     }, connectFn: (info) {
@@ -190,6 +195,7 @@ class VntBox {
         return fd;
       } catch (e) {
         debugPrint('创建vpn异常 $e');
+        onConnectionChanged?.call();
         uiCall.send('stop');
         return 0;
       }
@@ -198,8 +204,12 @@ class VntBox {
     }, errorFn: (info) {
       debugPrint('服务异常 类型 ${info.code.name} ${info.msg ?? ''}');
       uiCall.send(info);
+      if (info.code != RustErrorType.warn) {
+        onConnectionChanged?.call();
+      }
     }, stopFn: () {
       uiCall.send('stop');
+      onConnectionChanged?.call();
     });
     var vntApi = await vntInit(vntConfig: vntConfig, call: vntCall);
 
@@ -270,6 +280,7 @@ class VntManager {
   bool connecting = false;
   // 记录主动断开连接的配置key，避免显示"服务已停止"提示
   final Set<String> _manualDisconnecting = {};
+  final List<VoidCallback> _connectionListeners = <VoidCallback>[];
 
   // 判断设备是否在线 - 不区分大小写，去掉空格和换行
   bool _isDeviceOnline(String status) {
@@ -291,6 +302,28 @@ class VntManager {
     _manualDisconnecting.remove(key);
   }
 
+  void addConnectionListener(VoidCallback listener) {
+    if (_connectionListeners.contains(listener)) {
+      return;
+    }
+    _connectionListeners.add(listener);
+  }
+
+  void removeConnectionListener(VoidCallback listener) {
+    _connectionListeners.remove(listener);
+  }
+
+  @visibleForTesting
+  void debugNotifyConnectionsChanged() {
+    _notifyConnectionsChanged();
+  }
+
+  void _notifyConnectionsChanged() {
+    for (final listener in List<VoidCallback>.from(_connectionListeners)) {
+      listener();
+    }
+  }
+
   Future<VntBox> create(NetworkConfig config, SendPort uiCall) async {
     var key = config.itemKey;
     if (map.containsKey(key)) {
@@ -309,8 +342,13 @@ class VntManager {
         }
       }
 
-      var vntBox = await VntBox.create(config, uiCall);
+      var vntBox = await VntBox.create(
+        config,
+        uiCall,
+        onConnectionChanged: _notifyConnectionsChanged,
+      );
       map[key] = vntBox;
+      _notifyConnectionsChanged();
       return vntBox;
     } finally {
       connecting = false;
@@ -330,6 +368,7 @@ class VntManager {
     if (vnt != null) {
       await vnt.close();
     }
+    _notifyConnectionsChanged();
     // 更新磁贴和小组件状态
     if (Platform.isAndroid) {
       VntAppCall.updateWidgetAndTile(hasConnection());
@@ -341,6 +380,7 @@ class VntManager {
       await element.value.close();
     }
     map.clear();
+    _notifyConnectionsChanged();
     // 更新磁贴和小组件状态
     if (Platform.isAndroid) {
       VntAppCall.updateWidgetAndTile(false);
@@ -360,13 +400,21 @@ class VntManager {
     if (map.isEmpty) {
       return false;
     }
-    map.removeWhere((key, val) => val.isClosed());
+    _removeClosedConnections();
     return map.isNotEmpty;
   }
 
   int size() {
-    map.removeWhere((key, val) => val.isClosed());
+    _removeClosedConnections();
     return map.length;
+  }
+
+  void _removeClosedConnections() {
+    final before = map.length;
+    map.removeWhere((key, val) => val.isClosed());
+    if (map.length != before) {
+      scheduleMicrotask(_notifyConnectionsChanged);
+    }
   }
 
   bool supportMultiple() {

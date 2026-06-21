@@ -12,6 +12,8 @@ void main() {
     bool bundledBootstrapAvailable = false,
     bool controllerAvailable = false,
     bool controlledServiceRunning = false,
+    bool portListening = false,
+    bool vntConnected = true,
     bool notificationPermissionGranted = false,
     bool screenCapturePermissionGranted = false,
     bool accessibilityPermissionGranted = false,
@@ -25,11 +27,11 @@ void main() {
         RemoteAssistConstants.capabilityController,
         RemoteAssistConstants.capabilityControlled,
       ],
-      vntConnected: true,
+      vntConnected: vntConnected,
       runtimeAvailable: runtimeAvailable,
       serviceInstalled: serviceInstalled,
       serviceRunning: false,
-      portListening: false,
+      portListening: portListening,
       firewallTcpRulePresent: false,
       firewallUdpRulePresent: false,
       firewallSyncSucceeded: false,
@@ -103,5 +105,36 @@ void main() {
     expect(status.primaryActionLabel, '同步状态');
     expect(status.needsAndroidPermissionGuidance, isTrue);
     expect(status.canAttemptRepair, isTrue);
+  });
+
+  test('macOS status exposes bundled runtime and controlled readiness', () {
+    final status = buildStatus(
+      platform: RemoteAssistPlatform.macos,
+      runtimeAvailable: true,
+      managedInstall: true,
+      controllerAvailable: true,
+      controlledServiceRunning: true,
+      portListening: true,
+    );
+
+    expect(status.isMacOS, isTrue);
+    expect(status.installationModeDescription, '当前应用已内置 macOS 远控组件');
+    expect(status.primaryActionLabel, '同步状态');
+    expect(status.controllerReady, isTrue);
+    expect(status.controlledReady, isTrue);
+  });
+
+  test('macOS controlled readiness requires VNT connection', () {
+    final status = buildStatus(
+      platform: RemoteAssistPlatform.macos,
+      runtimeAvailable: true,
+      controllerAvailable: true,
+      controlledServiceRunning: true,
+      portListening: true,
+      vntConnected: false,
+    );
+
+    expect(status.controllerReady, isFalse);
+    expect(status.controlledReady, isFalse);
   });
 }

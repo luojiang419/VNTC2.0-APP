@@ -61,7 +61,9 @@ void main() {
     expect(decoded.sentAtEpochMs, announcement.sentAtEpochMs);
   });
 
-  test('presence announcement derives supported roles from legacy capability payload', () {
+  test(
+      'presence announcement derives supported roles from legacy capability payload',
+      () {
     final decoded = RemoteAssistPresenceAnnouncement.fromJson(
       const <String, dynamic>{
         'displayName': 'Android-1',
@@ -86,5 +88,36 @@ void main() {
         RemoteAssistConstants.capabilityControlled,
       ],
     );
+  });
+
+  test('macOS presence announcement round trip preserves platform token', () {
+    const announcement = RemoteAssistPresenceAnnouncement(
+      displayName: 'MacBook',
+      virtualIp: '10.0.0.9',
+      networkName: '默认网络',
+      version: '2.0.0',
+      platform: RemoteAssistPlatform.macos,
+      supportedRoles: <String>[
+        RemoteAssistConstants.capabilityController,
+        RemoteAssistConstants.capabilityControlled,
+      ],
+      capabilities: <String>[
+        RemoteAssistConstants.capabilityMacos,
+        RemoteAssistConstants.capabilityController,
+        RemoteAssistConstants.capabilityControlled,
+      ],
+      sentAtEpochMs: 456,
+    );
+
+    final decoded = RemoteAssistPresenceAnnouncement.fromJson(
+      announcement.toJson(),
+    );
+
+    expect(RemoteAssistPlatform.fromToken('macos'), RemoteAssistPlatform.macos);
+    expect(
+        RemoteAssistPlatform.fromToken('darwin'), RemoteAssistPlatform.macos);
+    expect(decoded.platform, RemoteAssistPlatform.macos);
+    expect(decoded.supportedRoles, announcement.supportedRoles);
+    expect(decoded.capabilities, announcement.capabilities);
   });
 }

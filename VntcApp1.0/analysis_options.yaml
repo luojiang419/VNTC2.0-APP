@@ -14,6 +14,7 @@ analyzer:
     - backup/**
     - packages/**
     - rust_builder/**
+    - vntcrustdesk-src/**
 
 linter:
   # The lint rules applied to this project can be customized in the

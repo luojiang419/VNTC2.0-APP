@@ -16,7 +16,7 @@ use vnt_core::core::{NetworkManager, RegisterResponse};
 use vnt_core::nat::NetInput;
 use vnt_core::port_mapping::PortMapping;
 use vnt_core::tls::verifier::CertValidationMode;
-use vnt_core::tunnel_core::server::transport::config::ProtocolAddress;
+use vnt_core::tunnel_core::server::transport::config::{ProtocolAddress, ProtocolType};
 use vnt_core::utils::task_control::{TaskGroupGuard, TaskGroupManager};
 
 const CORE_VERSION: &str = "2.0.0";
@@ -120,8 +120,6 @@ pub struct VntApi {
 impl VntApi {
     pub fn new(vnt_config: VntConfig, call: VntApiCallback) -> anyhow::Result<VntApi> {
         let (core_config, connect_targets) = convert_to_core_config(&vnt_config)?;
-        let task_manager = TaskGroupManager::new();
-        let (task_group, task_group_guard) = task_manager.create_task()?;
         let runtime = Runtime::new().context("创建 Tokio Runtime 失败")?;
 
         for (index, address) in connect_targets.iter().enumerate() {
@@ -131,15 +129,64 @@ impl VntApi {
             });
         }
 
-        let (network_manager, network_addr) = match runtime.block_on(async {
-            start_network(core_config, task_group, call.clone()).await
-        }) {
+        let mut attempts = vec![core_config.clone()];
+        if let Some(fallback_config) = tcp_fallback_config_for_quic(&core_config) {
+            attempts.push(fallback_config);
+        }
+
+        let fallback_allowed = attempts_supports_tcp_fallback(&core_config);
+        let mut last_error = None;
+        let mut result = None;
+        let mut fallback_used = false;
+
+        for (index, config) in attempts.into_iter().enumerate() {
+            let task_manager = TaskGroupManager::new();
+            let (task_group, task_group_guard) = match task_manager.create_task() {
                 Ok(value) => value,
                 Err(err) => {
-                    call.emit_error(error_info_from_error(&err));
-                    return Err(err);
+                    last_error = Some(err);
+                    break;
                 }
             };
+            if index > 0 {
+                fallback_used = true;
+                if let Some(address) = config.server_addr.first() {
+                    call.emit_connect(RustConnectInfo {
+                        count: connect_targets.len() + index,
+                        address: address.to_string(),
+                    });
+                }
+            }
+            match runtime
+                .block_on(async { start_network(config.clone(), task_group, call.clone()).await })
+            {
+                Ok((network_manager, network_addr)) => {
+                    result = Some((network_manager, network_addr, task_group_guard));
+                    break;
+                }
+                Err(err) => {
+                    let retry =
+                        index == 0 && fallback_allowed && is_transport_retryable_error(&err);
+                    last_error = Some(err);
+                    if !retry {
+                        break;
+                    }
+                }
+            }
+        }
+
+        let (network_manager, network_addr, task_group_guard) = match result {
+            Some(value) => value,
+            None => {
+                let err = last_error.unwrap_or_else(|| anyhow!("启动 VNT 网络失败"));
+                call.emit_error(error_info_from_error(&err));
+                return Err(err);
+            }
+        };
+
+        if fallback_used {
+            log::warn!("QUIC 连接失败，已回退到 TCP 传输");
+        }
 
         call.emit_handshake(RustHandshakeInfo {
             finger: None,
@@ -364,17 +411,42 @@ async fn start_network(
         }
         #[cfg(not(target_os = "android"))]
         {
-        network_manager
-            .start_tun()
-            .await
-            .context("启动虚拟网卡失败")?;
-        network_manager
-            .set_tun_network_ip(network_addr.ip, network_addr.prefix_len)
-            .await
-            .context("设置虚拟网卡 IP 失败")?;
+            network_manager
+                .start_tun()
+                .await
+                .context("启动虚拟网卡失败")?;
+            network_manager
+                .set_tun_network_ip(network_addr.ip, network_addr.prefix_len)
+                .await
+                .context("设置虚拟网卡 IP 失败")?;
         }
     }
     Ok((network_manager, network_addr))
+}
+
+fn attempts_supports_tcp_fallback(core_config: &CoreConfig) -> bool {
+    tcp_fallback_config_for_quic(core_config).is_some()
+}
+
+fn tcp_fallback_config_for_quic(core_config: &CoreConfig) -> Option<CoreConfig> {
+    if core_config.server_addr.len() != 1 {
+        return None;
+    }
+    if core_config.server_addr.first()?.protocol_type != ProtocolType::Quic {
+        return None;
+    }
+
+    let mut fallback_config = core_config.clone();
+    fallback_config.server_addr[0].protocol_type = ProtocolType::TlsTcp;
+    Some(fallback_config)
+}
+
+fn is_transport_retryable_error(error: &anyhow::Error) -> bool {
+    let message = format!("{error:#}").to_lowercase();
+    message.contains("timeout")
+        || message.contains("deadline has elapsed")
+        || message.contains("failed to establish quic")
+        || message.contains("connection refused")
 }
 
 fn build_android_tun_config(

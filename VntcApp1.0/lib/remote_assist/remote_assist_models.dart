@@ -3,6 +3,7 @@ import 'remote_assist_constants.dart';
 enum RemoteAssistPlatform {
   windows('windows'),
   android('android'),
+  macos('macos'),
   unsupported('unsupported');
 
   const RemoteAssistPlatform(this.token);
@@ -15,6 +16,10 @@ enum RemoteAssistPlatform {
         return RemoteAssistPlatform.windows;
       case 'android':
         return RemoteAssistPlatform.android;
+      case 'macos':
+      case 'mac':
+      case 'darwin':
+        return RemoteAssistPlatform.macos;
       default:
         return RemoteAssistPlatform.unsupported;
     }
@@ -268,6 +273,7 @@ class RemoteAssistHealthStatus {
 
   bool get isWindows => platform == RemoteAssistPlatform.windows;
   bool get isAndroid => platform == RemoteAssistPlatform.android;
+  bool get isMacOS => platform == RemoteAssistPlatform.macos;
 
   bool get supportsControllerRole =>
       supportedRoles.contains(RemoteAssistConstants.capabilityController);
@@ -306,7 +312,10 @@ class RemoteAssistHealthStatus {
           listenerReady &&
           permissionsReady;
     }
-    return supported && controlledServiceRunning && listenerReady;
+    return supported &&
+        vntConnected &&
+        controlledServiceRunning &&
+        listenerReady;
   }
 
   bool get canLaunch => controllerReady;
@@ -337,6 +346,15 @@ class RemoteAssistHealthStatus {
           ? '当前应用内置 Android 远控组件'
           : '当前应用内置 Android 控制端组件';
     }
+    if (isMacOS) {
+      if (managedInstall) {
+        return '当前应用已内置 macOS 远控组件';
+      }
+      if (runtimeAvailable) {
+        return '已检测到 /Applications 中的 macOS 远控组件';
+      }
+      return '当前 macOS 包未内置远控组件';
+    }
     if (managedInstall) {
       return '受当前安装器管理';
     }
@@ -349,5 +367,5 @@ class RemoteAssistHealthStatus {
     return '当前目录未携带远程协助安装组件';
   }
 
-  String get primaryActionLabel => isAndroid ? '同步状态' : '安装/修复';
+  String get primaryActionLabel => isAndroid || isMacOS ? '同步状态' : '安装/修复';
 }

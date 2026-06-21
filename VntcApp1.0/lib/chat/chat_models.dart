@@ -46,10 +46,59 @@ String buildHallId({
   required String connectServer,
   required String virtualNetwork,
 }) {
-  return 'hall:$connectServer|$virtualNetwork';
+  return 'hall:${normalizeChatConnectServer(connectServer)}|${virtualNetwork.trim()}';
+}
+
+String buildLegacyChatHallId({
+  required String connectServer,
+  required String virtualNetwork,
+}) {
+  final server =
+      connectServer.trim().isEmpty ? 'unknown' : connectServer.trim();
+  return 'hall:$server|${virtualNetwork.trim()}';
+}
+
+String normalizeChatConnectServer(String connectServer) {
+  var normalized = connectServer.trim();
+  if (normalized.isEmpty) {
+    return 'unknown';
+  }
+  final schemeIndex = normalized.indexOf('://');
+  if (schemeIndex > 0) {
+    normalized = normalized.substring(schemeIndex + 3);
+  }
+  while (normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return normalized.toLowerCase();
+}
+
+String normalizeChatHallId(String hallId) {
+  final trimmed = hallId.trim();
+  if (!trimmed.startsWith('hall:')) {
+    return trimmed;
+  }
+  final body = trimmed.substring('hall:'.length);
+  final separatorIndex = body.lastIndexOf('|');
+  if (separatorIndex <= 0 || separatorIndex == body.length - 1) {
+    return trimmed;
+  }
+  return buildHallId(
+    connectServer: body.substring(0, separatorIndex),
+    virtualNetwork: body.substring(separatorIndex + 1),
+  );
 }
 
 String buildDirectConversationId({
+  required String hallId,
+  required String firstVirtualIp,
+  required String secondVirtualIp,
+}) {
+  final ips = [firstVirtualIp, secondVirtualIp]..sort();
+  return 'dm:${normalizeChatHallId(hallId)}:${ips[0]}|${ips[1]}';
+}
+
+String buildLegacyDirectConversationId({
   required String hallId,
   required String firstVirtualIp,
   required String secondVirtualIp,
@@ -63,6 +112,14 @@ String buildRoomId({
   required String creatorVirtualIp,
   required String roomToken,
 }) {
+  return 'room:${normalizeChatHallId(hallId)}:$creatorVirtualIp:$roomToken';
+}
+
+String buildLegacyRoomId({
+  required String hallId,
+  required String creatorVirtualIp,
+  required String roomToken,
+}) {
   return 'room:$hallId:$creatorVirtualIp:$roomToken';
 }
 
@@ -70,7 +127,7 @@ String buildPresencePeerKey({
   required String hallId,
   required String virtualIp,
 }) {
-  return '$hallId|$virtualIp';
+  return '${normalizeChatHallId(hallId)}|$virtualIp';
 }
 
 T _parseEnum<T>(List<T> values, String raw, T fallback) {

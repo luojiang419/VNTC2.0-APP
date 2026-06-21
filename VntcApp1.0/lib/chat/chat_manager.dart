@@ -16,6 +16,34 @@ import 'package:vnt_app/chat/chat_transport_service.dart';
 import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 
+@visibleForTesting
+bool isChatSupportedPlatform({
+  required bool isWindows,
+  required bool isMacOS,
+}) {
+  return isWindows || isMacOS;
+}
+
+@visibleForTesting
+String? buildChatStartupIssueMessage({
+  String? transportError,
+  String? presenceError,
+  String? refreshError,
+}) {
+  final issues = <String>[
+    if (transportError?.trim().isNotEmpty == true)
+      '消息监听未就绪：${transportError!.trim()}',
+    if (presenceError?.trim().isNotEmpty == true)
+      '在线状态广播未就绪：${presenceError!.trim()}',
+    if (refreshError?.trim().isNotEmpty == true)
+      '大厅刷新未就绪：${refreshError!.trim()}',
+  ];
+  if (issues.isEmpty) {
+    return null;
+  }
+  return issues.join('；');
+}
+
 class ChatManager extends ChangeNotifier {
   ChatManager._();
 
@@ -49,8 +77,19 @@ class ChatManager extends ChangeNotifier {
   List<ChatPeerPresence> _onlinePeers = const [];
   Map<String, int> _syncCheckpoints = const {};
   String _lastFirewallStateKey = '';
+  String _lastVntSnapshotLogKey = '';
+  bool _listeningToVntConnections = false;
+  bool _transportStartInProgress = false;
+  int _observedVntConnectionCount = 0;
+  String? _transportStartError;
+  String? _presenceStartError;
+  String? _refreshError;
+  List<String> _lastSkippedVntStates = const [];
 
-  bool get supported => Platform.isWindows;
+  bool get supported => isChatSupportedPlatform(
+        isWindows: Platform.isWindows,
+        isMacOS: Platform.isMacOS,
+      );
   bool get loading => _loading || _refreshing;
   bool get started => _started;
   ChatMainTab get selectedTab => _selectedTab;
@@ -64,6 +103,15 @@ class ChatManager extends ChangeNotifier {
   List<ChatHall> get halls => List<ChatHall>.unmodifiable(_halls);
   List<ChatPeerPresence> get onlinePeers =>
       List<ChatPeerPresence>.unmodifiable(_onlinePeers);
+  bool get hasActiveVntConnections =>
+      _observedVntConnectionCount > 0 || _hasLiveVntConnectionSnapshot();
+  String? get chatStartupIssue => buildChatStartupIssueMessage(
+        transportError: _transportStartError,
+        presenceError: _presenceStartError,
+        refreshError: _refreshError,
+      );
+  String? get lastVntConnectionIssue =>
+      _lastSkippedVntStates.isEmpty ? null : _lastSkippedVntStates.first;
   List<ChatMessageRecord> get selectedMessages =>
       List<ChatMessageRecord>.unmodifiable(
         _messageCache[_selectedConversationId] ?? const [],
@@ -74,6 +122,340 @@ class ChatManager extends ChangeNotifier {
         _conversations
             .where((item) => item.type == ChatConversationType.direct),
       );
+
+  bool _hasLiveVntConnectionSnapshot() {
+    for (final box in vntManager.map.values) {
+      try {
+        if (!box.isClosed()) {
+          return true;
+        }
+      } catch (_) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  String? _resolveLocalHallId(String hallId) {
+    final normalizedHallId = normalizeChatHallId(hallId);
+    if (_localNodes.containsKey(normalizedHallId)) {
+      return normalizedHallId;
+    }
+    if (_localNodes.containsKey(hallId)) {
+      return hallId;
+    }
+    for (final localHallId in _localNodes.keys) {
+      if (normalizeChatHallId(localHallId) == normalizedHallId) {
+        return localHallId;
+      }
+    }
+    return null;
+  }
+
+  String? _canonicalRoomId(String? roomId, String localHallId) {
+    final value = roomId?.trim() ?? '';
+    if (value.isEmpty || !value.startsWith('room:')) {
+      return value.isEmpty ? null : value;
+    }
+    final tokenSeparator = value.lastIndexOf(':');
+    if (tokenSeparator <= 'room:'.length) {
+      return value;
+    }
+    final creatorSeparator = value.lastIndexOf(':', tokenSeparator - 1);
+    if (creatorSeparator <= 'room:'.length) {
+      return value;
+    }
+    final creatorVirtualIp =
+        value.substring(creatorSeparator + 1, tokenSeparator);
+    final roomToken = value.substring(tokenSeparator + 1);
+    if (creatorVirtualIp.trim().isEmpty || roomToken.trim().isEmpty) {
+      return value;
+    }
+    return buildRoomId(
+      hallId: localHallId,
+      creatorVirtualIp: creatorVirtualIp,
+      roomToken: roomToken,
+    );
+  }
+
+  ChatRoomDescriptor _canonicalizeRoomDescriptor(
+    ChatRoomDescriptor room,
+    String localHallId,
+  ) {
+    return ChatRoomDescriptor(
+      roomId: _canonicalRoomId(room.roomId, localHallId) ?? room.roomId,
+      hallId: localHallId,
+      roomName: room.roomName,
+      creatorVirtualIp: room.creatorVirtualIp,
+      locallyJoined: room.locallyJoined,
+      isActive: room.isActive,
+      lastSeenAtEpochMs: room.lastSeenAtEpochMs,
+      updatedAtEpochMs: room.updatedAtEpochMs,
+      metadataJson: room.metadataJson,
+    );
+  }
+
+  ChatMessageRecord _canonicalizeIncomingMessage(
+    ChatMessageRecord message,
+    String localHallId,
+    _LocalHallNode localNode,
+  ) {
+    final roomId = _canonicalRoomId(
+      message.roomId ??
+          (message.conversationType == ChatConversationType.room
+              ? message.conversationId
+              : null),
+      localHallId,
+    );
+    final conversationId = switch (message.conversationType) {
+      ChatConversationType.hall => localHallId,
+      ChatConversationType.direct => buildDirectConversationId(
+          hallId: localHallId,
+          firstVirtualIp: localNode.hall.localVirtualIp,
+          secondVirtualIp: message.senderVirtualIp,
+        ),
+      ChatConversationType.room => roomId ?? message.conversationId,
+    };
+    return ChatMessageRecord(
+      id: message.id,
+      conversationId: conversationId,
+      hallId: localHallId,
+      conversationType: message.conversationType,
+      senderVirtualIp: message.senderVirtualIp,
+      senderName: message.senderName,
+      senderSeq: message.senderSeq,
+      direction: message.direction,
+      contentType: message.contentType,
+      status: message.status,
+      text: message.text,
+      isSyncMessage: message.isSyncMessage,
+      isRead: message.isRead,
+      sentAtEpochMs: message.sentAtEpochMs,
+      createdAtEpochMs: message.createdAtEpochMs,
+      metadataJson: message.metadataJson,
+      peerVirtualIp: message.peerVirtualIp,
+      roomId: roomId,
+      attachmentId: message.attachmentId,
+      attachment: message.attachment,
+    );
+  }
+
+  List<String> _buildLegacyHallIds({
+    required String connectServer,
+    required String virtualNetwork,
+    required Object? networkConfig,
+    required String canonicalHallId,
+  }) {
+    final servers = <String>{
+      connectServer,
+    };
+    try {
+      final config = networkConfig as dynamic;
+      final primary = config.primaryServerAddress?.toString() ?? '';
+      if (primary.trim().isNotEmpty) {
+        servers.add(primary);
+      }
+      final effectiveList = config.effectiveServerList;
+      if (effectiveList is Iterable) {
+        for (final item in effectiveList) {
+          final value = item.toString();
+          if (value.trim().isNotEmpty) {
+            servers.add(value);
+          }
+        }
+      }
+      final compatibleList = config.v2CompatibleServerList;
+      if (compatibleList is Iterable) {
+        for (final item in compatibleList) {
+          final value = item.toString();
+          if (value.trim().isNotEmpty) {
+            servers.add(value);
+          }
+        }
+      }
+    } catch (_) {
+      // 兼容测试桩和旧配置对象，取不到配置字段时只保留当前连接服务器。
+    }
+
+    return servers
+        .map((server) => buildLegacyChatHallId(
+              connectServer: server,
+              virtualNetwork: virtualNetwork,
+            ))
+        .where((hallId) => hallId != canonicalHallId)
+        .toSet()
+        .toList(growable: false);
+  }
+
+  String? _legacyRoomIdForHallAlias(String? roomId, String aliasHallId) {
+    final value = roomId?.trim() ?? '';
+    if (value.isEmpty || !value.startsWith('room:')) {
+      return value.isEmpty ? null : value;
+    }
+    final tokenSeparator = value.lastIndexOf(':');
+    if (tokenSeparator <= 'room:'.length) {
+      return value;
+    }
+    final creatorSeparator = value.lastIndexOf(':', tokenSeparator - 1);
+    if (creatorSeparator <= 'room:'.length) {
+      return value;
+    }
+    final creatorVirtualIp =
+        value.substring(creatorSeparator + 1, tokenSeparator);
+    final roomToken = value.substring(tokenSeparator + 1);
+    if (creatorVirtualIp.trim().isEmpty || roomToken.trim().isEmpty) {
+      return value;
+    }
+    return buildLegacyRoomId(
+      hallId: aliasHallId,
+      creatorVirtualIp: creatorVirtualIp,
+      roomToken: roomToken,
+    );
+  }
+
+  String _legacyConversationIdForHallAlias({
+    required String conversationId,
+    required ChatConversationType type,
+    required String aliasHallId,
+    required _LocalHallNode localNode,
+    required String targetIp,
+    String? roomId,
+  }) {
+    switch (type) {
+      case ChatConversationType.hall:
+        return aliasHallId;
+      case ChatConversationType.direct:
+        return buildLegacyDirectConversationId(
+          hallId: aliasHallId,
+          firstVirtualIp: localNode.hall.localVirtualIp,
+          secondVirtualIp: targetIp,
+        );
+      case ChatConversationType.room:
+        return _legacyRoomIdForHallAlias(
+                roomId ?? conversationId, aliasHallId) ??
+            conversationId;
+    }
+  }
+
+  ChatMessageRecord _messageForHallAlias({
+    required ChatMessageRecord message,
+    required String aliasHallId,
+    required _LocalHallNode localNode,
+    required String targetIp,
+  }) {
+    final roomId = _legacyRoomIdForHallAlias(message.roomId, aliasHallId);
+    return ChatMessageRecord(
+      id: message.id,
+      conversationId: _legacyConversationIdForHallAlias(
+        conversationId: message.conversationId,
+        type: message.conversationType,
+        aliasHallId: aliasHallId,
+        localNode: localNode,
+        targetIp: targetIp,
+        roomId: roomId,
+      ),
+      hallId: aliasHallId,
+      conversationType: message.conversationType,
+      senderVirtualIp: message.senderVirtualIp,
+      senderName: message.senderName,
+      senderSeq: message.senderSeq,
+      direction: message.direction,
+      contentType: message.contentType,
+      status: message.status,
+      text: message.text,
+      isSyncMessage: message.isSyncMessage,
+      isRead: message.isRead,
+      sentAtEpochMs: message.sentAtEpochMs,
+      createdAtEpochMs: message.createdAtEpochMs,
+      metadataJson: message.metadataJson,
+      peerVirtualIp: message.peerVirtualIp,
+      roomId: roomId,
+      attachmentId: message.attachmentId,
+      attachment: message.attachment,
+    );
+  }
+
+  ChatTransportPacket _packetForHallAlias({
+    required ChatTransportPacket packet,
+    required String aliasHallId,
+    required _LocalHallNode localNode,
+    required String targetIp,
+  }) {
+    final syncRequest = packet.syncRequest;
+    return ChatTransportPacket(
+      type: packet.type,
+      message: packet.message == null
+          ? null
+          : _messageForHallAlias(
+              message: packet.message!,
+              aliasHallId: aliasHallId,
+              localNode: localNode,
+              targetIp: targetIp,
+            ),
+      syncRequest: syncRequest == null
+          ? null
+          : ChatSyncRequestPayload(
+              hallId: aliasHallId,
+              requesterVirtualIp: syncRequest.requesterVirtualIp,
+              requesterName: syncRequest.requesterName,
+              joinedRoomIds: syncRequest.joinedRoomIds
+                  .map((roomId) =>
+                      _legacyRoomIdForHallAlias(roomId, aliasHallId) ?? roomId)
+                  .toList(growable: false),
+              summary: syncRequest.summary.map(
+                (conversationId, value) => MapEntry(
+                  _legacyConversationIdForHallAlias(
+                    conversationId: conversationId,
+                    type: conversationId == localNode.hall.id
+                        ? ChatConversationType.hall
+                        : conversationId.startsWith('dm:')
+                            ? ChatConversationType.direct
+                            : ChatConversationType.room,
+                    aliasHallId: aliasHallId,
+                    localNode: localNode,
+                    targetIp: targetIp,
+                    roomId: conversationId,
+                  ),
+                  value,
+                ),
+              ),
+            ),
+      attachmentBase64: packet.attachmentBase64,
+    );
+  }
+
+  Future<void> _sendPacketWithHallCompatibility({
+    required String targetIp,
+    required ChatTransportPacket packet,
+    required _LocalHallNode localNode,
+  }) async {
+    Object? firstError;
+    var sent = false;
+    final packets = <ChatTransportPacket>[
+      packet,
+      for (final aliasHallId in localNode.legacyHallIds)
+        _packetForHallAlias(
+          packet: packet,
+          aliasHallId: aliasHallId,
+          localNode: localNode,
+          targetIp: targetIp,
+        ),
+    ];
+    for (final candidate in packets) {
+      try {
+        await _transportService.sendPacket(
+          targetIp: targetIp,
+          packet: candidate,
+        );
+        sent = true;
+      } catch (error) {
+        firstError ??= error;
+      }
+    }
+    if (!sent) {
+      throw firstError ?? StateError('聊天报文发送失败');
+    }
+  }
 
   ChatConversation? get selectedConversation {
     final id = _selectedConversationId;
@@ -121,6 +503,12 @@ class ChatManager extends ChangeNotifier {
 
   Future<void> start() async {
     if (_started) {
+      if (supported) {
+        _ensureVntConnectionListener();
+        _ensureRefreshTimer();
+        unawaited(_ensureTransportStarted());
+        unawaited(refresh());
+      }
       return;
     }
     _started = true;
@@ -136,13 +524,11 @@ class ChatManager extends ChangeNotifier {
       return;
     }
 
-    await _transportService.start(onPacket: _handleTransportPacket);
-    await ChatLog.write('聊天室管理器已启动');
+    _ensureVntConnectionListener();
+    _ensureRefreshTimer();
+    await _ensureTransportStarted();
     await refresh();
-    _refreshTimer = Timer.periodic(
-      ChatConstants.refreshInterval,
-      (_) => unawaited(refresh()),
-    );
+    await ChatLog.write('聊天室管理器已启动');
   }
 
   Future<void> stop() async {
@@ -150,10 +536,68 @@ class ChatManager extends ChangeNotifier {
     _stopping = true;
     _refreshTimer?.cancel();
     _refreshTimer = null;
+    _removeVntConnectionListener();
     await _presenceService.stop();
     await _transportService.stop();
     await ChatLog.write('聊天室管理器已停止');
     _stopping = false;
+  }
+
+  void _ensureVntConnectionListener() {
+    if (_listeningToVntConnections) {
+      return;
+    }
+    vntManager.addConnectionListener(_handleVntConnectionsChanged);
+    _listeningToVntConnections = true;
+  }
+
+  void _removeVntConnectionListener() {
+    if (!_listeningToVntConnections) {
+      return;
+    }
+    vntManager.removeConnectionListener(_handleVntConnectionsChanged);
+    _listeningToVntConnections = false;
+  }
+
+  void _handleVntConnectionsChanged() {
+    if (!_started || _stopping || !supported) {
+      return;
+    }
+    unawaited(_ensureTransportStarted());
+    unawaited(refresh());
+  }
+
+  void _ensureRefreshTimer() {
+    _refreshTimer ??= Timer.periodic(
+      ChatConstants.refreshInterval,
+      (_) {
+        unawaited(_ensureTransportStarted());
+        unawaited(refresh());
+      },
+    );
+  }
+
+  Future<void> _ensureTransportStarted() async {
+    if (!supported ||
+        _stopping ||
+        _transportService.isRunning ||
+        _transportStartInProgress) {
+      return;
+    }
+    _transportStartInProgress = true;
+    try {
+      await _transportService.start(onPacket: _handleTransportPacket);
+      _transportStartError = null;
+      await ChatLog.write('聊天室消息监听已就绪');
+    } catch (error) {
+      _transportStartError = error.toString();
+      await ChatLog.write(
+        '聊天室消息监听启动失败，继续刷新 VNT 大厅: $error',
+      );
+    } finally {
+      _transportStartInProgress = false;
+      notifyListeners();
+    }
   }
 
   Future<void> reloadFromStorage({bool notify = true}) async {
@@ -183,8 +627,19 @@ class ChatManager extends ChangeNotifier {
     }
     _refreshing = true;
     notifyListeners();
+    final refreshIssues = <String>[];
     try {
-      final currentRooms = await _storage.loadRoomDescriptors();
+      var currentRooms = const <ChatRoomDescriptor>[];
+      try {
+        currentRooms = await _storage.loadRoomDescriptors();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '读取本地聊天室房间缓存',
+          error,
+          stackTrace,
+        );
+      }
       final joinedRoomsByHall = <String, List<ChatRoomDescriptor>>{};
       for (final room in currentRooms) {
         if (!room.locallyJoined) {
@@ -198,77 +653,119 @@ class ChatManager extends ChangeNotifier {
       final nextHalls = <ChatHall>[];
       final nextLocalNodes = <String, _LocalHallNode>{};
       final nextBasePeers = <_PeerSeed>[];
+      final skippedStates = <String>[];
+      var activeVntConnections = 0;
 
-      for (final entry in vntManager.map.entries) {
+      for (final entry in vntManager.map.entries.toList(growable: false)) {
         final box = entry.value;
-        if (box.isClosed()) {
+        bool isClosed;
+        try {
+          isClosed = box.isClosed();
+        } catch (error, stackTrace) {
+          activeVntConnections += 1;
+          skippedStates.add('${entry.key}: 连接状态读取失败 $error');
+          await _recordRefreshIssue(
+            refreshIssues,
+            '读取 VNT 连接状态',
+            error,
+            stackTrace,
+          );
           continue;
         }
-        final currentDevice = box.currentDevice();
-        final networkConfig = box.getNetConfig();
-        final localVirtualIp =
-            (currentDevice['virtualIp'] ?? '').toString().trim();
-        final virtualNetwork =
-            (currentDevice['virtualNetwork'] ?? '').toString().trim();
-        final connectServer =
-            (currentDevice['connectServer'] ?? '').toString().trim();
-        final virtualNetmask =
-            (currentDevice['virtualNetmask'] ?? '').toString().trim();
-        if (localVirtualIp.isEmpty || virtualNetwork.isEmpty) {
+        if (isClosed) {
           continue;
         }
+        activeVntConnections += 1;
+        try {
+          final currentDevice = box.currentDevice();
+          final networkConfig = box.getNetConfig();
+          final localVirtualIp =
+              (currentDevice['virtualIp'] ?? '').toString().trim();
+          final virtualNetwork =
+              (currentDevice['virtualNetwork'] ?? '').toString().trim();
+          final connectServer =
+              (currentDevice['connectServer'] ?? '').toString().trim();
+          final virtualNetmask =
+              (currentDevice['virtualNetmask'] ?? '').toString().trim();
+          if (localVirtualIp.isEmpty || virtualNetwork.isEmpty) {
+            final configName = networkConfig?.configName.trim();
+            final status = (currentDevice['status'] ?? '').toString().trim();
+            skippedStates.add(
+              '${configName?.isNotEmpty == true ? configName : entry.key}: '
+              'ip=${localVirtualIp.isEmpty ? "-" : localVirtualIp}, '
+              'network=${virtualNetwork.isEmpty ? "-" : virtualNetwork}, '
+              'status=${status.isEmpty ? "-" : status}',
+            );
+            continue;
+          }
 
-        final hallId = buildHallId(
-          connectServer: connectServer.isEmpty ? 'unknown' : connectServer,
-          virtualNetwork: virtualNetwork,
-        );
-        final hallTitle = networkConfig?.configName.trim().isNotEmpty == true
-            ? networkConfig!.configName.trim()
-            : (connectServer.isEmpty ? virtualNetwork : connectServer);
-        final displayName = networkConfig?.deviceName.trim().isNotEmpty == true
-            ? networkConfig!.deviceName.trim()
-            : hallTitle;
-        final peerDevices = box.peerDeviceList();
-        final peerVirtualIps = peerDevices
-            .map((item) => item.virtualIp.trim())
-            .where((item) => item.isNotEmpty)
-            .toSet()
-            .toList(growable: false);
+          final hallId = buildHallId(
+            connectServer: connectServer.isEmpty ? 'unknown' : connectServer,
+            virtualNetwork: virtualNetwork,
+          );
+          final hallTitle = networkConfig?.configName.trim().isNotEmpty == true
+              ? networkConfig!.configName.trim()
+              : (connectServer.isEmpty ? virtualNetwork : connectServer);
+          final displayName =
+              networkConfig?.deviceName.trim().isNotEmpty == true
+                  ? networkConfig!.deviceName.trim()
+                  : hallTitle;
+          final peerDevices = box.peerDeviceList();
+          final peerVirtualIps = peerDevices
+              .map((item) => item.virtualIp.trim())
+              .where((item) => item.isNotEmpty)
+              .toSet()
+              .toList(growable: false);
 
-        nextHalls.add(
-          ChatHall(
-            id: hallId,
-            title: hallTitle,
-            networkName: virtualNetwork,
-            connectServer: connectServer,
-            localVirtualIp: localVirtualIp,
-            peerVirtualIps: peerVirtualIps,
-          ),
-        );
-        nextLocalNodes[hallId] = _LocalHallNode(
-          hall: nextHalls.last,
-          displayName: displayName,
-          joinedRooms:
-              joinedRoomsByHall[hallId] ?? const <ChatRoomDescriptor>[],
-          networkCidr: cidrFromNetworkAndMask(virtualNetwork, virtualNetmask),
-        );
-
-        for (final peer in peerDevices) {
-          final status = peer.status.trim().toLowerCase();
-          nextBasePeers.add(
-            _PeerSeed(
-              key: buildPresencePeerKey(
-                hallId: hallId,
-                virtualIp: peer.virtualIp.trim(),
-              ),
-              hallId: hallId,
-              hallTitle: hallTitle,
-              virtualIp: peer.virtualIp.trim(),
-              displayName: peer.name.trim().isEmpty
-                  ? peer.virtualIp.trim()
-                  : peer.name.trim(),
-              isOnline: status == 'online',
+          nextHalls.add(
+            ChatHall(
+              id: hallId,
+              title: hallTitle,
+              networkName: virtualNetwork,
+              connectServer: connectServer,
+              localVirtualIp: localVirtualIp,
+              peerVirtualIps: peerVirtualIps,
             ),
+          );
+          nextLocalNodes[hallId] = _LocalHallNode(
+            hall: nextHalls.last,
+            displayName: displayName,
+            joinedRooms:
+                joinedRoomsByHall[hallId] ?? const <ChatRoomDescriptor>[],
+            networkCidr: cidrFromNetworkAndMask(virtualNetwork, virtualNetmask),
+            legacyHallIds: _buildLegacyHallIds(
+              connectServer: connectServer.isEmpty ? 'unknown' : connectServer,
+              virtualNetwork: virtualNetwork,
+              networkConfig: networkConfig,
+              canonicalHallId: hallId,
+            ),
+          );
+
+          for (final peer in peerDevices) {
+            final status = peer.status.trim().toLowerCase();
+            nextBasePeers.add(
+              _PeerSeed(
+                key: buildPresencePeerKey(
+                  hallId: hallId,
+                  virtualIp: peer.virtualIp.trim(),
+                ),
+                hallId: hallId,
+                hallTitle: hallTitle,
+                virtualIp: peer.virtualIp.trim(),
+                displayName: peer.name.trim().isEmpty
+                    ? peer.virtualIp.trim()
+                    : peer.name.trim(),
+                isOnline: status == 'online',
+              ),
+            );
+          }
+        } catch (error, stackTrace) {
+          skippedStates.add('${entry.key}: VNT 设备信息读取失败 $error');
+          await _recordRefreshIssue(
+            refreshIssues,
+            '读取 VNT 设备信息',
+            error,
+            stackTrace,
           );
         }
       }
@@ -276,41 +773,160 @@ class ChatManager extends ChangeNotifier {
       _halls = nextHalls;
       _localNodes = nextLocalNodes;
       _basePeers = nextBasePeers;
-
-      await _ensureHallConversations();
-      await _presenceService.updateContexts(
-        contexts: nextLocalNodes.values
-            .map(
-              (node) => ChatPresenceContext(
-                hallId: node.hall.id,
-                hallTitle: node.hall.title,
-                displayName: node.displayName,
-                virtualIp: node.hall.localVirtualIp,
-                peerVirtualIps: node.hall.peerVirtualIps,
-                rooms: node.joinedRooms,
-              ),
-            )
-            .toList(growable: false),
-        onSnapshot: _handlePresenceSnapshot,
+      _observedVntConnectionCount = activeVntConnections;
+      _lastSkippedVntStates = List<String>.unmodifiable(skippedStates);
+      await _logVntSnapshotIfChanged(
+        activeVntConnections: activeVntConnections,
+        halls: nextHalls,
+        skippedStates: skippedStates,
       );
 
-      await _reconcilePresenceAndRooms();
-      await reloadFromStorage(notify: false);
-      _mergeOnlinePeers();
-      await _syncKnownPeers();
-      await _syncFirewallRulesIfNeeded();
+      try {
+        await _ensureHallConversations();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '写入大厅会话',
+          error,
+          stackTrace,
+        );
+      }
+      try {
+        await _presenceService.updateContexts(
+          contexts: nextLocalNodes.values
+              .map(
+                (node) => ChatPresenceContext(
+                  hallId: node.hall.id,
+                  hallTitle: node.hall.title,
+                  displayName: node.displayName,
+                  virtualIp: node.hall.localVirtualIp,
+                  peerVirtualIps: node.hall.peerVirtualIps,
+                  rooms: node.joinedRooms,
+                ),
+              )
+              .toList(growable: false),
+          onSnapshot: _handlePresenceSnapshot,
+        );
+        _presenceStartError = null;
+      } catch (error) {
+        _presenceStartError = error.toString();
+        await ChatLog.write(
+          '聊天室在线状态广播更新失败，继续保留 VNT 大厅: $error',
+        );
+      }
+
+      try {
+        await _reconcilePresenceAndRooms();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '同步聊天室房间状态',
+          error,
+          stackTrace,
+        );
+      }
+      try {
+        await reloadFromStorage(notify: false);
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '重新加载聊天记录',
+          error,
+          stackTrace,
+        );
+      }
+      try {
+        _mergeOnlinePeers();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '合并在线用户',
+          error,
+          stackTrace,
+        );
+      }
+      try {
+        await _syncKnownPeers();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '同步已知聊天节点',
+          error,
+          stackTrace,
+        );
+      }
+      try {
+        await _syncFirewallRulesIfNeeded();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '同步聊天防火墙规则',
+          error,
+          stackTrace,
+        );
+      }
 
       if (_selectedHallId == null && _halls.isNotEmpty) {
         _selectedHallId = _halls.first.id;
       }
       if (_selectedConversationId == null && _selectedHallId != null) {
         _selectedConversationId = _selectedHallId;
-        await loadConversationMessages(_selectedConversationId!);
+        try {
+          await loadConversationMessages(_selectedConversationId!);
+        } catch (error, stackTrace) {
+          await _recordRefreshIssue(
+            refreshIssues,
+            '加载当前大厅消息',
+            error,
+            stackTrace,
+          );
+        }
       }
+      _refreshError = refreshIssues.isEmpty ? null : refreshIssues.join('；');
+    } catch (error, stackTrace) {
+      _refreshError = error.toString();
+      await ChatLog.write('聊天室刷新流程异常: $error\n$stackTrace');
     } finally {
       _refreshing = false;
       notifyListeners();
     }
+  }
+
+  Future<void> _recordRefreshIssue(
+    List<String> issues,
+    String stage,
+    Object error,
+    StackTrace stackTrace,
+  ) async {
+    final message = '$stage失败: $error';
+    issues.add(message);
+    await ChatLog.write('聊天室刷新阶段失败 $stage: $error\n$stackTrace');
+  }
+
+  Future<void> _logVntSnapshotIfChanged({
+    required int activeVntConnections,
+    required List<ChatHall> halls,
+    required List<String> skippedStates,
+  }) async {
+    final hallSummary = halls
+        .map((hall) =>
+            '${hall.title}/${hall.localVirtualIp}/${hall.networkName}')
+        .join(',');
+    final skippedSummary = skippedStates.join('; ');
+    final stateKey = '$activeVntConnections|$hallSummary|$skippedSummary';
+    if (_lastVntSnapshotLogKey == stateKey) {
+      return;
+    }
+    _lastVntSnapshotLogKey = stateKey;
+    if (halls.isEmpty && activeVntConnections > 0) {
+      await ChatLog.write(
+        '聊天室刷新未生成大厅 activeVntConnections=$activeVntConnections skipped=$skippedSummary',
+      );
+      return;
+    }
+    await ChatLog.write(
+      '聊天室刷新完成 activeVntConnections=$activeVntConnections halls=${halls.length} halls=[$hallSummary]',
+    );
   }
 
   Future<void> selectTab(ChatMainTab tab) async {
@@ -512,9 +1128,10 @@ class ChatManager extends ChangeNotifier {
     );
     for (final recipient in recipients) {
       try {
-        await _transportService.sendPacket(
+        await _sendPacketWithHallCompatibility(
           targetIp: recipient,
           packet: outboundPacket,
+          localNode: localNode,
         );
         deliveredRecipients += 1;
       } catch (error) {
@@ -652,9 +1269,10 @@ class ChatManager extends ChangeNotifier {
     );
     for (final recipient in recipients) {
       try {
-        await _transportService.sendPacket(
+        await _sendPacketWithHallCompatibility(
           targetIp: recipient,
           packet: outboundPacket,
+          localNode: localNode,
         );
         deliveredRecipients += 1;
       } catch (error) {
@@ -750,15 +1368,22 @@ class ChatManager extends ChangeNotifier {
   }
 
   Future<void> _handleIncomingMessage(
-    ChatMessageRecord remoteMessage, {
+    ChatMessageRecord rawRemoteMessage, {
     String? attachmentBase64,
   }) async {
-    if (_localNodes[remoteMessage.hallId] == null) {
+    final localHallId = _resolveLocalHallId(rawRemoteMessage.hallId);
+    if (localHallId == null) {
       await ChatLog.write(
-        '丢弃聊天消息 conversation=${remoteMessage.conversationId} hall=${remoteMessage.hallId} reason=local_hall_offline',
+        '丢弃聊天消息 conversation=${rawRemoteMessage.conversationId} hall=${rawRemoteMessage.hallId} normalizedHall=${normalizeChatHallId(rawRemoteMessage.hallId)} reason=local_hall_offline',
       );
       return;
     }
+    final localNode = _localNodes[localHallId]!;
+    final remoteMessage = _canonicalizeIncomingMessage(
+      rawRemoteMessage,
+      localHallId,
+      localNode,
+    );
 
     final conversationId = remoteMessage.conversationId;
     final existing = await _storage.getConversation(conversationId);
@@ -872,17 +1497,18 @@ class ChatManager extends ChangeNotifier {
     ChatSyncRequestPayload payload,
     String remoteIp,
   ) async {
+    final localHallId = _resolveLocalHallId(payload.hallId);
     await ChatLog.write(
-      '收到聊天补同步请求 hall=${payload.hallId} requester=${payload.requesterVirtualIp} remote=$remoteIp joinedRooms=${payload.joinedRoomIds.length}',
+      '收到聊天补同步请求 hall=${payload.hallId} mappedHall=${localHallId ?? "-"} requester=${payload.requesterVirtualIp} remote=$remoteIp joinedRooms=${payload.joinedRoomIds.length}',
     );
-    final localNode = _localNodes[payload.hallId];
-    if (localNode == null) {
+    if (localHallId == null) {
       return;
     }
+    final localNode = _localNodes[localHallId]!;
     final conversationIds = <String>{
-      payload.hallId,
+      localHallId,
       buildDirectConversationId(
-        hallId: payload.hallId,
+        hallId: localHallId,
         firstVirtualIp: localNode.hall.localVirtualIp,
         secondVirtualIp: payload.requesterVirtualIp,
       ),
@@ -922,7 +1548,7 @@ class ChatManager extends ChangeNotifier {
         }
       }
       try {
-        await _transportService.sendPacket(
+        await _sendPacketWithHallCompatibility(
           targetIp: remoteIp,
           packet: ChatTransportPacket(
             type: 'message',
@@ -931,6 +1557,7 @@ class ChatManager extends ChangeNotifier {
             ),
             attachmentBase64: attachmentBase64,
           ),
+          localNode: localNode,
         );
       } catch (_) {
         // 同步阶段失败，等待下次 Presence 驱动重新补齐
@@ -965,7 +1592,7 @@ class ChatManager extends ChangeNotifier {
         conversationIds: conversationIds,
       );
       try {
-        await _transportService.sendPacket(
+        await _sendPacketWithHallCompatibility(
           targetIp: peer.virtualIp,
           packet: ChatTransportPacket(
             type: 'sync_request',
@@ -978,6 +1605,7 @@ class ChatManager extends ChangeNotifier {
               summary: summary,
             ),
           ),
+          localNode: localNode,
         );
         _syncCheckpoints = Map<String, int>.from(_syncCheckpoints)
           ..[peer.key] = now;
@@ -1079,7 +1707,28 @@ class ChatManager extends ChangeNotifier {
   void _handlePresenceSnapshot(
     Map<String, ChatPresenceAnnouncement> snapshot,
   ) {
-    _presenceCache = snapshot;
+    final normalizedSnapshot = <String, ChatPresenceAnnouncement>{};
+    for (final announcement in snapshot.values) {
+      final localHallId = _resolveLocalHallId(announcement.hallId);
+      if (localHallId == null) {
+        continue;
+      }
+      final normalizedAnnouncement = ChatPresenceAnnouncement(
+        hallId: localHallId,
+        hallTitle: announcement.hallTitle,
+        displayName: announcement.displayName,
+        virtualIp: announcement.virtualIp,
+        rooms: announcement.rooms
+            .map((room) => _canonicalizeRoomDescriptor(room, localHallId))
+            .toList(growable: false),
+        sentAtEpochMs: announcement.sentAtEpochMs,
+      );
+      normalizedSnapshot[buildPresencePeerKey(
+        hallId: localHallId,
+        virtualIp: announcement.virtualIp,
+      )] = normalizedAnnouncement;
+    }
+    _presenceCache = normalizedSnapshot;
     _mergeOnlinePeers();
     unawaited(_reconcilePresenceAndRooms().then((_) async {
       await reloadFromStorage(notify: false);
@@ -1220,12 +1869,14 @@ class _LocalHallNode {
     required this.displayName,
     required this.joinedRooms,
     required this.networkCidr,
+    required this.legacyHallIds,
   });
 
   final ChatHall hall;
   final String displayName;
   final List<ChatRoomDescriptor> joinedRooms;
   final String? networkCidr;
+  final List<String> legacyHallIds;
 }
 
 class _PeerSeed {
