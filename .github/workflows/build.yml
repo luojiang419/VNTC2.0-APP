@@ -25,8 +25,13 @@ concurrency:
 
 env:
   CARGO_TERM_COLOR: always
+  APP_DIR: VntcApp1.0
 permissions:
   contents: write
+
+defaults:
+  run:
+    working-directory: VntcApp1.0
 
 jobs:
   build:
@@ -158,7 +163,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.pub-cache
-          key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
+          key: ${{ runner.os }}-pub-${{ hashFiles('VntcApp1.0/**/pubspec.yaml') }}
           restore-keys: |
             ${{ runner.os }}-pub-
 
@@ -174,7 +179,7 @@ jobs:
           key: >
             windows-flutter-win7-engine-
             ${{ matrix.flutter-version }}-
-            ${{ hashFiles('pubspec.lock') }}
+            ${{ hashFiles('VntcApp1.0/pubspec.lock') }}
           restore-keys: |
             windows-flutter-win7-engine-
 
@@ -190,7 +195,7 @@ jobs:
           key: >
             ${{ runner.os }}-flutter-
             ${{ matrix.flutter-version }}-
-            ${{ hashFiles('pubspec.lock') }}
+            ${{ hashFiles('VntcApp1.0/pubspec.lock') }}
           restore-keys: |
             ${{ runner.os }}-flutter-
 
@@ -512,9 +517,9 @@ jobs:
             -e APP_RELEASE_BUILD_NUMBER="${APP_RELEASE_BUILD_NUMBER}" \
             -e APP_RELEASE_DISPLAY_VERSION="${APP_RELEASE_DISPLAY_VERSION}" \
             -e APPIMAGETOOL_ARCH=${{ matrix.APPIMAGE_ARCH }} \
-            -w /workspace \
+            -w /workspace/VntcApp1.0 \
             ${{ matrix.DOCKER_IMAGE }} \
-            bash /workspace/linux/build_linux_appimage.sh \
+            bash /workspace/VntcApp1.0/linux/build_linux_appimage.sh \
               ${{ matrix.BUNDLE_DIR }} ${{ matrix.APPIMAGE_ARCH }}
 
       - name: Archive artifact
@@ -522,17 +527,20 @@ jobs:
         with:
           name: ${{ matrix.NAME }}
           path: |
-            ${{ matrix.NAME == 'vntApp-android' && 'vntApp-android.apk' || '' }}
-            ${{ matrix.NAME == 'vntApp-windows' && 'vntApp-windows.zip' || '' }}
-            ${{ matrix.NAME == 'vntApp-macOS' && 'vnt_APP.dmg' || '' }}
-            ${{ matrix.NAME == 'vntApp-IOS' && 'build/ios/iphoneos/vntAPP.ipa' || '' }}
-            ${{ matrix.NAME == 'vntApp-linux-x86_64' && 'vntApp-linux-x86_64.AppImage' || '' }}
-            ${{ matrix.NAME == 'vntApp-linux-arm64' && 'vntApp-linux-aarch64.AppImage' || '' }}
+            ${{ matrix.NAME == 'vntApp-android' && 'VntcApp1.0/vntApp-android.apk' || '' }}
+            ${{ matrix.NAME == 'vntApp-windows' && 'VntcApp1.0/vntApp-windows.zip' || '' }}
+            ${{ matrix.NAME == 'vntApp-macOS' && 'VntcApp1.0/vnt_APP.dmg' || '' }}
+            ${{ matrix.NAME == 'vntApp-IOS' && 'VntcApp1.0/build/ios/iphoneos/vntAPP.ipa' || '' }}
+            ${{ matrix.NAME == 'vntApp-linux-x86_64' && 'VntcApp1.0/vntApp-linux-x86_64.AppImage' || '' }}
+            ${{ matrix.NAME == 'vntApp-linux-arm64' && 'VntcApp1.0/vntApp-linux-aarch64.AppImage' || '' }}
 
   deploy:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: .
     steps:
       - name: Download artifacts
         uses: actions/download-artifact@v4
@@ -611,7 +619,6 @@ jobs:
             App 内更新功能会读取 GitHub Releases，并按当前系统平台选择对应安装包。iOS 版本仅提供下载/分发文件，App 内不会直接自安装 IPA。
           files: release-assets/*
           prerelease: ${{ contains(github.ref_name, 'test') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-
 
 
 
