@@ -15,6 +15,7 @@ import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 import 'package:vnt_app/app_version.dart';
+import 'package:vnt_app/update/update_dialog.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -770,6 +771,14 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               },
               activeColor: Theme.of(context).primaryColor,
             ),
+          ),
+          _buildDivider(isDark),
+          _buildSettingItem(
+            isDark,
+            icon: Icons.system_update_alt,
+            title: '软件更新',
+            subtitle: '通过 GitHub Releases 检查并下载最新版本',
+            onTap: () => showUpdateCheckDialog(context),
           ),
           _buildDivider(isDark),
           _buildDefaultConfigSelector(isDark),

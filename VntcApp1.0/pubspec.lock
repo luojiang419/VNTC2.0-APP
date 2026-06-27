@@ -1006,12 +1006,11 @@ packages:
     source: hosted
     version: "2.0.2"
   objective_c:
-    dependency: transitive
+    dependency: "direct overridden"
     description:
-      name: objective_c
-      sha256: "100a1c87616ab6ed41ec263b083c0ef3261ee6cd1dc3b0f35f8ddfa4f996fe52"
-      url: "https://pub.dev"
-    source: hosted
+      path: "third_party/objective_c"
+      relative: true
+    source: path
     version: "9.3.0"
   octo_image:
     dependency: transitive
@@ -1030,7 +1029,7 @@ packages:
     source: hosted
     version: "2.2.0"
   package_info_plus:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: package_info_plus
       sha256: "7e76fad405b3e4016cd39d08f455a4eb5199723cf594cd1b8916d47140d93017"

@@ -18,6 +18,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.app.ActivityCompat;
 import androidx.core.content.ContextCompat;
+import androidx.core.content.FileProvider;
 
 import java.io.File;
 import java.io.FileInputStream;
@@ -41,6 +42,7 @@ public class MainActivity extends FlutterActivity {
     private static final int RUSTDESK_MANAGE_STORAGE_PERMISSION_REQUEST_CODE = 6;
 
     private static final String FILE_CHANNEL = "top.wherewego.vnt/file";
+    private static final String UPDATE_CHANNEL = "top.wherewego.vnt/update";
     private static final String RUSTDESK_CHANNEL = "mChannel";
     private static final String RUSTDESK_KEY_SHARED_PREFERENCES = "KEY_SHARED_PREFERENCES";
     private static final String RUSTDESK_KEY_START_ON_BOOT_OPT = "KEY_START_ON_BOOT_OPT";
@@ -255,6 +257,18 @@ public class MainActivity extends FlutterActivity {
             }
         });
 
+        new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                UPDATE_CHANNEL
+        ).setMethodCallHandler((call, result) -> {
+            if (call.method.equals("installApk")) {
+                String filePath = call.argument("filePath");
+                installDownloadedApk(filePath, result);
+            } else {
+                result.notImplemented();
+            }
+        });
+
         rustdeskChannel = new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
                 RUSTDESK_CHANNEL
@@ -262,6 +276,53 @@ public class MainActivity extends FlutterActivity {
         rustdeskChannel.setMethodCallHandler(this::handleRustdeskMethodCall);
         rustdeskEventChannel = rustdeskChannel;
 
+    }
+
+    private void installDownloadedApk(@Nullable String filePath, @NonNull MethodChannel.Result result) {
+        if (TextUtils.isEmpty(filePath)) {
+            result.error("INVALID_ARGUMENT", "filePath is required", null);
+            return;
+        }
+
+        File apkFile = new File(filePath);
+        if (!apkFile.exists()) {
+            result.error("APK_NOT_FOUND", "APK file not found: " + filePath, null);
+            return;
+        }
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && !getPackageManager().canRequestPackageInstalls()) {
+                Intent settingsIntent = new Intent(
+                        Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName())
+                );
+                startActivity(settingsIntent);
+                result.error(
+                        "INSTALL_PERMISSION_REQUIRED",
+                        "请允许此应用安装未知来源应用后再次点击安装",
+                        null
+                );
+                return;
+            }
+
+            Uri apkUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    apkFile
+            );
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setDataAndType(
+                    apkUri,
+                    "application/vnd.android.package-archive"
+            );
+            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(installIntent);
+            result.success(true);
+        } catch (Exception error) {
+            result.error("INSTALL_APK_FAILED", error.getMessage(), null);
+        }
     }
 
     public static void notifyRustdeskMethod(String method, @Nullable Object arguments) {

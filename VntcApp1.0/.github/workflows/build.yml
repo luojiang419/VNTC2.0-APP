@@ -3,7 +3,10 @@ name: VntApp
 on:
   push:
     branches:
+      - main
       - flutter
+    tags:
+      - 'v*'
   workflow_dispatch:
     inputs:
       rebuild_android_so:
@@ -11,6 +14,10 @@ on:
         required: false
         type: boolean
         default: false  
+      release_version:
+        description: '手动构建版本号，例如 2.0.1'
+        required: false
+        type: string
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -63,9 +70,36 @@ jobs:
 
     runs-on: ${{ matrix.OS }}
     steps:
-      - uses: actions/checkout@main
+      - uses: actions/checkout@v4
         with:
-         ref: flutter
+          fetch-depth: 0
+
+      - name: 准备发布版本
+        shell: bash
+        run: |
+          set -euo pipefail
+          input_version="${{ github.event.inputs.release_version || '' }}"
+          if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
+            version="${GITHUB_REF_NAME#v}"
+          elif [[ -n "$input_version" ]]; then
+            version="$input_version"
+          else
+            version="$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)"
+          fi
+          version="${version%%-*}"
+          if ! [[ "$version" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
+            echo "版本号格式不正确: $version" >&2
+            exit 1
+          fi
+          IFS='.' read -r major minor patch build <<< "$version"
+          minor="${minor:-0}"
+          patch="${patch:-0}"
+          build="${build:-0}"
+          build_number=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + 10#$build))
+          echo "APP_RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          echo "APP_RELEASE_BUILD_NUMBER=$build_number" >> "$GITHUB_ENV"
+          echo "APP_RELEASE_DISPLAY_VERSION=v$version" >> "$GITHUB_ENV"
+          echo "构建版本: $version ($build_number)"
 
       - name: 设置 Xcode 版本
         if: matrix.NAME == 'vntApp-IOS'
@@ -121,7 +155,7 @@ jobs:
 
       - name: 缓存 Flutter 依赖
         if: matrix.NAME == 'vntApp-macOS'
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:
           path: ~/.pub-cache
           key: ${{ runner.os }}-pub-${{ hashFiles('**/pubspec.yaml') }}
@@ -130,7 +164,7 @@ jobs:
 
       - name: 缓存 Flutter / Pub / Gradle（Windows 7 引擎版）
         if: matrix.NAME == 'vntApp-windows'
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
@@ -146,7 +180,7 @@ jobs:
 
       - name: 缓存 Flutter / Pub / Gradle（标准版）
         if: matrix.NAME != 'vntApp-windows'
-        uses: actions/cache@main
+        uses: actions/cache@v4
         with:
           path: |
             ~/.pub-cache
@@ -268,7 +302,14 @@ jobs:
          flutter clean
          flutter doctor -v
          flutter pub get
-         flutter build apk --release 
+         flutter build apk --release \
+           --build-name "$APP_RELEASE_VERSION" \
+           --build-number "$APP_RELEASE_BUILD_NUMBER" \
+           --dart-define=APP_BASE_TITLE="VNTC APP2.0" \
+           --dart-define=APP_BUILD_VERSION="$APP_RELEASE_VERSION" \
+           --dart-define=APP_DISPLAY_VERSION="$APP_RELEASE_DISPLAY_VERSION" \
+           --dart-define=APP_PRODUCT_NAME="VNTC APP2.0" \
+           --dart-define=APP_WINDOW_TITLE="VNTC APP2.0 $APP_RELEASE_DISPLAY_VERSION"
          find . -type f -name "*.apk"
          mkdir -p /opt/vntAPP
          mv -f build/app/outputs/apk/release/app-release.apk app-release.apk
@@ -312,7 +353,13 @@ jobs:
         shell: pwsh
         run: |
           flutter pub get
-          flutter build windows --release -v
+          flutter build windows --release -v `
+            --build-name "$Env:APP_RELEASE_VERSION" `
+            "--dart-define=APP_BASE_TITLE=VNTC APP2.0" `
+            "--dart-define=APP_BUILD_VERSION=$Env:APP_RELEASE_VERSION" `
+            "--dart-define=APP_DISPLAY_VERSION=$Env:APP_RELEASE_DISPLAY_VERSION" `
+            "--dart-define=APP_PRODUCT_NAME=VNTC APP2.0" `
+            "--dart-define=APP_WINDOW_TITLE=VNTC APP2.0 $Env:APP_RELEASE_DISPLAY_VERSION"
 
           echo "构建完成，开始列出生成的文件"
           Get-ChildItem build\windows\x64\runner\Release
@@ -354,7 +401,14 @@ jobs:
         run: |
           # 构建 Flutter macOS 应用
           flutter pub get
-          flutter build macos --release -v
+          flutter build macos --release -v \
+            --build-name "$APP_RELEASE_VERSION" \
+            --build-number "$APP_RELEASE_BUILD_NUMBER" \
+            --dart-define=APP_BASE_TITLE="VNTC APP2.0" \
+            --dart-define=APP_BUILD_VERSION="$APP_RELEASE_VERSION" \
+            --dart-define=APP_DISPLAY_VERSION="$APP_RELEASE_DISPLAY_VERSION" \
+            --dart-define=APP_PRODUCT_NAME="VNTC APP2.0" \
+            --dart-define=APP_WINDOW_TITLE="VNTC APP2.0 $APP_RELEASE_DISPLAY_VERSION"
 
           APP_PATH="build/macos/Build/Products/Release/vnt_app.app"
           DMG_PATH="vnt_APP.dmg"
@@ -422,7 +476,14 @@ jobs:
           cd ..
 
           echo "3. 开始构建"
-          flutter build ios --release --no-codesign -v
+          flutter build ios --release --no-codesign -v \
+            --build-name "$APP_RELEASE_VERSION" \
+            --build-number "$APP_RELEASE_BUILD_NUMBER" \
+            --dart-define=APP_BASE_TITLE="VNTC APP2.0" \
+            --dart-define=APP_BUILD_VERSION="$APP_RELEASE_VERSION" \
+            --dart-define=APP_DISPLAY_VERSION="$APP_RELEASE_DISPLAY_VERSION" \
+            --dart-define=APP_PRODUCT_NAME="VNTC APP2.0" \
+            --dart-define=APP_WINDOW_TITLE="VNTC APP2.0 $APP_RELEASE_DISPLAY_VERSION"
           
           echo "4. 创建 Payload 目录（IPA 必须结构）"
           cd build/ios/iphoneos
@@ -447,6 +508,9 @@ jobs:
             -v "${{ github.workspace }}:/workspace" \
             -v "${HOME}/.pub-cache:/root/.pub-cache" \
             -e PUB_CACHE=/root/.pub-cache \
+            -e APP_RELEASE_VERSION="${APP_RELEASE_VERSION}" \
+            -e APP_RELEASE_BUILD_NUMBER="${APP_RELEASE_BUILD_NUMBER}" \
+            -e APP_RELEASE_DISPLAY_VERSION="${APP_RELEASE_DISPLAY_VERSION}" \
             -e APPIMAGETOOL_ARCH=${{ matrix.APPIMAGE_ARCH }} \
             -w /workspace \
             ${{ matrix.DOCKER_IMAGE }} \
@@ -454,7 +518,7 @@ jobs:
               ${{ matrix.BUNDLE_DIR }} ${{ matrix.APPIMAGE_ARCH }}
 
       - name: Archive artifact
-        uses: actions/upload-artifact@main
+        uses: actions/upload-artifact@v4
         with:
           name: ${{ matrix.NAME }}
           path: |
@@ -466,6 +530,7 @@ jobs:
             ${{ matrix.NAME == 'vntApp-linux-arm64' && 'vntApp-linux-aarch64.AppImage' || '' }}
 
   deploy:
+    if: startsWith(github.ref, 'refs/tags/v')
     needs: build
     runs-on: ubuntu-latest
     steps:
@@ -473,10 +538,79 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: ./artifacts
-      - name: List
-        run: find ./artifacts
+      - name: Prepare release assets
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          find ./artifacts -maxdepth 3 -type f -print0 | while IFS= read -r -d '' file; do
+            cp "$file" "release-assets/$(basename "$file")"
+          done
+          cd release-assets
+          sha256sum * > SHA256SUMS.txt
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from datetime import datetime, timezone
 
+          repo = os.environ["GITHUB_REPOSITORY"]
+          tag = os.environ["GITHUB_REF_NAME"]
+          version = tag[1:] if tag.startswith("v") else tag
 
+          def platform_for(name):
+              lower = name.lower()
+              if lower.endswith(".apk"):
+                  return "android"
+              if lower.endswith(".dmg"):
+                  return "macos"
+              if lower.endswith(".ipa"):
+                  return "ios"
+              if lower.endswith(".appimage"):
+                  return "linux"
+              if lower.endswith(".exe") or lower.endswith(".msi") or lower.endswith(".zip"):
+                  return "windows"
+              return "unknown"
+
+          assets = []
+          for name in sorted(os.listdir(".")):
+              if name in {"SHA256SUMS.txt", "latest.json"}:
+                  continue
+              if not os.path.isfile(name):
+                  continue
+              with open(name, "rb") as handle:
+                  sha256 = hashlib.sha256(handle.read()).hexdigest()
+              assets.append({
+                  "name": name,
+                  "platform": platform_for(name),
+                  "size": os.path.getsize(name),
+                  "sha256": sha256,
+                  "download_url": f"https://github.com/{repo}/releases/download/{tag}/{name}",
+              })
+
+          manifest = {
+              "version": version,
+              "tag": tag,
+              "published_at": datetime.now(timezone.utc).isoformat(),
+              "release_url": f"https://github.com/{repo}/releases/tag/{tag}",
+              "assets": assets,
+          }
+          with open("latest.json", "w", encoding="utf-8") as handle:
+              json.dump(manifest, handle, ensure_ascii=False, indent=2)
+          PY
+          ls -lh
+
+      - name: Publish GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: VNTC APP ${{ github.ref_name }}
+          body: |
+            自动构建版本 ${{ github.ref_name }}。
+
+            App 内更新功能会读取 GitHub Releases，并按当前系统平台选择对应安装包。iOS 版本仅提供下载/分发文件，App 内不会直接自安装 IPA。
+          files: release-assets/*
+          prerelease: ${{ contains(github.ref_name, 'test') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
 
 
 

@@ -1,0 +1,85 @@
+// Copyright (c) 2024, the Dart project authors. Please see the AUTHORS file
+// for details. All rights reserved. Use of this source code is governed by a
+// BSD-style license that can be found in the LICENSE file.
+
+#ifndef OBJECTIVE_C_SRC_OBJECTIVE_C_H_
+#define OBJECTIVE_C_SRC_OBJECTIVE_C_H_
+
+#include "ffi.h"
+#include "include/dart_api_dl.h"
+#include "objective_c_runtime.h"
+
+// See https://clang.llvm.org/docs/Block-ABI-Apple.html
+typedef struct _ObjCBlockDesc {
+  unsigned long int reserved;
+  unsigned long int size;  // sizeof(ObjCBlockImpl)
+  void (*copy_helper)(void *dst, void *src);
+  void (*dispose_helper)(void *src);
+  const char *signature;
+} ObjCBlockDesc;
+
+typedef struct _ObjCBlockImpl {
+  void *isa;  // _NSConcreteGlobalBlock
+  int flags;
+  int reserved;
+  void *invoke;  // RET (*invoke)(ObjCBlockImpl *, ARGS...);
+  ObjCBlockDesc *descriptor;
+
+  // Captured variables follow. These are specific to our use case.
+  void *target;
+  Dart_Port dispose_port;
+} ObjCBlockImpl;
+
+// Initialize the Dart API.
+FFI_EXPORT intptr_t DOBJC_initializeApi(void *data);
+
+// Dispose helper for ObjC blocks that wrap a Dart closure.
+FFI_EXPORT void DOBJC_disposeObjCBlockWithClosure(ObjCBlockImpl *block);
+
+// Returns whether the block is valid and live. The pointer must point to
+// readable memory, or be null. May (rarely) return false positives.
+FFI_EXPORT bool DOBJC_isValidBlock(ObjCBlockImpl *block);
+
+// Returns a new Dart_FinalizableHandle that will clean up the object when the
+// Dart owner is garbage collected.
+FFI_EXPORT Dart_FinalizableHandle
+DOBJC_newFinalizableHandle(Dart_Handle owner, ObjCObjectImpl *object);
+
+// Delete a finalizable handle. Doesn't run the finalization callback, so
+// doesn't clean up the assocated pointer.
+FFI_EXPORT void DOBJC_deleteFinalizableHandle(Dart_FinalizableHandle handle,
+                                              Dart_Handle owner);
+
+// Returns a newly allocated bool* (initialized to false) that will be deleted
+// by a Dart_FinalizableHandle when the owner is garbage collected.
+FFI_EXPORT bool *DOBJC_newFinalizableBool(Dart_Handle owner);
+
+// Runs fn(arg) on the main thread. If runOnMainThread is already running on the
+// main thread, fn(arg) is invoked synchronously. Otherwise it is dispatched to
+// the main thread (ie dispatch_async(dispatch_get_main_queue(), ...)).
+FFI_EXPORT void DOBJC_runOnMainThread(void (*fn)(void *), void *arg);
+
+// Functions for creating a waiter, signaling it, and waiting for the signal. A
+// waiter is one-time-use, and the object that newWaiter creates will be
+// destroyed once signalWaiter and awaitWaiter are called exactly once.
+FFI_EXPORT void *DOBJC_newWaiter(void);
+FFI_EXPORT void DOBJC_signalWaiter(void *waiter);
+FFI_EXPORT void DOBJC_awaitWaiter(void *waiter);
+
+// Context object containing functions needed by the FFIgen bindings. Any
+// changes to this struct should bump the `version` field filled in by
+// package:objective_c, and checked by FFIgen. Never change or delete existing
+// fields. Keep in sync with the struct defined in FFIgen's writer.dart.
+typedef struct _DOBJC_Context {
+  int64_t version;
+  void* (*newWaiter)(void);
+  void (*awaitWaiter)(void*);
+  Dart_Isolate (*currentIsolate)(void);
+  void (*enterIsolate)(Dart_Isolate);
+  void (*exitIsolate)(void);
+  int64_t (*getMainPortId)(void);
+  bool (*getCurrentThreadOwnsIsolate)(int64_t);
+} DOBJC_Context;
+FFI_EXPORT DOBJC_Context* DOBJC_fillContext(DOBJC_Context* context);
+
+#endif  // OBJECTIVE_C_SRC_OBJECTIVE_C_H_

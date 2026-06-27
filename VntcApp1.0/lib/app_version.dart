@@ -7,7 +7,7 @@ class AppVersion {
   );
   static const String buildVersion = String.fromEnvironment(
     'APP_BUILD_VERSION',
-    defaultValue: '0.0',
+    defaultValue: '2.0.0',
   );
   static const String explicitDisplayVersion = String.fromEnvironment(
     'APP_DISPLAY_VERSION',
@@ -22,18 +22,21 @@ class AppVersion {
     defaultValue: '',
   );
 
+  static String get currentVersion {
+    final version = buildVersion.trim();
+    return version.isEmpty || version == '0.0' ? '2.0.0' : version;
+  }
+
   static String get displayVersion => explicitDisplayVersion.isEmpty
-      ? 'v$buildVersion'
+      ? 'v$currentVersion'
       : explicitDisplayVersion;
 
-  static String get productName => explicitProductName.isEmpty
-      ? baseTitle
-      : explicitProductName;
+  static String get productName =>
+      explicitProductName.isEmpty ? baseTitle : explicitProductName;
 
-  static String get windowTitle =>
-      explicitWindowTitle.isEmpty
-          ? '$productName $displayVersion'
-          : explicitWindowTitle;
+  static String get windowTitle => explicitWindowTitle.isEmpty
+      ? '$productName $displayVersion'
+      : explicitWindowTitle;
 
   static String get trayTooltip => '$windowTitle - Virtual Network Tool';
 }
