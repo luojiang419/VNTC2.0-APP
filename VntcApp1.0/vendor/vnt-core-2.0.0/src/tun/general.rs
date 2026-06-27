@@ -2,17 +2,19 @@ use crate::enhanced_tunnel::outbound::EnhancedOutbound;
 use crate::protocol::ip_packet_protocol::HEAD_LENGTH;
 use crate::protocol::transmission::TransmissionBytes;
 use crate::utils::task_control::{SubTask, TaskGroup};
-use anyhow::{Context, bail};
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
+use anyhow::Context;
+use anyhow::bail;
 use bytes::BytesMut;
 use futures::{SinkExt, StreamExt};
 use std::io;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
 use tokio::sync::mpsc::{Receiver, Sender};
-use tun_rs::async_framed::{Decoder, DeviceFramedRead, DeviceFramedWrite, Encoder};
 use tun_rs::AsyncDevice;
-#[cfg(not(target_os = "android"))]
+#[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
 use tun_rs::DeviceBuilder;
+use tun_rs::async_framed::{Decoder, DeviceFramedRead, DeviceFramedWrite, Encoder};
 
 #[derive(Clone)]
 pub struct DeviceIOManager {
@@ -21,6 +23,7 @@ pub struct DeviceIOManager {
 }
 type DeviceMutex = Arc<tokio::sync::Mutex<(Option<DeviceTask>, Option<(Ipv4Addr, u8)>)>>;
 pub struct DeviceTask {
+    #[cfg_attr(any(target_os = "ios", target_os = "tvos"), allow(dead_code))]
     device: Arc<AsyncDevice>,
     task_recv: SubTask,
     task_send: SubTask,
@@ -91,7 +94,7 @@ impl DeviceIOManager {
         self.device.lock().await.0.replace(task);
         Ok(())
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
     pub async fn tun_if_index(&self) -> anyhow::Result<u32> {
         let guard = self.device.lock().await;
         if let Some(v) = &guard.0 {
@@ -100,7 +103,13 @@ impl DeviceIOManager {
             bail!("device doesn't exist")
         }
     }
-    #[cfg(not(target_os = "android"))]
+
+    #[cfg(any(target_os = "ios", target_os = "tvos"))]
+    pub async fn tun_if_index(&self) -> anyhow::Result<u32> {
+        bail!("iOS/tvOS TUN interface index is managed by Network Extension")
+    }
+
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
     pub async fn set_network(&self, ip: Ipv4Addr, prefix_len: u8) -> anyhow::Result<()> {
         let mut guard = self.device.lock().await;
         let Some(dev) = guard.0.as_ref() else {
@@ -119,7 +128,7 @@ impl DeviceIOManager {
         Ok(())
     }
 
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios", target_os = "tvos"))]
     pub async fn set_network(&self, _ip: Ipv4Addr, _prefix_len: u8) -> anyhow::Result<()> {
         Ok(())
     }
@@ -132,33 +141,33 @@ fn create_tun(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
         // Using an invalid fd may cause undefined behavior.
         unsafe { return Ok(AsyncDevice::from_fd(fd)?) }
     }
-    #[cfg(target_os = "android")]
+    #[cfg(any(target_os = "android", target_os = "ios", target_os = "tvos"))]
     {
-        bail!("Android VPN fd 未提供，无法创建 tun 设备")
+        bail!("当前平台必须提供 VPN fd，无法创建 tun 设备")
     }
-    #[cfg(not(target_os = "android"))]
+    #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
     {
-    let mut builder = DeviceBuilder::new();
-    if let Some(tun_name) = config.tun_name {
-        builder = builder.name(tun_name);
-    }
-    if let Some(mtu) = config.mtu {
-        builder = builder.mtu(mtu);
-    }
-    #[cfg(windows)]
-    {
-        builder = builder.metric(1);
-    }
-    #[cfg(target_os = "linux")]
-    {
-        builder = builder.offload(true);
-    }
-    let dev = builder.build_async().context("创建tun失败")?;
-    #[cfg(target_os = "linux")]
-    {
-        _ = dev.set_tx_queue_len(1000);
-    }
-    Ok(dev)
+        let mut builder = DeviceBuilder::new();
+        if let Some(tun_name) = config.tun_name {
+            builder = builder.name(tun_name);
+        }
+        if let Some(mtu) = config.mtu {
+            builder = builder.mtu(mtu);
+        }
+        #[cfg(windows)]
+        {
+            builder = builder.metric(1);
+        }
+        #[cfg(target_os = "linux")]
+        {
+            builder = builder.offload(true);
+        }
+        let dev = builder.build_async().context("创建tun失败")?;
+        #[cfg(target_os = "linux")]
+        {
+            _ = dev.set_tx_queue_len(1000);
+        }
+        Ok(dev)
     }
 }
 fn create(

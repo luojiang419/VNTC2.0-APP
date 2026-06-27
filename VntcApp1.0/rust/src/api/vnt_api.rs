@@ -1059,3 +1059,247 @@ pub struct RustCurrentDeviceInfo {
     pub connect_server: String,
     pub status: String,
 }
+
+#[cfg(any(target_os = "ios", target_os = "tvos"))]
+mod ios_ffi {
+    use super::*;
+    use log::LevelFilter;
+    use std::collections::hash_map::DefaultHasher;
+    use std::ffi::CStr;
+    use std::hash::{Hash, Hasher};
+    use std::os::raw::c_char;
+    use std::sync::OnceLock;
+
+    struct IosTunnelInstance {
+        _runtime: Runtime,
+        _task_group_guard: TaskGroupGuard,
+        #[allow(dead_code)]
+        network_manager: NetworkManager,
+        core_api: CoreVntApi,
+    }
+
+    static IOS_TUNNEL: OnceLock<Mutex<Option<IosTunnelInstance>>> = OnceLock::new();
+    static IOS_LOG_INIT: OnceLock<()> = OnceLock::new();
+
+    fn tunnel_slot() -> &'static Mutex<Option<IosTunnelInstance>> {
+        IOS_TUNNEL.get_or_init(|| Mutex::new(None))
+    }
+
+    #[no_mangle]
+    pub extern "C" fn vnt_ios_init_log(log_dir: *const c_char) -> i32 {
+        if IOS_LOG_INIT.get().is_some() {
+            return 0;
+        }
+
+        let Ok(log_dir) = read_c_string(log_dir, "log_dir") else {
+            return -1;
+        };
+        let config_path = format!("{log_dir}/vnt-config.json");
+
+        match init_log_with_path(log_dir, config_path) {
+            Ok(()) => {
+                _ = IOS_LOG_INIT.set(());
+                0
+            }
+            Err(err) => {
+                let message = format!("{err:#}");
+                if message.contains("set a logger") || message.contains("logger") {
+                    _ = IOS_LOG_INIT.set(());
+                    return 0;
+                }
+                -2
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn vnt_ios_start_tunnel(
+        fd: i32,
+        server_addr: *const c_char,
+        token: *const c_char,
+        device_name: *const c_char,
+        mtu: i32,
+    ) -> i32 {
+        match start_tunnel_inner(fd, server_addr, token, device_name, mtu) {
+            Ok(()) => 0,
+            Err(err) => {
+                log::error!("vnt_ios_start_tunnel failed: {err:#}");
+                -10
+            }
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn vnt_ios_stop_tunnel() {
+        if let Ok(mut guard) = tunnel_slot().lock() {
+            guard.take();
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn vnt_ios_get_status() -> i32 {
+        let Ok(guard) = tunnel_slot().lock() else {
+            return -1;
+        };
+        let Some(instance) = guard.as_ref() else {
+            return -1;
+        };
+        if instance.core_api.network().is_some() {
+            1
+        } else {
+            0
+        }
+    }
+
+    #[no_mangle]
+    pub extern "C" fn vnt_ios_set_log_level(level: i32) {
+        let level_filter = match level {
+            value if value <= 0 => LevelFilter::Error,
+            1 => LevelFilter::Warn,
+            2 => LevelFilter::Info,
+            3 => LevelFilter::Debug,
+            _ => LevelFilter::Trace,
+        };
+        log::set_max_level(level_filter);
+    }
+
+    fn start_tunnel_inner(
+        fd: i32,
+        server_addr: *const c_char,
+        token: *const c_char,
+        device_name: *const c_char,
+        mtu: i32,
+    ) -> anyhow::Result<()> {
+        if fd < 0 {
+            return Err(anyhow!("iOS VPN fd 无效: {fd}"));
+        }
+
+        let server_addr = read_c_string(server_addr, "server_addr")?;
+        let token = read_c_string(token, "token")?;
+        let device_name = read_c_string(device_name, "device_name")?;
+        let mtu = if mtu > 0 { Some(mtu as u32) } else { None };
+
+        let old_instance = {
+            let mut guard = tunnel_slot()
+                .lock()
+                .map_err(|_| anyhow!("iOS tunnel 状态锁已损坏"))?;
+            guard.take()
+        };
+        drop(old_instance);
+
+        let instance = create_tunnel_instance(fd, server_addr, token, device_name, mtu)?;
+        let mut guard = tunnel_slot()
+            .lock()
+            .map_err(|_| anyhow!("iOS tunnel 状态锁已损坏"))?;
+        guard.replace(instance);
+        Ok(())
+    }
+
+    fn create_tunnel_instance(
+        fd: i32,
+        server_addr: String,
+        token: String,
+        device_name: String,
+        mtu: Option<u32>,
+    ) -> anyhow::Result<IosTunnelInstance> {
+        let vnt_config = build_ios_vnt_config(server_addr, token, device_name, mtu);
+        let (core_config, _) = convert_to_core_config(&vnt_config)?;
+        let runtime = Runtime::new().context("创建 iOS Tokio Runtime 失败")?;
+        let task_manager = TaskGroupManager::new();
+        let (task_group, task_group_guard) = task_manager.create_task()?;
+
+        let network_manager = runtime.block_on(async move {
+            let mut network_manager =
+                NetworkManager::create_network(Box::new(core_config), task_group)
+                    .await
+                    .context("创建 iOS VNT 网络实例失败")?;
+            let register_response = network_manager
+                .register()
+                .await
+                .context("iOS 注册到 VNTS 2.0 服务端失败")?;
+            if let RegisterResponse::Failed(error) = register_response {
+                return Err(anyhow!("iOS 注册到 VNTS 2.0 服务端失败: {}", error.message));
+            }
+            if !network_manager.is_no_tun() {
+                network_manager
+                    .start_tun_fd(Some(fd))
+                    .await
+                    .context("启动 iOS VPN fd 失败")?;
+            }
+            Ok::<_, anyhow::Error>(network_manager)
+        })?;
+
+        let core_api = network_manager.vnt_api();
+        Ok(IosTunnelInstance {
+            _runtime: runtime,
+            _task_group_guard: task_group_guard,
+            network_manager,
+            core_api,
+        })
+    }
+
+    fn build_ios_vnt_config(
+        server_addr: String,
+        token: String,
+        device_name: String,
+        mtu: Option<u32>,
+    ) -> VntConfig {
+        let device_name = if device_name.trim().is_empty() {
+            "iOS Device".to_string()
+        } else {
+            device_name.trim().to_string()
+        };
+        VntConfig {
+            tap: false,
+            token,
+            device_id: stable_ios_device_id(&server_addr, &device_name),
+            name: device_name,
+            server_address_str: server_addr,
+            name_servers: Vec::new(),
+            stun_server: Vec::new(),
+            in_ips: Vec::new(),
+            out_ips: Vec::new(),
+            password: None,
+            mtu,
+            ip: None,
+            no_proxy: false,
+            server_encrypt: false,
+            cipher_model: String::new(),
+            finger: false,
+            punch_model: String::new(),
+            ports: None,
+            first_latency: false,
+            device_name: None,
+            use_channel_type: String::new(),
+            packet_loss_rate: None,
+            packet_delay: 0,
+            port_mapping_list: Vec::new(),
+            compressor: "none".to_string(),
+            allow_wire_guard: false,
+            local_dev: None,
+            disable_relay: false,
+        }
+    }
+
+    fn stable_ios_device_id(server_addr: &str, device_name: &str) -> String {
+        let mut hasher = DefaultHasher::new();
+        server_addr.hash(&mut hasher);
+        device_name.hash(&mut hasher);
+        format!("ios-{:016x}", hasher.finish())
+    }
+
+    fn read_c_string(ptr: *const c_char, name: &str) -> anyhow::Result<String> {
+        if ptr.is_null() {
+            return Err(anyhow!("{name} 不能为空"));
+        }
+        let value = unsafe { CStr::from_ptr(ptr) }
+            .to_str()
+            .with_context(|| format!("{name} 不是有效 UTF-8"))?
+            .trim()
+            .to_string();
+        if value.is_empty() {
+            return Err(anyhow!("{name} 不能为空"));
+        }
+        Ok(value)
+    }
+}

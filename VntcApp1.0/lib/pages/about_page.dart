@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/update/update_dialog.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
@@ -21,10 +22,12 @@ class _AboutPageState extends State<AboutPage> {
     final isWideScreen = screenWidth > 600;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor:
+          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
       body: SafeArea(
         child: SingleChildScrollView(
-          padding: ResponsiveUtils.padding(context,
+          padding: ResponsiveUtils.padding(
+            context,
             all: isWideScreen ? 24 : 16,
           ),
           child: Column(
@@ -36,6 +39,10 @@ class _AboutPageState extends State<AboutPage> {
 
               // 应用信息卡片
               _buildAppInfoCard(isDark),
+              SizedBox(height: context.spacingMedium),
+
+              // 软件更新卡片
+              _buildUpdateCard(isDark),
               SizedBox(height: context.spacingMedium),
 
               // 基于开源项目卡片
@@ -91,14 +98,18 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontXLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
               Text(
                 '应用信息与帮助',
                 style: TextStyle(
                   fontSize: context.fontBody,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
                 ),
               ),
             ],
@@ -115,7 +126,8 @@ class _AboutPageState extends State<AboutPage> {
       width: double.infinity,
       padding: ResponsiveUtils.padding(context, all: 32),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
@@ -161,14 +173,15 @@ class _AboutPageState extends State<AboutPage> {
             style: TextStyle(
               fontSize: context.fontXLarge,
               fontWeight: FontWeight.bold,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
           SizedBox(height: context.spacingXSmall),
 
-          // 版本号 - 可点击跳转到GitHub
+          // 版本号 - 可点击检查更新
           InkWell(
-            onTap: () => _launchUrl('https://github.com/lmq8267/VntApp'),
+            onTap: () => showUpdateCheckDialog(context),
             borderRadius: BorderRadius.circular(context.cardRadius),
             child: Container(
               padding: EdgeInsets.symmetric(
@@ -197,10 +210,44 @@ class _AboutPageState extends State<AboutPage> {
             textAlign: TextAlign.center,
             style: TextStyle(
               fontSize: context.fontMedium,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
         ],
+      ),
+    );
+  }
+
+  Widget _buildUpdateCard(bool isDark) {
+    final primaryColor = Theme.of(context).primaryColor;
+    return Container(
+      width: double.infinity,
+      padding: ResponsiveUtils.padding(context, all: 20),
+      decoration: BoxDecoration(
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            blurRadius: 10,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: _buildContactItem(
+        isDark,
+        icon: Icons.system_update_alt_rounded,
+        title: '软件更新',
+        subtitle: '通过 GitHub Releases 检查并下载最新版本',
+        trailing: Icon(
+          Icons.chevron_right_rounded,
+          color: primaryColor,
+          size: context.iconSmall,
+        ),
+        onTap: () => showUpdateCheckDialog(context),
       ),
     );
   }
@@ -212,7 +259,8 @@ class _AboutPageState extends State<AboutPage> {
       width: double.infinity,
       padding: ResponsiveUtils.padding(context, all: 20),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
@@ -238,7 +286,9 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
             ],
@@ -248,7 +298,9 @@ class _AboutPageState extends State<AboutPage> {
             'VNT 是一个高性能、跨平台的虚拟组网工具',
             style: TextStyle(
               fontSize: context.fontBody,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
           SizedBox(height: context.spacingMedium),
@@ -310,7 +362,8 @@ class _AboutPageState extends State<AboutPage> {
       width: double.infinity,
       padding: ResponsiveUtils.padding(context, all: 20),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
@@ -336,7 +389,9 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
             ],
@@ -416,7 +471,9 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontMedium,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
               SizedBox(height: context.spacing(2)),
@@ -424,7 +481,9 @@ class _AboutPageState extends State<AboutPage> {
                 subtitle,
                 style: TextStyle(
                   fontSize: context.fontSmall,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
                 ),
               ),
             ],
@@ -441,7 +500,8 @@ class _AboutPageState extends State<AboutPage> {
       width: double.infinity,
       padding: ResponsiveUtils.padding(context, all: 20),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
@@ -467,7 +527,9 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
             ],
@@ -508,7 +570,8 @@ class _AboutPageState extends State<AboutPage> {
                 color: primaryColor,
               ),
             ),
-            onTap: () => _launchUrl('http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=O7Thrz1oW12eJtNnGicZB16O4CF1P6-9&authKey=0Mdrbl88lqI3tlipW1cZiz2MsNP2Mle7zn91MPQMSWqIKDvaf5e5s6ErCHeb07MN&noverify=0&group_code=1060550456'),
+            onTap: () => _launchUrl(
+                'http://qm.qq.com/cgi-bin/qm/qr?_wv=1027&k=O7Thrz1oW12eJtNnGicZB16O4CF1P6-9&authKey=0Mdrbl88lqI3tlipW1cZiz2MsNP2Mle7zn91MPQMSWqIKDvaf5e5s6ErCHeb07MN&noverify=0&group_code=1060550456'),
           ),
         ],
       ),
@@ -522,7 +585,8 @@ class _AboutPageState extends State<AboutPage> {
       width: double.infinity,
       padding: ResponsiveUtils.padding(context, all: 20),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
@@ -548,7 +612,9 @@ class _AboutPageState extends State<AboutPage> {
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
             ],
@@ -558,7 +624,9 @@ class _AboutPageState extends State<AboutPage> {
             'VNT 项目遵循 Apache License 2.0 开源许可证',
             style: TextStyle(
               fontSize: context.fontBody,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
         ],
@@ -612,7 +680,9 @@ class _AboutPageState extends State<AboutPage> {
                     style: TextStyle(
                       fontSize: context.buttonFontSize,
                       fontWeight: FontWeight.w600,
-                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
                     ),
                   ),
                   SizedBox(height: context.spacing(2)),
@@ -620,18 +690,24 @@ class _AboutPageState extends State<AboutPage> {
                     subtitle,
                     style: TextStyle(
                       fontSize: context.fontSmall,
-                      color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
                     ),
                   ),
                 ],
               ),
             ),
-            if (trailing != null) trailing
-            else Icon(
-              Icons.open_in_new_rounded,
-              size: context.iconSmall,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
-            ),
+            if (trailing != null)
+              trailing
+            else
+              Icon(
+                Icons.open_in_new_rounded,
+                size: context.iconSmall,
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
+              ),
           ],
         ),
       ),

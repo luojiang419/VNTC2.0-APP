@@ -3,6 +3,9 @@ set -e
 
 BUNDLE=$1
 APPIMAGE_ARCH=$2
+APP_RELEASE_VERSION="${APP_RELEASE_VERSION:-$(grep '^version:' pubspec.yaml | awk '{print $2}' | cut -d+ -f1)}"
+APP_RELEASE_BUILD_NUMBER="${APP_RELEASE_BUILD_NUMBER:-1}"
+APP_RELEASE_DISPLAY_VERSION="${APP_RELEASE_DISPLAY_VERSION:-v$APP_RELEASE_VERSION}"
 
 step() { echo -e "\n\033[1;36m>>> $1\033[0m\n"; }
 
@@ -39,7 +42,14 @@ rustc -V
 step "构建 Flutter Linux Release"
 flutter config --no-analytics
 flutter pub get
-flutter build linux --release -v
+flutter build linux --release -v \
+  --build-name "$APP_RELEASE_VERSION" \
+  --build-number "$APP_RELEASE_BUILD_NUMBER" \
+  --dart-define=APP_BASE_TITLE="VNTC APP2.0" \
+  --dart-define=APP_BUILD_VERSION="$APP_RELEASE_VERSION" \
+  --dart-define=APP_DISPLAY_VERSION="$APP_RELEASE_DISPLAY_VERSION" \
+  --dart-define=APP_PRODUCT_NAME="VNTC APP2.0" \
+  --dart-define=APP_WINDOW_TITLE="VNTC APP2.0 $APP_RELEASE_DISPLAY_VERSION"
 
 step "下载并解压 appimagetool"
 APPIMAGETOOL_URL="https://github.com/AppImage/AppImageKit/releases/download/continuous/appimagetool-${APPIMAGE_ARCH}.AppImage"
