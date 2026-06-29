@@ -26,6 +26,7 @@ concurrency:
 env:
   CARGO_TERM_COLOR: always
   APP_DIR: VntcApp1.0
+  RUST_VERSION: 1.88.0
 permissions:
   contents: write
 
@@ -133,18 +134,18 @@ jobs:
           channel: stable
           flutter-version: ${{ matrix.flutter-version }}
 
-      - name: 固定 Rust 版本 1.77.2
+      - name: 固定 Rust 版本
         if: "!startsWith(matrix.NAME, 'vntApp-linux')"
         shell: bash
         run: |
           echo "========================================="
-          echo "🔧 开始配置 Rust 1.77.2"
+          echo "🔧 开始配置 Rust ${RUST_VERSION}"
           echo "========================================="
           
           rustup set auto-self-update disable
-          rustup toolchain install 1.77.2
-          rustup default 1.77.2
-          rustup component add rust-src --toolchain 1.77.2
+          rustup toolchain install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup component add rust-src --toolchain "${RUST_VERSION}"
           
           echo ""
           echo "✅ Rust 版本配置完成："
@@ -217,20 +218,28 @@ jobs:
         run: |
           flutter doctor -v
           flutter precache --windows
-          
-          Expand-Archive -Path ".github/patches/windows-x64-release.zip" -DestinationPath "windows-x64-release"
-          
-          Copy-Item -Path "windows-x64-release/*" -Destination "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/bin/cache/artifacts/engine/windows-x64-release/" -Recurse -Force
-          
-          New-Item -ItemType File -Path "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/.win7_engine_applied" -Force
+
+          $archive = Join-Path $Env:GITHUB_WORKSPACE "VntcApp1.0/.github/patches/windows-x64-release.zip"
+          if (Test-Path $archive) {
+            Expand-Archive -Path $archive -DestinationPath "windows-x64-release" -Force
+            Copy-Item -Path "windows-x64-release/*" -Destination "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/bin/cache/artifacts/engine/windows-x64-release/" -Recurse -Force
+            New-Item -ItemType File -Path "C:/hostedtoolcache/windows/flutter/stable-${{ matrix.flutter-version }}-x64/.win7_engine_applied" -Force
+          } else {
+            Write-Host "未找到 Windows 7 引擎补丁包，跳过引擎替换: $archive"
+          }
             
       - name: 打补丁以启用 Dropdown Menu 过滤支持
         if: matrix.NAME == 'vntApp-windows' && steps.win7_engine.outputs.applied != 'true'
         shell: bash
         run: |
-          cp .github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff $(dirname $(dirname $(which flutter)))
-          cd $(dirname $(dirname $(which flutter)))
-          git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || true
+          patch_file="${GITHUB_WORKSPACE}/VntcApp1.0/vntcrustdesk-src/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
+          if [ -f "$patch_file" ]; then
+            cp "$patch_file" "$(dirname "$(dirname "$(which flutter)")")"
+            cd "$(dirname "$(dirname "$(which flutter)")")"
+            git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || true
+          else
+            echo "未找到 Dropdown Menu 补丁，跳过: $patch_file"
+          fi
           
       - name: Install Android rust target
         if: matrix.NAME == 'vntApp-android'
@@ -387,19 +396,31 @@ jobs:
           echo "预下载依赖以触发 tun-rs 下载"
           cd rust
           cargo fetch || true
+          cd ..
           
           echo "修复 tun-rs size_of 导入问题"
-          TUN_FILE=$(find ~/.cargo/registry/src -name "mod.rs" -path "*/tun-rs-*/src/platform/macos/tap/mod.rs" 2>/dev/null | head -1)
+          TUN_FILE="vendor/tun-rs-2.5.7/src/platform/macos/tap/mod.rs"
+          if [ ! -f "$TUN_FILE" ]; then
+            TUN_FILE=$(find ~/.cargo/registry/src -name "mod.rs" -path "*/tun-rs-*/src/platform/macos/tap/mod.rs" 2>/dev/null | head -1)
+          fi
           if [ -n "$TUN_FILE" ] && [ -f "$TUN_FILE" ]; then
             echo "找到文件: $TUN_FILE"
-            echo 'use std::mem::size_of;' | sed -i '' '35r /dev/stdin' "$TUN_FILE" || \
-            sed -i '' '35a\
-          use std::mem::size_of;' "$TUN_FILE"
+            python3 - "$TUN_FILE" <<'PY'
+          import sys
+          from pathlib import Path
+
+          path = Path(sys.argv[1])
+          text = path.read_text()
+          line = "use std::mem::size_of;"
+          if line not in text:
+              marker = "use std::io::{IoSlice, IoSliceMut};"
+              text = text.replace(marker, f"{marker}\n{line}", 1)
+              path.write_text(text)
+          PY
             echo "✅ 已修复"
           else
             echo "⚠️ 未找到 tun-rs 文件，可能还未下载"
           fi
-          cd ..
 
       - name: 构建 macOS 应用
         if: matrix.NAME == 'vntApp-macOS'
@@ -516,6 +537,7 @@ jobs:
             -e APP_RELEASE_VERSION="${APP_RELEASE_VERSION}" \
             -e APP_RELEASE_BUILD_NUMBER="${APP_RELEASE_BUILD_NUMBER}" \
             -e APP_RELEASE_DISPLAY_VERSION="${APP_RELEASE_DISPLAY_VERSION}" \
+            -e RUST_VERSION="${RUST_VERSION}" \
             -e APPIMAGETOOL_ARCH=${{ matrix.APPIMAGE_ARCH }} \
             -w /workspace/VntcApp1.0 \
             ${{ matrix.DOCKER_IMAGE }} \
@@ -619,6 +641,3 @@ jobs:
             App 内更新功能会读取 GitHub Releases，并按当前系统平台选择对应安装包。iOS 版本仅提供下载/分发文件，App 内不会直接自安装 IPA。
           files: release-assets/*
           prerelease: ${{ contains(github.ref_name, 'test') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
-
-
-
