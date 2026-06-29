@@ -42,6 +42,7 @@ use std::collections::VecDeque;
 use std::ffi::{CStr, CString};
 use std::io;
 use std::io::{IoSlice, IoSliceMut};
+use std::mem::size_of;
 use std::os::fd::{AsRawFd, IntoRawFd, RawFd};
 use std::sync::Mutex;
 
