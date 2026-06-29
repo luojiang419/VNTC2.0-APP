@@ -9,11 +9,6 @@ on:
       - 'v*'
   workflow_dispatch:
     inputs:
-      rebuild_android_so:
-        description: '是否重新打包安卓so库？'
-        required: false
-        type: boolean
-        default: false  
       release_version:
         description: '手动构建版本号，例如 2.0.1'
         required: false
@@ -42,37 +37,9 @@ jobs:
       matrix:
         include:
 
-          - NAME: vntApp-android
-            OS: ubuntu-latest
-            flutter-version: 3.44.2
-
-          - NAME: vntApp-windows
-            OS: windows-2022
-            flutter-version: 3.44.2
-
           - NAME: vntApp-macOS
             OS: macos-14
             flutter-version: 3.44.2
-
-          - NAME: vntApp-IOS
-            OS: macos-14
-            flutter-version: 3.44.2
-
-          - NAME: vntApp-linux-x86_64
-            OS: ubuntu-latest
-            flutter-version: 3.44.2
-            DOCKER_PLATFORM: linux/amd64
-            DOCKER_IMAGE: ubuntu:18.04
-            APPIMAGE_ARCH: x86_64
-            BUNDLE_DIR: build/linux/x64/release/bundle
-
-          #- NAME: vntApp-linux-arm64
-          #  OS: ubuntu-latest
-          #  flutter-version: 3.44.2
-          #  DOCKER_PLATFORM: linux/arm64
-          #  DOCKER_IMAGE: arm64v8/ubuntu:18.04
-          #  APPIMAGE_ARCH: aarch64
-          #  BUNDLE_DIR: build/linux/arm64/release/bundle
 
     runs-on: ${{ matrix.OS }}
     steps:
@@ -108,7 +75,7 @@ jobs:
           echo "构建版本: $version ($build_number)"
 
       - name: 设置 Xcode 版本
-        if: matrix.NAME == 'vntApp-IOS' || matrix.NAME == 'vntApp-macOS'
+        if: matrix.NAME == 'vntApp-macOS'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.2'
@@ -427,6 +394,31 @@ jobs:
         run: |
           # 构建 Flutter macOS 应用
           flutter pub get
+          python3 - <<'PY'
+          import os
+          import shutil
+          from pathlib import Path
+
+          candidates = []
+          if os.environ.get("PUB_CACHE"):
+              candidates.append(Path(os.environ["PUB_CACHE"]))
+          candidates.append(Path.home() / ".pub-cache")
+          flutter_bin = shutil.which("flutter")
+          if flutter_bin:
+              candidates.append(Path(flutter_bin).resolve().parents[1] / ".pub-cache")
+
+          header_glob = "hosted/pub.dev/video_player_avfoundation-*/darwin/video_player_avfoundation/Sources/video_player_avfoundation_objc/include/video_player_avfoundation_objc/FVPViewProvider.h"
+          patched = False
+          for pub_cache in dict.fromkeys(candidates):
+              for header in pub_cache.glob(header_glob):
+                  text = header.read_text()
+                  if "#import <TargetConditionals.h>" not in text:
+                      header.write_text(text.replace("#if TARGET_OS_OSX", "#import <TargetConditionals.h>\n\n#if TARGET_OS_OSX", 1))
+                      patched = True
+                      print(f"已修复 video_player_avfoundation 头文件: {header}")
+          if not patched:
+              print("未发现需要修复的 video_player_avfoundation 头文件")
+          PY
           flutter build macos --release -v \
             --build-name "$APP_RELEASE_VERSION" \
             --build-number "$APP_RELEASE_BUILD_NUMBER" \
@@ -550,12 +542,7 @@ jobs:
         with:
           name: ${{ matrix.NAME }}
           path: |
-            ${{ matrix.NAME == 'vntApp-android' && 'VntcApp1.0/vntApp-android.apk' || '' }}
-            ${{ matrix.NAME == 'vntApp-windows' && 'VntcApp1.0/vntApp-windows.zip' || '' }}
             ${{ matrix.NAME == 'vntApp-macOS' && 'VntcApp1.0/vnt_APP.dmg' || '' }}
-            ${{ matrix.NAME == 'vntApp-IOS' && 'VntcApp1.0/build/ios/iphoneos/vntAPP.ipa' || '' }}
-            ${{ matrix.NAME == 'vntApp-linux-x86_64' && 'VntcApp1.0/vntApp-linux-x86_64.AppImage' || '' }}
-            ${{ matrix.NAME == 'vntApp-linux-arm64' && 'VntcApp1.0/vntApp-linux-aarch64.AppImage' || '' }}
 
   deploy:
     if: startsWith(github.ref, 'refs/tags/v')
@@ -639,6 +626,6 @@ jobs:
           body: |
             自动构建版本 ${{ github.ref_name }}。
 
-            App 内更新功能会读取 GitHub Releases，并按当前系统平台选择对应安装包。iOS 版本仅提供下载/分发文件，App 内不会直接自安装 IPA。
+            App 内更新功能会读取 GitHub Releases，并为 macOS 选择 DMG 安装包。
           files: release-assets/*
           prerelease: ${{ contains(github.ref_name, 'test') || contains(github.ref_name, 'beta') || contains(github.ref_name, 'rc') }}
