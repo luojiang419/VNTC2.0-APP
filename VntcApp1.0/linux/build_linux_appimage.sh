@@ -21,8 +21,9 @@ apt-get install -y --no-install-recommends --no-install-suggests \
     apt-get install -f -y
   }
 
-step "安装 Flutter 3.24.5"
-git clone --depth 1 --branch 3.24.5 \
+FLUTTER_VERSION="${FLUTTER_VERSION:-3.44.2}"
+step "安装 Flutter ${FLUTTER_VERSION}"
+git clone --depth 1 --branch "${FLUTTER_VERSION}" \
   https://github.com/flutter/flutter.git /opt/flutter
 export PATH="/opt/flutter/bin:$PATH"
 flutter precache --linux

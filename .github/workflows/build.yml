@@ -44,23 +44,23 @@ jobs:
 
           - NAME: vntApp-android
             OS: ubuntu-latest
-            flutter-version: 3.22.0
+            flutter-version: 3.44.2
 
           - NAME: vntApp-windows
             OS: windows-2022
-            flutter-version: 3.24.5
+            flutter-version: 3.44.2
 
           - NAME: vntApp-macOS
-            OS: macos-latest
-            flutter-version: 3.24.5
+            OS: macos-14
+            flutter-version: 3.44.2
 
           - NAME: vntApp-IOS
             OS: macos-14
-            flutter-version: 3.24.5
+            flutter-version: 3.44.2
 
           - NAME: vntApp-linux-x86_64
             OS: ubuntu-latest
-            flutter-version: 3.24.5
+            flutter-version: 3.44.2
             DOCKER_PLATFORM: linux/amd64
             DOCKER_IMAGE: ubuntu:18.04
             APPIMAGE_ARCH: x86_64
@@ -68,7 +68,7 @@ jobs:
 
           #- NAME: vntApp-linux-arm64
           #  OS: ubuntu-latest
-          #  flutter-version: 3.24.5
+          #  flutter-version: 3.44.2
           #  DOCKER_PLATFORM: linux/arm64
           #  DOCKER_IMAGE: arm64v8/ubuntu:18.04
           #  APPIMAGE_ARCH: aarch64
@@ -108,7 +108,7 @@ jobs:
           echo "构建版本: $version ($build_number)"
 
       - name: 设置 Xcode 版本
-        if: matrix.NAME == 'vntApp-IOS'
+        if: matrix.NAME == 'vntApp-IOS' || matrix.NAME == 'vntApp-macOS'
         uses: maxim-lobanov/setup-xcode@v1
         with:
           xcode-version: '16.2'
@@ -538,6 +538,7 @@ jobs:
             -e APP_RELEASE_BUILD_NUMBER="${APP_RELEASE_BUILD_NUMBER}" \
             -e APP_RELEASE_DISPLAY_VERSION="${APP_RELEASE_DISPLAY_VERSION}" \
             -e RUST_VERSION="${RUST_VERSION}" \
+            -e FLUTTER_VERSION="${{ matrix.flutter-version }}" \
             -e APPIMAGETOOL_ARCH=${{ matrix.APPIMAGE_ARCH }} \
             -w /workspace/VntcApp1.0 \
             ${{ matrix.DOCKER_IMAGE }} \
