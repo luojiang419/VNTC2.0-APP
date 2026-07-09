@@ -278,10 +278,12 @@ class ChatManager extends ChangeNotifier {
     }
 
     return servers
-        .map((server) => buildLegacyChatHallId(
-              connectServer: server,
-              virtualNetwork: virtualNetwork,
-            ))
+        .expand(
+          (server) => buildLegacyChatHallIdCandidates(
+            connectServer: server,
+            virtualNetwork: virtualNetwork,
+          ),
+        )
         .where((hallId) => hallId != canonicalHallId)
         .toSet()
         .toList(growable: false);

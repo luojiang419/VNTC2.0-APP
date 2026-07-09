@@ -58,17 +58,64 @@ String buildLegacyChatHallId({
   return 'hall:$server|${virtualNetwork.trim()}';
 }
 
-String normalizeChatConnectServer(String connectServer) {
+List<String> buildLegacyChatHallIdCandidates({
+  required String connectServer,
+  required String virtualNetwork,
+}) {
+  final trimmed = connectServer.trim();
+  final body = _chatConnectServerBody(connectServer);
+  final servers = <String>{};
+  if (trimmed.isNotEmpty) {
+    servers.add(trimmed);
+  }
+  if (body.isNotEmpty) {
+    servers
+      ..add(body)
+      ..add('quic://$body')
+      ..add('udp://$body')
+      ..add('tcp://$body')
+      ..add('wss://$body')
+      ..add('ws://$body')
+      ..add('dynamic://$body')
+      ..add('txt:$body');
+  }
+  if (servers.isEmpty) {
+    servers.add('unknown');
+  }
+  return servers
+      .map(
+        (server) => buildLegacyChatHallId(
+          connectServer: server,
+          virtualNetwork: virtualNetwork,
+        ),
+      )
+      .toList(growable: false);
+}
+
+String _chatConnectServerBody(String connectServer) {
   var normalized = connectServer.trim();
   if (normalized.isEmpty) {
-    return 'unknown';
+    return '';
   }
-  final schemeIndex = normalized.indexOf('://');
-  if (schemeIndex > 0) {
-    normalized = normalized.substring(schemeIndex + 3);
+  final lower = normalized.toLowerCase();
+  if (lower.startsWith('txt:')) {
+    normalized = normalized.substring('txt:'.length);
+  } else {
+    final schemeIndex = normalized.indexOf('://');
+    if (schemeIndex > 0) {
+      normalized = normalized.substring(schemeIndex + 3);
+    }
   }
   while (normalized.endsWith('/')) {
     normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return normalized.trim();
+}
+
+String normalizeChatConnectServer(String connectServer) {
+  final normalized = _chatConnectServerBody(connectServer);
+  if (normalized.isEmpty) {
+    return 'unknown';
   }
   return normalized.toLowerCase();
 }

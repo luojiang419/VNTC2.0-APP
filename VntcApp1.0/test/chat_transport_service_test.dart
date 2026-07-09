@@ -37,6 +37,20 @@ void main() {
     expect(tcpHallId, 'hall:115.231.35.105:2225|10.10.10.0');
   });
 
+  test('动态地址与txt前缀会归一化到同一大厅ID', () {
+    final txtHallId = buildHallId(
+      connectServer: 'txt:115.231.35.105:2225',
+      virtualNetwork: '10.10.10.0',
+    );
+    final dynamicHallId = buildHallId(
+      connectServer: 'dynamic://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.0',
+    );
+
+    expect(txtHallId, dynamicHallId);
+    expect(txtHallId, 'hall:115.231.35.105:2225|10.10.10.0');
+  });
+
   test('旧大厅ID可归一化为跨平台稳定ID', () {
     expect(
       normalizeChatHallId('hall:tcp://115.231.35.105:2225|10.10.10.0'),
@@ -69,6 +83,38 @@ void main() {
         roomToken: 'room-token',
       ),
       'room:hall:quic://115.231.35.105:2225|10.10.10.0:10.10.10.6:room-token',
+    );
+  });
+
+  test('旧版大厅兼容候选覆盖常见协议别名', () {
+    final candidates = buildLegacyChatHallIdCandidates(
+      connectServer: 'quic://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.0',
+    );
+
+    expect(
+      candidates,
+      contains('hall:quic://115.231.35.105:2225|10.10.10.0'),
+    );
+    expect(
+      candidates,
+      contains('hall:tcp://115.231.35.105:2225|10.10.10.0'),
+    );
+    expect(
+      candidates,
+      contains('hall:udp://115.231.35.105:2225|10.10.10.0'),
+    );
+    expect(
+      candidates,
+      contains('hall:wss://115.231.35.105:2225|10.10.10.0'),
+    );
+    expect(
+      candidates,
+      contains('hall:dynamic://115.231.35.105:2225|10.10.10.0'),
+    );
+    expect(
+      candidates,
+      contains('hall:txt:115.231.35.105:2225|10.10.10.0'),
     );
   });
 
