@@ -5,61 +5,98 @@ import 'package:flutter/material.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 
+bool _updateAvailableDialogVisible = false;
+bool _manualUpdateCheckActive = false;
+
 Future<void> showUpdateCheckDialog(
   BuildContext context, {
   AppUpdateService? service,
 }) async {
-  final updateService = service ?? AppUpdateService();
-  showDialog<void>(
-    context: context,
-    barrierDismissible: false,
-    builder: (dialogContext) => const AlertDialog(
-      content: Row(
-        children: [
-          SizedBox(
-            width: 24,
-            height: 24,
-            child: CircularProgressIndicator(strokeWidth: 2.5),
-          ),
-          SizedBox(width: 16),
-          Expanded(child: Text('正在检查 GitHub 最新版本...')),
-        ],
-      ),
-    ),
-  );
-
-  AppUpdateInfo info;
+  if (_manualUpdateCheckActive) {
+    return;
+  }
+  _manualUpdateCheckActive = true;
   try {
-    info = await updateService.checkLatest();
-  } catch (error) {
-    if (context.mounted) {
-      Navigator.of(context, rootNavigator: true).pop();
-      showTopToast(context, '检查更新失败: $error', isSuccess: false);
-    }
-    return;
-  }
-
-  if (!context.mounted) {
-    return;
-  }
-  Navigator.of(context, rootNavigator: true).pop();
-
-  if (!info.hasUpdate) {
-    showTopToast(
-      context,
-      '当前已是最新版本：v${info.currentVersion}',
-      isSuccess: true,
+    final updateService = service ?? AppUpdateService();
+    showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => const AlertDialog(
+        content: Row(
+          children: [
+            SizedBox(
+              width: 24,
+              height: 24,
+              child: CircularProgressIndicator(strokeWidth: 2.5),
+            ),
+            SizedBox(width: 16),
+            Expanded(child: Text('正在检查 GitHub 最新版本...')),
+          ],
+        ),
+      ),
     );
-    return;
-  }
 
-  await showDialog<void>(
-    context: context,
-    builder: (_) => _UpdateAvailableDialog(
+    AppUpdateInfo info;
+    try {
+      info = await updateService.checkLatest();
+    } catch (error) {
+      if (context.mounted) {
+        Navigator.of(context, rootNavigator: true).pop();
+        showTopToast(context, '检查更新失败: $error', isSuccess: false);
+      }
+      return;
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+    Navigator.of(context, rootNavigator: true).pop();
+
+    if (!info.hasUpdate) {
+      showTopToast(
+        context,
+        '当前已是最新版本：v${info.currentVersion}',
+        isSuccess: true,
+      );
+      return;
+    }
+
+    await showUpdateAvailableDialog(
+      context: context,
       info: info,
       service: updateService,
-    ),
-  );
+      allowDuringManualCheck: true,
+    );
+  } finally {
+    _manualUpdateCheckActive = false;
+  }
+}
+
+Future<bool> showUpdateAvailableDialog({
+  required BuildContext context,
+  required AppUpdateInfo info,
+  required AppUpdateService service,
+  bool allowDuringManualCheck = false,
+}) async {
+  if (!context.mounted ||
+      _updateAvailableDialogVisible ||
+      (_manualUpdateCheckActive && !allowDuringManualCheck)) {
+    return false;
+  }
+
+  _updateAvailableDialogVisible = true;
+  try {
+    await showDialog<void>(
+      context: context,
+      builder: (_) => _UpdateAvailableDialog(
+        info: info,
+        service: service,
+      ),
+    );
+    return true;
+  } finally {
+    _updateAvailableDialogVisible = false;
+  }
 }
 
 class _UpdateAvailableDialog extends StatefulWidget {
