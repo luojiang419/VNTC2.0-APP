@@ -1,4 +1,3 @@
-import 'dart:convert';
 import 'dart:async';
 import 'dart:io';
 
@@ -45,6 +44,63 @@ String? buildChatStartupIssueMessage({
   return issues.join('；');
 }
 
+@visibleForTesting
+Map<String, Map<String, int>> canonicalizeChatSyncSummary({
+  required Map<String, Map<String, int>> remoteSummary,
+  required String incomingHallId,
+  required String localHallId,
+  required String localVirtualIp,
+  required String remoteVirtualIp,
+  required Iterable<String> incomingRoomIds,
+  required Iterable<String> canonicalRoomIds,
+}) {
+  final normalized = <String, Map<String, int>>{};
+
+  void mergeEntry(String sourceId, String targetId) {
+    final source = remoteSummary[sourceId];
+    if (source == null) {
+      return;
+    }
+    final target = normalized.putIfAbsent(targetId, () => <String, int>{});
+    for (final entry in source.entries) {
+      final knownSequence = target[entry.key];
+      if (knownSequence == null || entry.value > knownSequence) {
+        target[entry.key] = entry.value;
+      }
+    }
+  }
+
+  mergeEntry(localHallId, localHallId);
+  mergeEntry(incomingHallId, localHallId);
+
+  final canonicalDirectId = buildDirectConversationId(
+    hallId: localHallId,
+    firstVirtualIp: localVirtualIp,
+    secondVirtualIp: remoteVirtualIp,
+  );
+  mergeEntry(canonicalDirectId, canonicalDirectId);
+  mergeEntry(
+    buildLegacyDirectConversationId(
+      hallId: incomingHallId,
+      firstVirtualIp: localVirtualIp,
+      secondVirtualIp: remoteVirtualIp,
+    ),
+    canonicalDirectId,
+  );
+
+  final canonicalRooms = canonicalRoomIds.toList(growable: false);
+  final incomingRooms = incomingRoomIds.toList(growable: false);
+  for (var index = 0; index < incomingRooms.length; index += 1) {
+    final canonicalRoomId = index < canonicalRooms.length
+        ? canonicalRooms[index]
+        : incomingRooms[index];
+    mergeEntry(canonicalRoomId, canonicalRoomId);
+    mergeEntry(incomingRooms[index], canonicalRoomId);
+  }
+
+  return normalized;
+}
+
 class ChatManager extends ChangeNotifier {
   ChatManager._();
 
@@ -69,6 +125,10 @@ class ChatManager extends ChangeNotifier {
   List<ChatConversation> _conversations = const [];
   List<ChatRoomDescriptor> _rooms = const [];
   final Map<String, List<ChatMessageRecord>> _messageCache = {};
+  final Map<String, ChatAttachmentTransferProgress>
+      _attachmentTransferProgress = {};
+  final Map<String, _IncomingAttachmentTransferState>
+      _incomingAttachmentTransfers = {};
   int _privateUnreadTotal = 0;
 
   List<ChatHall> _halls = const [];
@@ -117,6 +177,11 @@ class ChatManager extends ChangeNotifier {
       List<ChatMessageRecord>.unmodifiable(
         _messageCache[_selectedConversationId] ?? const [],
       );
+
+  ChatAttachmentTransferProgress? attachmentTransferProgressFor(
+    String messageId,
+  ) =>
+      _attachmentTransferProgress[messageId];
 
   List<ChatConversation> get directConversations =>
       List<ChatConversation>.unmodifiable(
@@ -475,7 +540,6 @@ class ChatManager extends ChangeNotifier {
                 ),
               ),
             ),
-      attachmentBase64: packet.attachmentBase64,
     );
   }
 
@@ -483,24 +547,18 @@ class ChatManager extends ChangeNotifier {
     required String targetIp,
     required ChatTransportPacket packet,
     required _LocalHallNode localNode,
+    void Function(int sentBytes, int totalBytes)? onProgress,
   }) async {
     Object? firstError;
     var sent = false;
-    final packets = <ChatTransportPacket>[
-      packet,
-      for (final aliasHallId in localNode.legacyHallIds)
-        _packetForHallAlias(
-          packet: packet,
-          aliasHallId: aliasHallId,
-          localNode: localNode,
-          targetIp: targetIp,
-        ),
-    ];
-    for (final candidate in packets) {
+    final packets = <ChatTransportPacket>[packet];
+    for (var index = 0; index < packets.length; index += 1) {
+      final candidate = packets[index];
       try {
         await _transportService.sendPacket(
           targetIp: targetIp,
           packet: candidate,
+          onProgress: index == 0 ? onProgress : null,
         );
         sent = true;
       } catch (error) {
@@ -509,6 +567,49 @@ class ChatManager extends ChangeNotifier {
     }
     if (!sent) {
       throw firstError ?? StateError('聊天报文发送失败');
+    }
+  }
+
+  Future<void> _sendAttachmentStreamWithHallCompatibility({
+    required String targetIp,
+    required ChatTransportPacket packet,
+    required File sourceFile,
+    required int totalBytes,
+    required _LocalHallNode localNode,
+    ChatPacketProgressCallback? onProgress,
+  }) async {
+    Object? firstError;
+    var sent = false;
+    final packets = <ChatTransportPacket>[packet];
+    for (var index = 0; index < packets.length; index += 1) {
+      for (var attempt = 1;
+          attempt <= ChatConstants.attachmentTransferMaxAttempts;
+          attempt += 1) {
+        try {
+          await _transportService.sendAttachmentStream(
+            targetIp: targetIp,
+            packet: packets[index],
+            sourceFactory: (startOffset) => sourceFile.openRead(startOffset),
+            totalBytes: totalBytes,
+            onProgress: index == 0 ? onProgress : null,
+          );
+          sent = true;
+          break;
+        } catch (error) {
+          firstError ??= error;
+          await ChatLog.write(
+            '附件流发送未确认 target=$targetIp message=${packets[index].message?.id ?? "-"} attempt=$attempt/${ChatConstants.attachmentTransferMaxAttempts} error=$error',
+          );
+          if (attempt < ChatConstants.attachmentTransferMaxAttempts) {
+            await Future<void>.delayed(
+              ChatConstants.attachmentTransferRetryDelay * attempt,
+            );
+          }
+        }
+      }
+    }
+    if (!sent) {
+      throw firstError ?? StateError('附件流发送失败');
     }
   }
 
@@ -641,7 +742,10 @@ class ChatManager extends ChangeNotifier {
     }
     _transportStartInProgress = true;
     try {
-      await _transportService.start(onPacket: _handleTransportPacket);
+      await _transportService.start(
+        onPacket: _handleTransportPacket,
+        onAttachmentStream: _openIncomingAttachmentStream,
+      );
       _transportStartError = null;
       await ChatLog.write('聊天室消息监听已就绪');
     } catch (error) {
@@ -1248,6 +1352,44 @@ class ChatManager extends ChangeNotifier {
     return result;
   }
 
+  void _startAttachmentTransfer({
+    required String messageId,
+    required int totalBytes,
+    required int startedAtEpochMs,
+  }) {
+    _attachmentTransferProgress[messageId] = ChatAttachmentTransferProgress(
+      messageId: messageId,
+      totalBytes: totalBytes,
+      transferredBytes: 0,
+      bytesPerSecond: 0,
+      startedAtEpochMs: startedAtEpochMs,
+      phase: ChatAttachmentTransferPhase.preparing,
+    );
+    notifyListeners();
+  }
+
+  void _updateAttachmentTransfer({
+    required String messageId,
+    required int transferredBytes,
+    required int bytesPerSecond,
+    required ChatAttachmentTransferPhase phase,
+  }) {
+    final current = _attachmentTransferProgress[messageId];
+    if (current == null) {
+      return;
+    }
+    _attachmentTransferProgress[messageId] = current.copyWith(
+      transferredBytes: transferredBytes,
+      bytesPerSecond: bytesPerSecond,
+      phase: phase,
+    );
+    notifyListeners();
+  }
+
+  void _clearAttachmentTransfer(String messageId) {
+    _attachmentTransferProgress.remove(messageId);
+  }
+
   Future<ChatSendResult> sendAttachment({
     required String conversationId,
     required String sourceFilePath,
@@ -1286,10 +1428,7 @@ class ChatManager extends ChangeNotifier {
           mimeType,
           fallbackPath: sourceFilePath,
         );
-    final relativePath = await _storage.importAttachmentFile(
-      sourceFilePath,
-      messageId: messageId,
-    );
+    final relativePath = '$messageId${path.extension(sourceFilePath)}';
     final attachment = ChatAttachmentRecord(
       id: attachmentId,
       messageId: messageId,
@@ -1303,82 +1442,118 @@ class ChatManager extends ChangeNotifier {
       needsManualResend: false,
       createdAtEpochMs: now,
     );
-    final bytes = await sourceFile.readAsBytes();
     final recipients = _resolveRecipients(conversation);
     var deliveredRecipients = 0;
     var failedRecipients = 0;
-    final outboundPacket = ChatTransportPacket(
-      type: 'message',
-      message: ChatMessageRecord(
-        id: messageId,
-        conversationId: conversation.id,
-        hallId: conversation.hallId,
-        conversationType: conversation.type,
-        senderVirtualIp: localNode.hall.localVirtualIp,
-        senderName: localNode.displayName,
-        senderSeq: senderSeq,
-        direction: ChatMessageDirection.outgoing,
-        contentType: contentType,
-        status: ChatMessageStatus.sent,
-        text: attachment.fileName,
-        isSyncMessage: false,
-        isRead: true,
-        sentAtEpochMs: now,
-        createdAtEpochMs: now,
-        metadataJson: '{}',
-        peerVirtualIp: conversation.peerVirtualIp,
-        roomId: conversation.roomId,
-        attachmentId: attachment.id,
-        attachment: attachment,
-      ),
-      attachmentBase64: base64Encode(bytes),
+    final localMessage = ChatMessageRecord(
+      id: messageId,
+      conversationId: conversation.id,
+      hallId: conversation.hallId,
+      conversationType: conversation.type,
+      senderVirtualIp: localNode.hall.localVirtualIp,
+      senderName: localNode.displayName,
+      senderSeq: senderSeq,
+      direction: ChatMessageDirection.outgoing,
+      contentType: contentType,
+      status: ChatMessageStatus.sending,
+      text: attachment.fileName,
+      isSyncMessage: false,
+      isRead: true,
+      sentAtEpochMs: now,
+      createdAtEpochMs: now,
+      metadataJson: '{}',
+      peerVirtualIp: conversation.peerVirtualIp,
+      roomId: conversation.roomId,
+      attachmentId: attachment.id,
+      attachment: attachment,
     );
-    for (final recipient in recipients) {
-      try {
-        await _sendPacketWithHallCompatibility(
-          targetIp: recipient,
-          packet: outboundPacket,
-          localNode: localNode,
-        );
-        deliveredRecipients += 1;
-      } catch (error) {
-        failedRecipients += 1;
-        await ChatLog.write(
-          '附件消息发送失败 conversation=${conversation.id} target=$recipient file=${attachment.fileName} error=$error',
-        );
+    await _storage.upsertMessage(localMessage, attachment: attachment);
+    await loadConversationMessages(conversation.id);
+    await reloadFromStorage(notify: false);
+    _startAttachmentTransfer(
+      messageId: messageId,
+      totalBytes: sizeBytes,
+      startedAtEpochMs: now,
+    );
+
+    try {
+      final importedPath = await _storage.importAttachmentFile(
+        sourceFilePath,
+        messageId: messageId,
+      );
+      if (importedPath != attachment.relativePath) {
+        throw StateError('附件本地缓存路径不一致');
       }
+      final outboundPacket = ChatTransportPacket(
+        type: 'attachment_stream',
+        message: localMessage.copyWith(status: ChatMessageStatus.sent),
+      );
+      for (var recipientIndex = 0;
+          recipientIndex < recipients.length;
+          recipientIndex += 1) {
+        final recipient = recipients[recipientIndex];
+        _updateAttachmentTransfer(
+          messageId: messageId,
+          transferredBytes: (sizeBytes * recipientIndex ~/ recipients.length),
+          bytesPerSecond: 0,
+          phase: ChatAttachmentTransferPhase.uploading,
+        );
+        try {
+          await _sendAttachmentStreamWithHallCompatibility(
+            targetIp: recipient,
+            packet: outboundPacket,
+            sourceFile: sourceFile,
+            totalBytes: sizeBytes,
+            localNode: localNode,
+            onProgress: (sentBytes, totalBytes) {
+              final currentRecipientBytes = totalBytes <= 0
+                  ? sizeBytes
+                  : (sizeBytes * sentBytes ~/ totalBytes);
+              final transferredBytes =
+                  ((sizeBytes * recipientIndex) + currentRecipientBytes) ~/
+                      recipients.length;
+              final elapsedMilliseconds =
+                  DateTime.now().millisecondsSinceEpoch - now;
+              _updateAttachmentTransfer(
+                messageId: messageId,
+                transferredBytes: transferredBytes,
+                bytesPerSecond: elapsedMilliseconds <= 0
+                    ? 0
+                    : (transferredBytes * 1000 ~/ elapsedMilliseconds),
+                phase: ChatAttachmentTransferPhase.uploading,
+              );
+            },
+          );
+          deliveredRecipients += 1;
+        } catch (error) {
+          failedRecipients += 1;
+          await ChatLog.write(
+            '附件消息发送失败 conversation=${conversation.id} target=$recipient file=${attachment.fileName} error=$error',
+          );
+        }
+      }
+    } catch (error) {
+      await _storage.upsertMessage(
+        localMessage.copyWith(status: ChatMessageStatus.failed),
+        attachment: attachment,
+      );
+      await loadConversationMessages(conversation.id);
+      await reloadFromStorage(notify: false);
+      _clearAttachmentTransfer(messageId);
+      notifyListeners();
+      rethrow;
     }
     final finalStatus = deliveredRecipients > 0
         ? ChatMessageStatus.sent
         : ChatMessageStatus.failed;
 
     await _storage.upsertMessage(
-      ChatMessageRecord(
-        id: messageId,
-        conversationId: conversation.id,
-        hallId: conversation.hallId,
-        conversationType: conversation.type,
-        senderVirtualIp: localNode.hall.localVirtualIp,
-        senderName: localNode.displayName,
-        senderSeq: senderSeq,
-        direction: ChatMessageDirection.outgoing,
-        contentType: contentType,
-        status: finalStatus,
-        text: attachment.fileName,
-        isSyncMessage: false,
-        isRead: true,
-        sentAtEpochMs: now,
-        createdAtEpochMs: now,
-        metadataJson: '{}',
-        peerVirtualIp: conversation.peerVirtualIp,
-        roomId: conversation.roomId,
-        attachmentId: attachment.id,
-        attachment: attachment,
-      ),
+      localMessage.copyWith(status: finalStatus),
       attachment: attachment,
     );
     await loadConversationMessages(conversation.id);
     await reloadFromStorage(notify: false);
+    _clearAttachmentTransfer(messageId);
     notifyListeners();
     final result = ChatSendResult(
       conversationId: conversation.id,
@@ -1431,10 +1606,7 @@ class ChatManager extends ChangeNotifier {
         );
         return;
       }
-      await _handleIncomingMessage(
-        packet.message!,
-        attachmentBase64: packet.attachmentBase64,
-      );
+      await _handleIncomingMessage(packet.message!);
       return;
     }
     if (packet.type == 'sync_request' && packet.syncRequest != null) {
@@ -1451,9 +1623,61 @@ class ChatManager extends ChangeNotifier {
     }
   }
 
+  Future<ChatAttachmentStreamSink?> _openIncomingAttachmentStream(
+    ChatTransportPacket packet,
+    InternetAddress remoteAddress,
+  ) async {
+    final remoteMessage = packet.message;
+    final attachment = remoteMessage?.attachment;
+    if (remoteMessage == null || attachment == null) {
+      await ChatLog.write('丢弃无附件元数据的二进制附件流');
+      return null;
+    }
+    if (!isChatRemoteAddressConsistent(
+      remoteAddress: remoteAddress.address,
+      declaredVirtualIp: remoteMessage.senderVirtualIp,
+    )) {
+      await ChatLog.write(
+        '丢弃身份不匹配的二进制附件流 remote=${remoteAddress.address} declared=${remoteMessage.senderVirtualIp}',
+      );
+      return null;
+    }
+    final transferKey = '${remoteAddress.address}|${remoteMessage.id}';
+    var transfer = _incomingAttachmentTransfers[transferKey];
+    if (transfer == null || transfer.expectedBytes != attachment.sizeBytes) {
+      final localRelativePath = await _storage.createIncomingAttachmentPath(
+        originalFileName: attachment.fileName,
+      );
+      final localFilePath = await _storage.resolveAttachmentPath(
+        localRelativePath,
+      );
+      transfer = _IncomingAttachmentTransferState(
+        localRelativePath: localRelativePath,
+        localFilePath: localFilePath,
+        expectedBytes: attachment.sizeBytes,
+      );
+      _incomingAttachmentTransfers[transferKey] = transfer;
+    }
+    final localAttachment = attachment.copyWith(
+      relativePath: transfer.localRelativePath,
+      payloadAvailable: true,
+      needsManualResend: false,
+    );
+    final sink = _IncomingAttachmentStreamSink(
+      targetPath: transfer.localFilePath,
+      expectedBytes: attachment.sizeBytes,
+      onCompleted: () => _handleIncomingMessage(
+        remoteMessage.copyWith(attachment: localAttachment),
+        attachmentPayloadAvailable: true,
+      ).whenComplete(() => _incomingAttachmentTransfers.remove(transferKey)),
+    );
+    await sink.initialize();
+    return sink;
+  }
+
   Future<void> _handleIncomingMessage(
     ChatMessageRecord rawRemoteMessage, {
-    String? attachmentBase64,
+    bool attachmentPayloadAvailable = false,
   }) async {
     final localHallId = _resolveLocalHallId(rawRemoteMessage.hallId);
     if (localHallId == null) {
@@ -1481,12 +1705,7 @@ class ChatManager extends ChangeNotifier {
 
     ChatAttachmentRecord? incomingAttachment = remoteMessage.attachment;
     if (incomingAttachment != null) {
-      if (attachmentBase64 != null && attachmentBase64.isNotEmpty) {
-        final bytes = base64Decode(attachmentBase64);
-        await _storage.writeAttachmentBytes(
-          incomingAttachment.relativePath,
-          bytes,
-        );
+      if (attachmentPayloadAvailable) {
         incomingAttachment = incomingAttachment.copyWith(
           payloadAvailable: true,
           needsManualResend: false,
@@ -1589,6 +1808,10 @@ class ChatManager extends ChangeNotifier {
       return;
     }
     final localNode = _localNodes[localHallId]!;
+    final canonicalRoomIds = payload.joinedRoomIds
+        .map((roomId) => _canonicalRoomId(roomId, localHallId))
+        .whereType<String>()
+        .toList(growable: false);
     final conversationIds = <String>{
       localHallId,
       buildDirectConversationId(
@@ -1596,14 +1819,22 @@ class ChatManager extends ChangeNotifier {
         firstVirtualIp: localNode.hall.localVirtualIp,
         secondVirtualIp: payload.requesterVirtualIp,
       ),
-      ...payload.joinedRoomIds,
+      ...canonicalRoomIds,
     };
     final missingMessages = await _storage.loadMissingMessages(
       conversationIds: conversationIds,
-      remoteSummary: payload.summary,
+      remoteSummary: canonicalizeChatSyncSummary(
+        remoteSummary: payload.summary,
+        incomingHallId: payload.hallId,
+        localHallId: localHallId,
+        localVirtualIp: localNode.hall.localVirtualIp,
+        remoteVirtualIp: payload.requesterVirtualIp,
+        incomingRoomIds: payload.joinedRoomIds,
+        canonicalRoomIds: canonicalRoomIds,
+      ),
     );
     for (final message in missingMessages) {
-      String? attachmentBase64;
+      File? attachmentFile;
       var syncMessage = message;
       if (message.attachment != null) {
         final attachment = message.attachment!;
@@ -1613,7 +1844,7 @@ class ChatManager extends ChangeNotifier {
           );
           final file = File(filePath);
           if (await file.exists()) {
-            attachmentBase64 = base64Encode(await file.readAsBytes());
+            attachmentFile = file;
           } else {
             syncMessage = message.copyWith(
               attachment: attachment.copyWith(
@@ -1632,17 +1863,33 @@ class ChatManager extends ChangeNotifier {
         }
       }
       try {
-        await _sendPacketWithHallCompatibility(
-          targetIp: remoteIp,
-          packet: ChatTransportPacket(
-            type: 'message',
-            message: syncMessage.copyWith(
-              status: ChatMessageStatus.sent,
-            ),
-            attachmentBase64: attachmentBase64,
-          ),
-          localNode: localNode,
+        final packet = ChatTransportPacket(
+          type: attachmentFile == null ? 'message' : 'attachment_stream',
+          message: syncMessage.copyWith(status: ChatMessageStatus.sent),
         );
+        final responsePacket = payload.hallId == localHallId
+            ? packet
+            : _packetForHallAlias(
+                packet: packet,
+                aliasHallId: payload.hallId,
+                localNode: localNode,
+                targetIp: remoteIp,
+              );
+        if (attachmentFile == null) {
+          await _sendPacketWithHallCompatibility(
+            targetIp: remoteIp,
+            packet: responsePacket,
+            localNode: localNode,
+          );
+        } else {
+          await _sendAttachmentStreamWithHallCompatibility(
+            targetIp: remoteIp,
+            packet: responsePacket,
+            sourceFile: attachmentFile,
+            totalBytes: await attachmentFile.length(),
+            localNode: localNode,
+          );
+        }
       } catch (_) {
         // 同步阶段失败，等待下次 Presence 驱动重新补齐
       }
@@ -1961,6 +2208,92 @@ class _LocalHallNode {
   final List<ChatRoomDescriptor> joinedRooms;
   final String? networkCidr;
   final List<String> legacyHallIds;
+}
+
+class _IncomingAttachmentStreamSink implements ChatAttachmentStreamSink {
+  _IncomingAttachmentStreamSink({
+    required this.targetPath,
+    required this.expectedBytes,
+    required this.onCompleted,
+  }) : _temporaryPath = '$targetPath.part';
+
+  final String targetPath;
+  final int expectedBytes;
+  final Future<void> Function() onCompleted;
+  final String _temporaryPath;
+  IOSink? _sink;
+  var _receivedBytes = 0;
+  var _closed = false;
+
+  @override
+  int get resumeOffset => _receivedBytes;
+
+  Future<void> initialize() => _ensureSink();
+
+  Future<void> _ensureSink() async {
+    if (_sink != null) {
+      return;
+    }
+    final temporaryFile = File(_temporaryPath);
+    _receivedBytes =
+        await temporaryFile.exists() ? await temporaryFile.length() : 0;
+    if (_receivedBytes > expectedBytes) {
+      await temporaryFile.delete();
+      _receivedBytes = 0;
+    }
+    _sink = temporaryFile.openWrite(mode: FileMode.append);
+  }
+
+  @override
+  Future<void> add(List<int> bytes) async {
+    if (_closed) {
+      throw StateError('附件流已关闭');
+    }
+    await _ensureSink();
+    _receivedBytes += bytes.length;
+    if (_receivedBytes > expectedBytes) {
+      throw StateError('附件流长度超出声明值');
+    }
+    _sink!.add(bytes);
+  }
+
+  @override
+  Future<void> close() async {
+    if (_closed) {
+      return;
+    }
+    _closed = true;
+    await _ensureSink();
+    await _sink?.close();
+    if (_receivedBytes != expectedBytes) {
+      throw StateError(
+        '附件流长度不匹配 expected=$expectedBytes actual=$_receivedBytes',
+      );
+    }
+    await File(_temporaryPath).rename(targetPath);
+    await onCompleted();
+  }
+
+  @override
+  Future<void> abort() async {
+    if (_closed) {
+      return;
+    }
+    _closed = true;
+    await _sink?.close();
+  }
+}
+
+class _IncomingAttachmentTransferState {
+  const _IncomingAttachmentTransferState({
+    required this.localRelativePath,
+    required this.localFilePath,
+    required this.expectedBytes,
+  });
+
+  final String localRelativePath;
+  final String localFilePath;
+  final int expectedBytes;
 }
 
 class _PeerSeed {

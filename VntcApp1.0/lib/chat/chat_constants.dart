@@ -9,6 +9,8 @@ class ChatConstants {
   static const Duration presenceBroadcastInterval = Duration(seconds: 5);
   static const Duration presenceExpiry = Duration(seconds: 18);
   static const Duration transportReadTimeout = Duration(seconds: 10);
+  static const int attachmentTransferMaxAttempts = 3;
+  static const Duration attachmentTransferRetryDelay = Duration(seconds: 1);
   static const Duration refreshInterval = Duration(seconds: 3);
   static const Duration syncInterval = Duration(seconds: 12);
 
