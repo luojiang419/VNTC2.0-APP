@@ -354,6 +354,80 @@ void main() {
     }
   });
 
+  test('同一目标和消息的并发附件发送会复用同一个传输任务', () async {
+    final service = ChatTransportService();
+    var receivedTransferCount = 0;
+    await service.start(
+      onPacket: (packet, remoteAddress) async {},
+      onAttachmentStream: (packet, remoteAddress) async {
+        receivedTransferCount += 1;
+        return _MemoryAttachmentStreamSink(
+          BytesBuilder(copy: false),
+          resumeOffset: 0,
+          onClose: () {},
+        );
+      },
+      listenPort: 0,
+    );
+    final port = service.listeningPort!;
+    const packet = ChatTransportPacket(
+      type: 'attachment_stream',
+      message: ChatMessageRecord(
+        id: 'same-message',
+        conversationId: 'hall:test',
+        hallId: 'hall:test',
+        conversationType: ChatConversationType.hall,
+        senderVirtualIp: '127.0.0.1',
+        senderName: '本机',
+        senderSeq: 3,
+        direction: ChatMessageDirection.outgoing,
+        contentType: ChatMessageContentType.file,
+        status: ChatMessageStatus.sent,
+        text: 'sample.bin',
+        isSyncMessage: false,
+        isRead: true,
+        sentAtEpochMs: 1717286403000,
+        createdAtEpochMs: 1717286403000,
+        metadataJson: '{}',
+        attachmentId: 'same-attachment',
+        attachment: ChatAttachmentRecord(
+          id: 'same-attachment',
+          messageId: 'same-message',
+          fileName: 'sample.bin',
+          mimeType: 'application/octet-stream',
+          sizeBytes: 3,
+          relativePath: 'sample.bin',
+          autoSyncEligible: true,
+          payloadAvailable: true,
+          needsManualResend: false,
+          createdAtEpochMs: 1717286403000,
+        ),
+      ),
+    );
+
+    try {
+      await Future.wait(<Future<void>>[
+        service.sendAttachmentStream(
+          targetIp: InternetAddress.loopbackIPv4.address,
+          packet: packet,
+          sourceFactory: (_) => Stream<List<int>>.value(<int>[1, 2, 3]),
+          totalBytes: 3,
+          port: port,
+        ),
+        service.sendAttachmentStream(
+          targetIp: InternetAddress.loopbackIPv4.address,
+          packet: packet,
+          sourceFactory: (_) => Stream<List<int>>.value(<int>[1, 2, 3]),
+          totalBytes: 3,
+          port: port,
+        ),
+      ]);
+      expect(receivedTransferCount, 1);
+    } finally {
+      await service.stop();
+    }
+  });
+
   test('聊天TCP传输服务拒绝超过上限的报文', () async {
     final service = ChatTransportService(maxPacketBytes: 128);
     var handled = false;

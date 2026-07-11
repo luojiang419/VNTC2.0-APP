@@ -234,6 +234,88 @@ void main() {
     expect(await File(resolved).readAsBytes(), <int>[1, 2, 3]);
   });
 
+  test('旧版绝对附件路径会迁移为附件目录内的相对路径', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+    final absoluteAttachmentPath = path.join(attachmentDirPath, 'legacy.txt');
+    await File(absoluteAttachmentPath).writeAsString('legacy');
+    const attachment = ChatAttachmentRecord(
+      id: 'legacy-attachment',
+      messageId: 'legacy-message',
+      fileName: 'legacy.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 6,
+      relativePath: '',
+      autoSyncEligible: true,
+      payloadAvailable: true,
+      needsManualResend: false,
+      createdAtEpochMs: 1717286401000,
+    );
+    const message = ChatMessageRecord(
+      id: 'legacy-message',
+      conversationId: 'hall:legacy',
+      hallId: 'hall:legacy',
+      conversationType: ChatConversationType.hall,
+      senderVirtualIp: '10.0.0.1',
+      senderName: '本机',
+      senderSeq: 1,
+      direction: ChatMessageDirection.outgoing,
+      contentType: ChatMessageContentType.file,
+      status: ChatMessageStatus.sent,
+      text: 'legacy.txt',
+      isSyncMessage: false,
+      isRead: true,
+      sentAtEpochMs: 1717286401000,
+      createdAtEpochMs: 1717286401000,
+      metadataJson: '{}',
+      attachmentId: 'legacy-attachment',
+    );
+    await storage.upsertMessage(
+      message,
+      attachment: attachment.copyWith(relativePath: absoluteAttachmentPath),
+    );
+    await storage.close();
+
+    final reopened = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(reopened);
+    await reopened.init();
+    final messages = await reopened.loadMessages('hall:legacy');
+
+    expect(messages.single.attachment?.relativePath, 'legacy.txt');
+    expect(messages.single.attachment?.payloadAvailable, isTrue);
+  });
+
+  test('新接收附件路径只返回相对文件名', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    final relativePath = await storage.createIncomingAttachmentPath(
+      originalFileName: 'sample.png',
+    );
+
+    expect(path.isAbsolute(relativePath), isFalse);
+    expect(path.windows.isAbsolute(relativePath), isFalse);
+    expect(path.extension(relativePath), '.png');
+    expect(
+      path.isWithin(
+        attachmentDirPath,
+        await storage.resolveAttachmentPath(relativePath),
+      ),
+      isTrue,
+    );
+  });
+
   group('默认聊天室存储目录', () {
     test('macOS 类平台使用应用支持目录，避免写入根目录 /config', () {
       final resolved =
