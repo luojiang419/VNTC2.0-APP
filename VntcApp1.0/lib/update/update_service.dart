@@ -273,7 +273,11 @@ class AppUpdateService {
       throw StateError('安装包不存在：${result.filePath}');
     }
     _ensureSupportedWindowsSilentInstaller(result);
-    await _verifyWindowsInstallerAuthenticode(installer);
+    await _verifyDownloadedFile(installer, result.asset);
+    await _verifyWindowsInstallerAuthenticode(
+      installer,
+      sha256Verified: true,
+    );
 
     final appDir = path.dirname(Platform.resolvedExecutable);
     final storageRoot = (await _resolveDownloadDirectory()).path;
@@ -819,7 +823,10 @@ class AppUpdateService {
     }
   }
 
-  Future<void> _verifyWindowsInstallerAuthenticode(File installer) async {
+  Future<void> _verifyWindowsInstallerAuthenticode(
+    File installer, {
+    required bool sha256Verified,
+  }) async {
     final command = '''
 \$signature = Get-AuthenticodeSignature -LiteralPath ${_psString(installer.path)}
 \$subject = if (\$signature.SignerCertificate) { \$signature.SignerCertificate.Subject } else { '' }
@@ -847,10 +854,11 @@ class AppUpdateService {
     }
     final status = (decoded['Status'] ?? '').toString();
     final subject = (decoded['Subject'] ?? '').toString();
-    if (!isTrustedWindowsSignature(
+    if (!isAcceptedWindowsInstallerTrust(
       status: status,
       subject: subject,
       trustedPublisher: AppUpdateConfig.windowsTrustedPublisherName,
+      sha256Verified: sha256Verified,
     )) {
       const publisherHint = AppUpdateConfig.windowsTrustedPublisherName;
       throw StateError(
@@ -1593,6 +1601,24 @@ bool isTrustedWindowsSignature({
     return true;
   }
   return subject.toLowerCase().contains(publisher.toLowerCase());
+}
+
+bool isAcceptedWindowsInstallerTrust({
+  required String status,
+  required String subject,
+  required String trustedPublisher,
+  required bool sha256Verified,
+}) {
+  if (isTrustedWindowsSignature(
+    status: status,
+    subject: subject,
+    trustedPublisher: trustedPublisher,
+  )) {
+    return true;
+  }
+  return trustedPublisher.trim().isEmpty &&
+      status.trim().toLowerCase() == 'notsigned' &&
+      sha256Verified;
 }
 
 int compareVersionStrings(String left, String right) {
