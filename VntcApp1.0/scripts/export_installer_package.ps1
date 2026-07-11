@@ -255,7 +255,7 @@ Name: "chinesesimplified"; MessagesFile: ".\ChineseSimplified.isl"
 Name: "desktopicon"; Description: "$desktopShortcutDescription"; GroupDescription: "$additionalShortcutsGroup"; Flags: unchecked
 
 [Files]
-Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
+Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Excludes: "config\*"; Flags: ignoreversion recursesubdirs createallsubdirs
 Source: ".\vntcrustdesk.msi"; DestDir: "{app}\remote_assist\artifacts"; Flags: ignoreversion
 Source: ".\bootstrap_vntcrustdesk.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
 Source: ".\uninstall_vntcrustdesk.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
