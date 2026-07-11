@@ -61,7 +61,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: lightCardBackground,
         elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.1),
+        shadowColor: Colors.black.withValues(alpha: 0.1),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -112,23 +112,24 @@ class AppTheme {
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: errorColor),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
       listTileTheme: const ListTileThemeData(
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return primaryColor;
           }
           return Colors.grey;
         }),
-        trackColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
-            return primaryColor.withOpacity(0.5);
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return primaryColor.withValues(alpha: 0.5);
           }
-          return Colors.grey.withOpacity(0.3);
+          return Colors.grey.withValues(alpha: 0.3);
         }),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -142,7 +143,8 @@ class AppTheme {
         backgroundColor: lightNavBackground,
         selectedIconTheme: IconThemeData(color: primaryColor),
         unselectedIconTheme: const IconThemeData(color: lightTextSecondary),
-        selectedLabelTextStyle: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
+        selectedLabelTextStyle:
+            TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
         unselectedLabelTextStyle: const TextStyle(color: lightTextSecondary),
       ),
       colorScheme: ColorScheme.light(
@@ -179,7 +181,7 @@ class AppTheme {
       cardTheme: CardThemeData(
         color: darkCardBackground,
         elevation: 2,
-        shadowColor: Colors.black.withOpacity(0.3),
+        shadowColor: Colors.black.withValues(alpha: 0.3),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
@@ -230,23 +232,24 @@ class AppTheme {
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: errorColor),
         ),
-        contentPadding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
       ),
       listTileTheme: const ListTileThemeData(
         contentPadding: EdgeInsets.symmetric(horizontal: 16, vertical: 4),
       ),
       switchTheme: SwitchThemeData(
-        thumbColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
             return primaryColor;
           }
           return Colors.grey;
         }),
-        trackColor: MaterialStateProperty.resolveWith((states) {
-          if (states.contains(MaterialState.selected)) {
-            return primaryColor.withOpacity(0.5);
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.selected)) {
+            return primaryColor.withValues(alpha: 0.5);
           }
-          return Colors.grey.withOpacity(0.3);
+          return Colors.grey.withValues(alpha: 0.3);
         }),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
@@ -260,7 +263,8 @@ class AppTheme {
         backgroundColor: darkNavBackground,
         selectedIconTheme: IconThemeData(color: primaryColor),
         unselectedIconTheme: const IconThemeData(color: darkTextSecondary),
-        selectedLabelTextStyle: TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
+        selectedLabelTextStyle:
+            TextStyle(color: primaryColor, fontWeight: FontWeight.w600),
         unselectedLabelTextStyle: const TextStyle(color: darkTextSecondary),
       ),
       colorScheme: ColorScheme.dark(
@@ -285,27 +289,22 @@ extension ThemeExtension on BuildContext {
   bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
 
   /// 获取卡片背景色
-  Color get cardBackground => isDarkMode
-      ? AppTheme.darkCardBackground
-      : AppTheme.lightCardBackground;
+  Color get cardBackground =>
+      isDarkMode ? AppTheme.darkCardBackground : AppTheme.lightCardBackground;
 
   /// 获取主要文字颜色
-  Color get textPrimary => isDarkMode
-      ? AppTheme.darkTextPrimary
-      : AppTheme.lightTextPrimary;
+  Color get textPrimary =>
+      isDarkMode ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
 
   /// 获取次要文字颜色
-  Color get textSecondary => isDarkMode
-      ? AppTheme.darkTextSecondary
-      : AppTheme.lightTextSecondary;
+  Color get textSecondary =>
+      isDarkMode ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
 
   /// 获取分割线颜色
-  Color get dividerColor => isDarkMode
-      ? AppTheme.darkDivider
-      : AppTheme.lightDivider;
+  Color get dividerColor =>
+      isDarkMode ? AppTheme.darkDivider : AppTheme.lightDivider;
 
   /// 获取导航栏背景色
-  Color get navBackground => isDarkMode
-      ? AppTheme.darkNavBackground
-      : AppTheme.lightNavBackground;
+  Color get navBackground =>
+      isDarkMode ? AppTheme.darkNavBackground : AppTheme.lightNavBackground;
 }

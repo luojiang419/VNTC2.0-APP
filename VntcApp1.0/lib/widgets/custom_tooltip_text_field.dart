@@ -22,7 +22,7 @@ class CustomTooltipTextField extends StatefulWidget {
   });
 
   @override
-  _CustomTooltipTextFieldState createState() => _CustomTooltipTextFieldState();
+  State<CustomTooltipTextField> createState() => _CustomTooltipTextFieldState();
 }
 
 class _CustomTooltipTextFieldState extends State<CustomTooltipTextField> {

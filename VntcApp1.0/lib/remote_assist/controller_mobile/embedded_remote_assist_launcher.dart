@@ -90,7 +90,7 @@ class _EmbeddedRemoteAssistShell extends StatelessWidget {
                 return hbb_common.AccessibilityListener(
                   child: MediaQuery(
                     data: MediaQuery.of(context).copyWith(
-                      textScaler: TextScaler.linear(1.0),
+                      textScaler: const TextScaler.linear(1.0),
                     ),
                     child: child ?? const SizedBox.shrink(),
                   ),
@@ -136,8 +136,7 @@ class _EmbeddedRemoteAssistEntryPageState
         MaterialPageRoute<void>(
           settings: const RouteSettings(name: '/session'),
           builder: (_) => RemotePage(
-            id:
-                '${widget.virtualIp}:${RemoteAssistConstants.directAccessPort}',
+            id: '${widget.virtualIp}:${RemoteAssistConstants.directAccessPort}',
             password: widget.password,
           ),
         ),
@@ -154,9 +153,9 @@ class _EmbeddedRemoteAssistEntryPageState
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
+    return const Scaffold(
       backgroundColor: hbb_common.MyTheme.canvasColor,
-      body: const Center(
+      body: Center(
         child: CircularProgressIndicator(),
       ),
     );

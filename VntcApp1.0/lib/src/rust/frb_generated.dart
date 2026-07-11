@@ -58,7 +58,7 @@ class RustLib extends BaseEntrypoint<RustLibApi, RustLibApiImpl, RustLibWire> {
   String get codegenVersion => '2.1.0';
 
   @override
-  int get rustContentHash => 391655432;
+  int get rustContentHash => 360596016;
 
   static const kDefaultExternalLibraryLoaderConfig =
       ExternalLibraryLoaderConfig(
@@ -105,6 +105,8 @@ abstract class RustLibApi extends BaseApi {
   Future<VntApi> crateApiVntApiVntApiNew(
       {required VntConfig vntConfig, required VntApiCallback call});
 
+  RustP2pDiagnostics crateApiVntApiVntApiP2PDiagnostics({required VntApi that});
+
   RustNatInfo? crateApiVntApiVntApiPeerNatInfo(
       {required VntApi that, required String ip});
 
@@ -126,7 +128,14 @@ abstract class RustLibApi extends BaseApi {
 
   Future<void> crateApiVntApiInitApp();
 
-  void crateApiVntApiInitLogWithPath({required String logDir, required String configPath});
+  void crateApiVntApiInitLogWithPath(
+      {required String logDir, required String configPath});
+
+  Future<RustCurrentDeviceInfo> crateApiVntApiRustCurrentDeviceInfoDefault();
+
+  Future<RustNatInfo> crateApiVntApiRustNatInfoDefault();
+
+  Future<RustP2pDiagnostics> crateApiVntApiRustP2PDiagnosticsDefault();
 
   Future<VntApi> crateApiVntApiVntInit(
       {required VntConfig vntConfig, required VntApiCallback call});
@@ -464,6 +473,32 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
+  RustP2pDiagnostics crateApiVntApiVntApiP2PDiagnostics(
+      {required VntApi that}) {
+    return handler.executeSync(SyncTask(
+      callFfi: () {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
+            that, serializer);
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11)!;
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_rust_p_2_p_diagnostics,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiVntApiVntApiP2PDiagnosticsConstMeta,
+      argValues: [that],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVntApiVntApiP2PDiagnosticsConstMeta =>
+      const TaskConstMeta(
+        debugName: "VntApi_p2p_diagnostics",
+        argNames: ["that"],
+      );
+
+  @override
   RustNatInfo? crateApiVntApiVntApiPeerNatInfo(
       {required VntApi that, required String ip}) {
     return handler.executeSync(SyncTask(
@@ -472,7 +507,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
         sse_encode_String(ip, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 11)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_box_autoadd_rust_nat_info,
@@ -499,7 +534,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
         sse_encode_String(ip, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 12)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_opt_box_autoadd_rust_route,
@@ -524,7 +559,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 13)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_record_string_list_rust_route,
@@ -549,7 +584,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 14)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -574,7 +609,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 15)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_record_string_u_64_u_64,
@@ -599,7 +634,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 16)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_String,
@@ -626,7 +661,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Ref_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApi(
             that, serializer);
         sse_encode_String(ip, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 17)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 18)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_list_prim_u_64_strict,
@@ -650,7 +685,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       callFfi: (port_) {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 18, port: port_);
+            funcId: 19, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -668,13 +703,14 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
       );
 
   @override
-  void crateApiVntApiInitLogWithPath({required String logDir, required String configPath}) {
+  void crateApiVntApiInitLogWithPath(
+      {required String logDir, required String configPath}) {
     return handler.executeSync(SyncTask(
       callFfi: () {
         final serializer = SseSerializer(generalizedFrbRustBinding);
         sse_encode_String(logDir, serializer);
         sse_encode_String(configPath, serializer);
-        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 19)!;
+        return pdeCallFfi(generalizedFrbRustBinding, serializer, funcId: 20)!;
       },
       codec: SseCodec(
         decodeSuccessData: sse_decode_unit,
@@ -689,7 +725,79 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   TaskConstMeta get kCrateApiVntApiInitLogWithPathConstMeta =>
       const TaskConstMeta(
         debugName: "init_log_with_path",
-        argNames: ["logDir"],
+        argNames: ["logDir", "configPath"],
+      );
+
+  @override
+  Future<RustCurrentDeviceInfo> crateApiVntApiRustCurrentDeviceInfoDefault() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 21, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_rust_current_device_info,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiVntApiRustCurrentDeviceInfoDefaultConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVntApiRustCurrentDeviceInfoDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "rust_current_device_info_default",
+        argNames: [],
+      );
+
+  @override
+  Future<RustNatInfo> crateApiVntApiRustNatInfoDefault() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 22, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_rust_nat_info,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiVntApiRustNatInfoDefaultConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVntApiRustNatInfoDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "rust_nat_info_default",
+        argNames: [],
+      );
+
+  @override
+  Future<RustP2pDiagnostics> crateApiVntApiRustP2PDiagnosticsDefault() {
+    return handler.executeNormal(NormalTask(
+      callFfi: (port_) {
+        final serializer = SseSerializer(generalizedFrbRustBinding);
+        pdeCallFfi(generalizedFrbRustBinding, serializer,
+            funcId: 23, port: port_);
+      },
+      codec: SseCodec(
+        decodeSuccessData: sse_decode_rust_p_2_p_diagnostics,
+        decodeErrorData: null,
+      ),
+      constMeta: kCrateApiVntApiRustP2PDiagnosticsDefaultConstMeta,
+      argValues: [],
+      apiImpl: this,
+    ));
+  }
+
+  TaskConstMeta get kCrateApiVntApiRustP2PDiagnosticsDefaultConstMeta =>
+      const TaskConstMeta(
+        debugName: "rust_p_2_p_diagnostics_default",
+        argNames: [],
       );
 
   @override
@@ -702,7 +810,7 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         sse_encode_Auto_Owned_RustOpaque_flutter_rust_bridgefor_generatedRustAutoOpaqueInnerVntApiCallback(
             call, serializer);
         pdeCallFfi(generalizedFrbRustBinding, serializer,
-            funcId: 20, port: port_);
+            funcId: 24, port: port_);
       },
       codec: SseCodec(
         decodeSuccessData:
@@ -1458,6 +1566,26 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  RustP2pDiagnostics dco_decode_rust_p_2_p_diagnostics(dynamic raw) {
+    // Codec=Dco (DartCObject based), see doc to use other codecs
+    final arr = raw as List<dynamic>;
+    if (arr.length != 10)
+      throw Exception('unexpected arr length: expect 10 but see ${arr.length}');
+    return RustP2pDiagnostics(
+      state: dco_decode_String(arr[0]),
+      reason: dco_decode_String(arr[1]),
+      connectedServer: dco_decode_opt_String(arr[2]),
+      natState: dco_decode_String(arr[3]),
+      natType: dco_decode_String(arr[4]),
+      publicIps: dco_decode_list_String(arr[5]),
+      onlinePeerCount: dco_decode_usize(arr[6]),
+      directPeerCount: dco_decode_usize(arr[7]),
+      relayPeerCount: dco_decode_usize(arr[8]),
+      routePeerCount: dco_decode_usize(arr[9]),
+    );
+  }
+
+  @protected
   RustPeerClientInfo dco_decode_rust_peer_client_info(dynamic raw) {
     // Codec=Dco (DartCObject based), see doc to use other codecs
     final arr = raw as List<dynamic>;
@@ -2020,6 +2148,33 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
         natType: var_natType,
         localIpv4: var_localIpv4,
         ipv6: var_ipv6);
+  }
+
+  @protected
+  RustP2pDiagnostics sse_decode_rust_p_2_p_diagnostics(
+      SseDeserializer deserializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    var var_state = sse_decode_String(deserializer);
+    var var_reason = sse_decode_String(deserializer);
+    var var_connectedServer = sse_decode_opt_String(deserializer);
+    var var_natState = sse_decode_String(deserializer);
+    var var_natType = sse_decode_String(deserializer);
+    var var_publicIps = sse_decode_list_String(deserializer);
+    var var_onlinePeerCount = sse_decode_usize(deserializer);
+    var var_directPeerCount = sse_decode_usize(deserializer);
+    var var_relayPeerCount = sse_decode_usize(deserializer);
+    var var_routePeerCount = sse_decode_usize(deserializer);
+    return RustP2pDiagnostics(
+        state: var_state,
+        reason: var_reason,
+        connectedServer: var_connectedServer,
+        natState: var_natState,
+        natType: var_natType,
+        publicIps: var_publicIps,
+        onlinePeerCount: var_onlinePeerCount,
+        directPeerCount: var_directPeerCount,
+        relayPeerCount: var_relayPeerCount,
+        routePeerCount: var_routePeerCount);
   }
 
   @protected
@@ -2644,6 +2799,22 @@ class RustLibApiImpl extends RustLibApiImplPlatform implements RustLibApi {
   }
 
   @protected
+  void sse_encode_rust_p_2_p_diagnostics(
+      RustP2pDiagnostics self, SseSerializer serializer) {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    sse_encode_String(self.state, serializer);
+    sse_encode_String(self.reason, serializer);
+    sse_encode_opt_String(self.connectedServer, serializer);
+    sse_encode_String(self.natState, serializer);
+    sse_encode_String(self.natType, serializer);
+    sse_encode_list_String(self.publicIps, serializer);
+    sse_encode_usize(self.onlinePeerCount, serializer);
+    sse_encode_usize(self.directPeerCount, serializer);
+    sse_encode_usize(self.relayPeerCount, serializer);
+    sse_encode_usize(self.routePeerCount, serializer);
+  }
+
+  @protected
   void sse_encode_rust_peer_client_info(
       RustPeerClientInfo self, SseSerializer serializer) {
     // Codec=Sse (Serialization based), see doc to use other codecs
@@ -2807,6 +2978,11 @@ class VntApiImpl extends RustOpaque implements VntApi {
       );
 
   RustNatInfo natInfo() => RustLib.instance.api.crateApiVntApiVntApiNatInfo(
+        that: this,
+      );
+
+  RustP2pDiagnostics p2PDiagnostics() =>
+      RustLib.instance.api.crateApiVntApiVntApiP2PDiagnostics(
         that: this,
       );
 

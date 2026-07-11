@@ -40,8 +40,8 @@ class StatusCard extends StatelessWidget {
         boxShadow: [
           BoxShadow(
             color: isConnected
-                ? AppTheme.successColor.withOpacity(0.3)
-                : Colors.black.withOpacity(0.1),
+                ? AppTheme.successColor.withValues(alpha: 0.3)
+                : Colors.black.withValues(alpha: 0.1),
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -54,7 +54,7 @@ class StatusCard extends StatelessWidget {
             width: context.w(64),
             height: context.w(64),
             decoration: BoxDecoration(
-              color: Colors.white.withOpacity(0.2),
+              color: Colors.white.withValues(alpha: 0.2),
               borderRadius: BorderRadius.circular(context.radius(16)),
             ),
             child: Icon(
@@ -80,12 +80,10 @@ class StatusCard extends StatelessWidget {
                 ),
                 SizedBox(height: context.spacing(4)),
                 Text(
-                  isConnected
-                      ? '$connectionCount 个活动连接'
-                      : '点击配置开始连接',
+                  isConnected ? '$connectionCount 个活动连接' : '点击配置开始连接',
                   style: TextStyle(
                     fontSize: context.fontBody,
-                    color: Colors.white.withOpacity(0.8),
+                    color: Colors.white.withValues(alpha: 0.8),
                   ),
                 ),
               ],
@@ -100,7 +98,7 @@ class StatusCard extends StatelessWidget {
                 width: context.w(40),
                 height: context.w(40),
                 decoration: BoxDecoration(
-                  color: Colors.white.withOpacity(0.2),
+                  color: Colors.white.withValues(alpha: 0.2),
                   borderRadius: BorderRadius.circular(context.radius(10)),
                 ),
                 child: Icon(

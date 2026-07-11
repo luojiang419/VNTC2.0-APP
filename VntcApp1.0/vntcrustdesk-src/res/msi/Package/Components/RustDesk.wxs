@@ -5,7 +5,7 @@
 		<?include ../Includes.wxi?>
 
 		<DirectoryRef Id="INSTALLFOLDER_INNER" FileSource="$(var.BuildDir)">
-			<Component Id="App.exe" Guid="19a4110b-af30-4f9c-9588-481b8b525c77">
+			<Component Id="App.exe" Guid="77c04400-6d03-40a6-acb3-b3e87bc09f38">
 				<File Id="App.exe" Name="$(var.ExecutableName).exe" KeyPath="yes" Checksum="yes">
 					<!--<fire:FirewallException Id="AppEx" Name="$(var.Product) Service" Scope="any" IgnoreFailure="yes" />-->
 				</File>
@@ -97,14 +97,14 @@
 
 		<!-- Shortcuts -->
 		<DirectoryRef Id="App.StartMenu">
-			<Component Id="App.StartMenu" Guid="82faff47-85be-453d-ba66-a3b28493c8bb">
+			<Component Id="App.StartMenu" Guid="761f1ebc-4d88-4910-8b9f-5059c5d38a60">
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.StartMenu" Type="string" Value="1" KeyPath="yes" />
 				<RemoveFolder Id="Remove.App.StartMenu" On="uninstall" />
 			</Component>
 		</DirectoryRef>
 
 		<DirectoryRef Id="App.StartMenu">
-			<Component Id="App.StartMenu.Shortcut" Guid="44c9b056-93cd-4c92-a783-82f44e487e6e" Condition="STARTMENUSHORTCUTS = 1 OR STARTMENUSHORTCUTS = &quot;Y&quot; OR STARTMENUSHORTCUTS = &quot;y&quot;">
+			<Component Id="App.StartMenu.Shortcut" Guid="4870e11a-a8f1-441e-82fd-da6e8a7a3e99" Condition="STARTMENUSHORTCUTS = 1 OR STARTMENUSHORTCUTS = &quot;Y&quot; OR STARTMENUSHORTCUTS = &quot;y&quot;">
 				<Shortcut Id="App.StartMenu.Shortcut" Name="!(loc.SC_Client)" Description="!(loc.SC_Client_Desc)" Target="[!App.exe]" Icon="AppIcon" WorkingDirectory="INSTALLFOLDER_INNER" />
 				<!--
 					Fix ICE 38 by adding a dummy registry key that is the key for this shortcut.
@@ -113,26 +113,26 @@
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.StartMenu.Shortcut" Type="string" Value="1" KeyPath="yes" />
 			</Component>
 
-			<Component Id="App.StartMenu.ShortcutUninstall" Guid="46533b7b-6f7b-4b48-8409-d20463942846" Condition="STARTMENUSHORTCUTS = 1 OR STARTMENUSHORTCUTS = &quot;Y&quot; OR STARTMENUSHORTCUTS = &quot;y&quot;">
+			<Component Id="App.StartMenu.ShortcutUninstall" Guid="642caef6-d436-4d4d-8b17-8acdbef6c694" Condition="STARTMENUSHORTCUTS = 1 OR STARTMENUSHORTCUTS = &quot;Y&quot; OR STARTMENUSHORTCUTS = &quot;y&quot;">
 				<Shortcut Id="App.StartMenu.ShortcutUninstall" Name="!(loc.SC_Uninstall)" Description="!(loc.SC_Uninstall_Desc)" Target="[System6432Folder]msiexec.exe" Arguments="/x [ProductCode]" Icon="AppIcon" />
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.StartMenu.ShortcutUninstall" Type="string" Value="1" KeyPath="yes" />
 			</Component>
 		</DirectoryRef>
 		<StandardDirectory Id="DesktopFolder">
-			<Component Id="App.Desktop.Shortcut" Guid="6652e147-5b84-4006-a21b-4fabf5e572eb" Condition="DESKTOPSHORTCUTS = 1 OR DESKTOPSHORTCUTS = &quot;Y&quot; OR DESKTOPSHORTCUTS = &quot;y&quot;">
+			<Component Id="App.Desktop.Shortcut" Guid="4fe45826-a9d2-4130-9407-43494906374e" Condition="DESKTOPSHORTCUTS = 1 OR DESKTOPSHORTCUTS = &quot;Y&quot; OR DESKTOPSHORTCUTS = &quot;y&quot;">
 				<Shortcut Id="App.Desktop.Shortcut" Name="!(loc.SC_Client)" Description="!(loc.SC_Client_Desc)" Target="[!App.exe]" Icon="AppIcon" WorkingDirectory="INSTALLFOLDER_INNER" />
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.Desktop.Shortcut" Type="string" Value="1" KeyPath="yes" />
 			</Component>
 		</StandardDirectory>
 		<StandardDirectory Id="StartupFolder">
-			<Component Id="App.StartupFolder.ShortcutTray" Guid="26ecc1b6-1bc8-4b0c-870e-f079f03efd40" Condition="STARTUPSHORTCUTS = 1 AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)">
+			<Component Id="App.StartupFolder.ShortcutTray" Guid="4d43ea64-31c2-40be-8b36-1133b59234b1" Condition="STARTUPSHORTCUTS = 1 AND (NOT CC_CONNECTION_TYPE=&quot;outgoing&quot;)">
 				<Shortcut Id="App.StartupFolder.ShortcutTray" Name="!(loc.SC_Client_Tray)" Description="!(loc.SC_Client_Tray_Desc)" Target="[!App.exe]" Arguments="--tray" Icon="AppIcon" WorkingDirectory="INSTALLFOLDER_INNER" />
 				<RegistryValue Root="HKCU" Key="Software\$(var.Product)" Name="App.StartupFolder.ShortcutTray" Type="string" Value="1" KeyPath="yes" />
 			</Component>
 		</StandardDirectory>
 
 		<!--<DirectoryRef Id="INSTALLFOLDER_INNER">
-			<Component Id="App.UninstallShortcut" Guid="29636813-f417-46a4-a091-046991662fb4">
+			<Component Id="App.UninstallShortcut" Guid="e964beb7-551f-4603-bb39-3129500cda71">
 				<Shortcut Id="App.UninstallShortcut" Name="!(loc.SC_Uninstall)" Description="!(loc.SC_Uninstall_Desc)" Target="[System6432Folder]msiexec.exe" Arguments="/x [ProductCode]" Icon="AppIcon" />
 			</Component>
 		</DirectoryRef>-->
@@ -146,311 +146,290 @@
 			<ComponentRef Id="App.StartupFolder.ShortcutTray" />
 
 			<!--$AutoComonentStart$-->
-			<Component Guid="3774f89f-a6ab-4f6a-b303-856d15902a01" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/desktop_drop_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="1d47a0dd-db2a-44f1-acfb-81f1c284eda7" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/desktop_drop_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="b8185377-fad9-486f-b595-a53369a15ace" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/desktop_multi_window_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4a6a7a7c-b83c-4fc0-b1c5-1a75343ed08f" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/desktop_multi_window_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="51e334f1-8924-47de-8387-85c796308163" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/dylib_virtual_display.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="76d889e7-65a6-4d91-8c3d-5845253eb222" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/dylib_virtual_display.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="a8c73cc5-183d-4309-ac4a-8ab771f2a185" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/file_selector_windows_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="23619cf9-d46d-4d75-97f5-dfe371516011" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/file_selector_windows_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="99510fd2-b2b1-42e2-9a45-9d2a15254147" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/flutter_custom_cursor_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="20893308-c15e-4266-9584-f6b38d21a753" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/flutter_custom_cursor_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="7e9053cb-10f6-4547-acdd-d62483d8b308" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/flutter_gpu_texture_renderer_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b2dccc8b-c422-4f80-a5de-ef1cb700e5d9" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/flutter_gpu_texture_renderer_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="17daf54a-4980-454e-accd-f19b6e1eb8bc" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/flutter_windows.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="94ecb8d2-b256-467b-a0a9-fff02656ec9d" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/flutter_windows.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3ebeca29-c4e0-4293-92b9-75a924682e98" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/librustdesk.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="84eb9d57-4543-4c97-b065-0baf3c54091d" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/librustdesk.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="b08ede59-5ef9-4a11-8da0-5bad37601055" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/printer_driver_adapter.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="aa22b111-8ee0-4c83-afd8-e35a07f7e615" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/screen_retriever_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="4e1679b2-d59b-4ef4-b463-d1b913d15cea" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/screen_retriever_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b8bd8b4c-304f-475f-8f12-dba633a5086a" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/texture_rgba_renderer_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="4787b153-d2a5-4bb0-aa38-fc98c3657b7a" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/texture_rgba_renderer_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="2b6feb07-f1c5-4846-b849-1583eae596b1" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/uni_links_desktop_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="9d140a07-bba5-4e3d-a957-c77978f3b689" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/uni_links_desktop_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4b3d0771-b31a-4ee6-b0d5-a01149e6e931" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/url_launcher_windows_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="0fae9de8-e8d1-4bd7-a0f5-c6734bb99af3" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/url_launcher_windows_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="c0e517b4-13c8-4c7f-aedb-d4e269dc5ead" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/window_manager_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="f3617377-f70a-4585-b9d7-1125e5c7a1d0" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/window_manager_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="8be10fba-b0e8-4ec9-b1a2-05b656b198df" >
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/window_size_plugin.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="101ba2f8-4b94-436e-aef3-8ac66ff9b385" >
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/window_size_plugin.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="be6c0050-3833-42c2-8ce6-6e312944eb28" Subdirectory="data">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/app.so" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="c8231a87-f70c-4a85-91cb-7aa4d7d892eb" Subdirectory="data">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/app.so" KeyPath="yes" Checksum="yes" />
+			<Component Guid="f3bcfa82-492a-4258-ac47-ee378a3d8051" Subdirectory="data">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/icudtl.dat" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3f833781-c523-43fc-9c47-f5cee87f51f6" Subdirectory="data">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/icudtl.dat" KeyPath="yes" Checksum="yes" />
+			<Component Guid="97c5cd0b-86bf-4509-ac61-4561bf712c22" Subdirectory="usbmmidd_v2">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/idd_instructions.txt" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="79a395eb-7570-4d6e-a41e-6ade8a691df4" Subdirectory="usbmmidd_v2">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/idd_instructions.txt" KeyPath="yes" Checksum="yes" />
+			<Component Guid="59f529c2-145c-485d-802e-70cef97dc8fe" Subdirectory="usbmmidd_v2">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/License.txt" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="def02e2a-0c08-47de-8566-d69dcf830a6f" Subdirectory="usbmmidd_v2">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/License.txt" KeyPath="yes" Checksum="yes" />
+			<Component Guid="d1a7c7e1-98ca-430e-aef5-2edcda914479" Subdirectory="usbmmidd_v2">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/usbmmidd.cat" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="b28ec432-e31b-4ef4-a5b6-fc54bd96bcf1" Subdirectory="usbmmidd_v2">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/usbmmidd.cat" KeyPath="yes" Checksum="yes" />
+			<Component Guid="2a61ff8c-36b0-4efa-b00f-b49a46cd4743" Subdirectory="usbmmidd_v2">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/usbmmIdd.inf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="a908f5e4-b0ae-4f20-abde-a64f44d18193" Subdirectory="usbmmidd_v2">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/usbmmIdd.inf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="f687db4a-5a6a-4621-8755-a89bb04fd16b" Subdirectory="data\flutter_assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/AssetManifest.bin" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="29d07fa7-e4bd-49d1-ae16-4643861ca99b" Subdirectory="data\flutter_assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/AssetManifest.bin" KeyPath="yes" Checksum="yes" />
+			<Component Guid="e053dcbb-86bd-4a5c-9e66-b9560c0b2ea6" Subdirectory="data\flutter_assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/FontManifest.json" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="e23c0a7b-6172-42d0-947a-9c080c577308" Subdirectory="data\flutter_assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/FontManifest.json" KeyPath="yes" Checksum="yes" />
+			<Component Guid="14861866-ce30-49f3-bedc-4ac8b02fe70d" Subdirectory="data\flutter_assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/NativeAssetsManifest.json" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="81c09b1c-2d34-4dd3-ae80-c02c17c3177e" Subdirectory="data\flutter_assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/NativeAssetsManifest.json" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b911be64-d995-4d67-a804-81d5005a334e" Subdirectory="data\flutter_assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/NOTICES.Z" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="51656b90-20d1-4248-b191-69ef6a1a4f82" Subdirectory="data\flutter_assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/NOTICES.Z" KeyPath="yes" Checksum="yes" />
+			<Component Guid="644b8ced-cf3b-4aa8-905e-86206bbe32ff" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/actions.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="1cc0871c-463b-4be2-b184-86ec752b25fe" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/actions.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="69b4b271-a68d-45b6-9315-ab7be26c5c4b" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/actions_mobile.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="a5fc62b9-03a5-422c-b06b-f4163943690f" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/actions_mobile.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="201bb067-a057-4ce5-8312-7d3d5212f0d2" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/address_book.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="940a3a10-ed1f-4dc6-8ee7-e12496678ca8" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/address_book.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="cb496ada-39d2-4f80-adc8-8f003e6e163a" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/android.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="2c0bf674-aac2-4915-b4d1-62231f3039da" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/android.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="73d3aa16-5ba5-4ba2-9a2d-ee758c4bbdde" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/arrow.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="00d82102-9b04-463f-8c72-b665d41507b3" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/arrow.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b16d918f-e2e7-42b5-a45c-d94a7bde50ca" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-apple.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="bba0ee72-bd62-420f-9121-f4bf6ff2d635" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-apple.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="d6a480fd-e460-48d6-9338-d685c9540fa6" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-auth0.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="dccc6d81-827a-4744-8cbe-a642f4b966ca" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-auth0.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="755928f1-9ae9-4449-8e19-694a03ad7ff5" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-azure.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="a22c7fe9-5fed-4873-a8ec-9be6e9c62710" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-azure.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="cf824171-c496-4817-b93b-e531e69c9590" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-default.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="25990c71-1922-42ab-8518-1683834523d4" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-default.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="2215346c-5f50-47d6-9490-ebc847b91bd9" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-facebook.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3544aa5c-490d-4d5f-875d-3f5603255c82" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-facebook.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="d26c6ae1-99f7-468b-a712-265310cbfa7f" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-github.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="c3335bfe-3023-404b-b61f-b86d603a49b3" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-github.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="66a33ff3-a5fa-4410-bea0-09eb22318a89" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-gitlab.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="0952d88a-7b98-4e9e-b424-5892b18e611d" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-gitlab.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="a82862c9-7d30-44db-aead-c29e604e59fa" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-google.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3bb2a292-4482-44b2-b2ad-20eb81894208" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-google.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="24b639cf-e712-4a00-80b4-c07cae844545" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-okta.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="bef4d27e-bd3c-469e-afe1-ff82b03cdc64" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/auth-okta.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4ad6e70f-7a77-4f63-bcfc-439516aa4a75" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/call_end.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="57951e3b-4638-417e-8e90-e2fa0e828410" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/call_end.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="7442e927-daed-479b-987e-503f7f501bc7" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/call_wait.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="1c6a6ac6-6082-4f32-8da3-cffbc6189246" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/call_wait.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="43c24d59-888d-40a5-b9ad-35b4ac2d1180" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chat.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="b56e3589-380e-4343-a7f1-b1d37a93adaa" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chat.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="ddc511d1-ccce-4db3-801d-f75b3f303826" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chat2.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3aec06e5-0170-4534-a1f3-c1c1df88d3f0" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chat2.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="fe94b2a5-88a5-44d5-8b0f-c75af9490c61" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/checkbox-outline.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="1e0f088d-30ff-46de-88f7-029be59af1fb" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/checkbox-outline.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="dc753fb0-f04b-4208-ab05-651afde48593" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chevron_up_chevron_down.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="33f4f7d7-720c-4e84-887d-f316076030be" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/chevron_up_chevron_down.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="c92d0778-4db4-486f-b151-f754bc4d14ea" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/close.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="9be02129-d08a-4621-8940-30fb4c6cb53b" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/close.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="77975c02-aa8e-4247-a0e5-82ab02ddf75d" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/device_group.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="fbf9bc3c-199d-41a3-99e2-e2b0b0c63407" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/device_group.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="05f769d9-fa5f-4c1d-b327-b3693665a341" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/display.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="8b017d08-7c33-497f-9a78-20aafdaaefe0" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/display.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="6f6396db-3142-4634-98d0-1803f6297d3b" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/dots.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="8171ab44-d429-437d-85a0-721794da24f3" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/dots.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="74f3b3db-82c3-4346-b275-501341662e3c" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/file.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="6ffa33ea-0c29-4132-b529-0fc08d7e0c33" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/file.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="d2444800-0057-4a5d-9a73-d94c33584bc8" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/file_transfer.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="9f711ddf-04ae-4462-8949-b087e9b4dcde" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/file_transfer.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="9fd4af41-fa80-40a3-aea4-d09babb6d34c" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/folder.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="ae3fa4a6-f47b-4156-b723-88e68a04a5fa" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/folder.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="70aecd43-e8db-477a-9c0d-6b81899d5be0" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/folder_new.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="c965270c-c95c-4132-9dd8-3f186bb7d9c3" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/folder_new.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="25253c21-88a2-4083-8d7e-d568332c9112" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/fullscreen.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="edd67911-b788-4a71-9f1e-19c03eb1d3f4" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/fullscreen.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="9cf28867-56cc-4b30-ad73-e99939cb35df" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/fullscreen_exit.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="37d8d157-56c2-450a-9da2-d71532dacba8" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/fullscreen_exit.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="041a8f1f-fadd-45eb-a3f0-dc5315a51031" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/gestures.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="daffe1e6-f3d7-4da1-852e-560b89cd508f" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/gestures.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="ea669d55-35c2-472b-bd19-41de590c71c9" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/home.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="ef15788f-aef4-4f04-b22b-e8fcd9fea947" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/home.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="42fd8e35-43cd-485c-b19a-1733091df416" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/icon.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="0b7a7d14-8456-4da2-a8ba-c8a5220b31b1" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/icon.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b67d71d2-8ddb-42e8-95a7-99b8707774eb" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/insecure.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="331be5db-19bb-4d13-b77e-8a196f356aeb" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/insecure.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="1746057d-dd0f-48b4-a176-88ee102db02f" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/insecure_relay.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="e88ad5f6-33e1-4133-8059-99a8dd311a05" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/insecure_relay.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="816d6d5c-753a-4e2f-a2df-a327ca4ff8c5" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/kb_layout_iso.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="febc5450-42dd-47fb-bf8e-f1f9d2d67484" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/kb_layout_iso.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="6163b7f7-34b5-4308-b58d-7827acd07e1a" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/kb_layout_not_iso.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="bad7838d-acb0-4efd-b805-207a7acae005" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/kb_layout_not_iso.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="decb321a-5dfd-4c9c-b0f4-49bda73e421f" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/keyboard_mouse.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="8e3a52d7-4417-4505-b962-c151fa920855" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/keyboard_mouse.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="062167ab-23f0-4333-8105-b0a6066cfb60" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/linux.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="f37d46a5-4805-4301-8917-0126cda20062" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/linux.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4a51eb69-156a-469f-9c3c-442ffcbf88a4" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/mac.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="9d6ed88f-2c1c-4de5-93fe-bc752d32ced8" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/mac.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="18970c15-b075-40b7-a264-6520493d0581" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/message_24dp_5F6368.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="7b511ecc-26eb-4ad5-897b-93f8f4ec96c1" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/message_24dp_5F6368.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="8bde58dc-24fe-4876-812f-15f06a3bddbc" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/more.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="aded2412-fa1d-42b3-ba5c-3e6f6de7b00c" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/more.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="925e2340-2cc8-46c3-89cb-a6f62d237b98" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/peer_searchbar.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="eaf43425-924c-4210-8b36-591d97c6f5d6" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/peer_searchbar.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="536142cf-3ff0-4b6d-9aa6-2c9f31385bfd" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/pinned.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="7fe68074-30db-44db-ad61-b412b68c3eca" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/pinned.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="6bb0aca9-319c-4d9d-a2aa-c8a6e6c795f6" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/rec.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="6bc93dd7-cf01-4fdf-af76-0ca6e7b8a69b" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/rec.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="ba95e384-1eb2-4b1b-96fe-cf5dd8b44a0b" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/record_screen.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="c147dff4-7a22-424c-ae28-ff103c4a4ee0" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/record_screen.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="fb639759-b7cf-4df7-8b21-4efbc8e14a19" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/refresh.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="b5439a2c-b44b-45f4-944c-377c266cf5a2" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/refresh.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="1fb87352-07fe-4245-b68d-f4fe859ae6ea" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/scam.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="5b2cbf54-3fc9-4905-8869-9a013efd6b77" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/scam.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4e6132cc-0d75-4e04-bc11-e3210dfb399f" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/screen.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="6f711aa5-4609-485b-846f-6c656695f0b1" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/screen.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4bc91d93-1905-454f-8f35-f7755e799a32" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/search.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="3be837b0-7db7-477c-8e7c-7e363b00844a" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/search.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="887e35e7-2b11-4a0d-b6b6-222440cc1e4f" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/secure.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="698052a7-26ef-4fce-b9ce-9184b670d549" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/secure.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="4b65193c-477d-42cd-b942-bd3e307805f8" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/secure_relay.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="391d6f36-2e3f-46d1-a444-3aba38511d38" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/secure_relay.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="b7a1af94-12de-4d85-b0a7-b2f90c5a106d" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/tabbar.ttf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="7b5bd9d3-9b26-4934-94a0-049077742b65" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/tabbar.ttf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="183324da-1a48-4bce-8dc0-5aa5d22a743d" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/transfer.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="5b0f9124-05a4-48cb-ab85-2bd040a60213" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/transfer.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="6c6c8010-4354-4015-94b9-5a76dcefc13c" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/trash.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="aab871bd-a241-4d81-95ab-f26771f93d98" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/trash.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="015017e8-ae6d-4f66-8127-701c966129fd" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/unpinned.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="45039348-4539-45ca-8dbc-7502f31e2b4a" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/unpinned.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="7aa8bbdd-4ef8-4bfc-a7e5-309ac3b80bdd" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/voice_call.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="21472931-e4d4-413a-998c-468a38c07e9d" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/voice_call.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="a4380459-886b-4a72-b3f8-7ececb7eaa91" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/voice_call_waiting.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="92763513-d9f2-4d5f-8e04-5f161d2f51b3" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/voice_call_waiting.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="2fa78e62-5b72-4157-99b2-50b1f819c3f4" Subdirectory="data\flutter_assets\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/win.svg" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="2376b11b-bf5f-4a35-a250-2c6ecc9b00fb" Subdirectory="data\flutter_assets\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/assets/win.svg" KeyPath="yes" Checksum="yes" />
+			<Component Guid="cb335265-6a21-43ad-bb37-f4402751235d" Subdirectory="data\flutter_assets\fonts">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/fonts/MaterialIcons-Regular.otf" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="fc2a7a10-ae3f-427a-b72c-ee5b2ee315f5" Subdirectory="data\flutter_assets\fonts">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/fonts/MaterialIcons-Regular.otf" KeyPath="yes" Checksum="yes" />
+			<Component Guid="61cc89b6-f340-4b1c-8838-9a4237c54b3b" Subdirectory="data\flutter_assets\shaders">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/shaders/ink_sparkle.frag" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="4eae0e12-907b-47a9-bc94-d65c716a6d44" Subdirectory="data\flutter_assets\shaders">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/shaders/ink_sparkle.frag" KeyPath="yes" Checksum="yes" />
+			<Component Guid="ad4b7ad4-df5a-497e-9b63-14df2b8c484e" Subdirectory="data\flutter_assets\shaders">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/shaders/stretch_effect.frag" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="25ce6832-a6c1-426b-9e6b-97c3187b1b93" Subdirectory="data\flutter_assets\shaders">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/shaders/stretch_effect.frag" KeyPath="yes" Checksum="yes" />
+			<Component Guid="d1142acf-c3f4-4a30-ba25-97ed96cf261f" Subdirectory="data\flutter_assets\packages\dash_chat_2\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/dash_chat_2/assets/placeholder.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="c2184f30-7f52-4769-8c71-711e850a8201" Subdirectory="data\flutter_assets\packages\dash_chat_2\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/dash_chat_2/assets/placeholder.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="3cd3f141-0af2-44a3-bbe6-ed0bea1af640" Subdirectory="data\flutter_assets\packages\dash_chat_2\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/dash_chat_2/assets/profile_placeholder.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="9ea60d98-2370-42da-a61e-89b2e5a81480" Subdirectory="data\flutter_assets\packages\dash_chat_2\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/dash_chat_2/assets/profile_placeholder.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="82e840cd-bb98-4e96-b062-c5980140ef5d" Subdirectory="data\flutter_assets\packages\flex_color_picker\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/flex_color_picker/assets/opacity.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="0689727d-a8c2-4953-8ba6-c84673c15fa5" Subdirectory="data\flutter_assets\packages\flex_color_picker\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/flex_color_picker/assets/opacity.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="f984f042-3961-4635-93eb-4da9d811ef68" Subdirectory="data\flutter_assets\packages\wakelock_plus\assets">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/wakelock_plus/assets/no_sleep.js" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="54cfd58d-7c2c-4775-bbb2-09bc3b66b2f4" Subdirectory="data\flutter_assets\packages\wakelock_plus\assets">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/wakelock_plus/assets/no_sleep.js" KeyPath="yes" Checksum="yes" />
+			<Component Guid="297c81e1-a7d7-49c2-a3e1-ace8040a9fc9" Subdirectory="data\flutter_assets\packages\window_manager\images">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_close.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="40935f65-2a1f-4713-a69c-73808edc0fec" Subdirectory="data\flutter_assets\packages\window_manager\images">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_close.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="6b1c36eb-d93e-41cb-b850-b5956404aa08" Subdirectory="data\flutter_assets\packages\window_manager\images">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_maximize.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="a5954a15-b64c-4236-bc35-53ca4b4fe436" Subdirectory="data\flutter_assets\packages\window_manager\images">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_maximize.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="e3401cfe-9c21-44be-b2bc-3535c63e6d26" Subdirectory="data\flutter_assets\packages\window_manager\images">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_minimize.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="7a2c173d-b4c2-4877-a441-5e50033468c2" Subdirectory="data\flutter_assets\packages\window_manager\images">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_minimize.png" KeyPath="yes" Checksum="yes" />
+			<Component Guid="532c9c88-e8cb-4051-9776-e670c74faa82" Subdirectory="data\flutter_assets\packages\window_manager\images">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_unmaximize.png" KeyPath="yes" Checksum="yes" />
 			</Component>
-			<Component Guid="e8e413d2-6c25-4a63-83d1-21ad109141c7" Subdirectory="data\flutter_assets\packages\window_manager\images">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/data/flutter_assets/packages/window_manager/images/ic_chrome_unmaximize.png" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="eb218ae8-dfab-4f08-9e79-50705de09b39" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/RustDeskPrinterDriver-manifest.ini" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="91d8d75c-d396-4314-9a05-77f967ad36f4" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/rustdeskprinterdriver.cat" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="1e9761fe-460b-43c7-a8d2-d5bd1760f31a" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/RustDeskPrinterDriver.gpd" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="c953bdfe-9973-4bc4-8286-4f5779f79b0f" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/RustDeskPrinterDriver.inf" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="6277ae43-a0ee-4807-b617-d605e7c7fef4" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/RustDeskPrinterDriverRenderFilter-PipelineConfig.xml" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="9be411f3-786d-49df-bad0-ebf0becec7d7" Subdirectory="drivers\RustDeskPrinterDriver">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/drivers/RustDeskPrinterDriver/RustDeskPrinterDriverRenderFilter.dll" KeyPath="yes" Checksum="yes" />
-			</Component>
-			<Component Guid="20a513ca-01fb-46e5-aeee-39b5da4e5071" Subdirectory="usbmmidd_v2\x64">
-				<File Source="D:/Myproject/vnt2.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/x64/usbmmIdd.dll" KeyPath="yes" Checksum="yes" />
+			<Component Guid="c2ccee7e-9ece-4f20-84e1-b84148fd7b53" Subdirectory="usbmmidd_v2\x64">
+				<File Source="D:/Myproject/vnt2.0/VntcApp1.0/vntcrustdesk-src/vntcrustdesk/usbmmidd_v2/x64/usbmmIdd.dll" KeyPath="yes" Checksum="yes" />
 			</Component>
 			<!--$AutoComponentEnd$-->
 

@@ -144,25 +144,40 @@ def read_lines_and_start_index(file_path, tag_start, tag_end):
     return lines, index_start, index_end
 
 
+def stable_component_guid(*parts):
+    normalized = "/".join(
+        str(part).replace("\\", "/").strip().lower()
+        for part in parts
+        if str(part).strip()
+    )
+    return uuid.uuid5(uuid.NAMESPACE_URL, f"vntc-msi-component/{normalized}")
+
+
 def insert_components_between_tags(lines, index_start, exe_name, dist_dir):
     indent = g_indent_unit * 3
     path = Path(dist_dir)
     idx = 1
-    for file_path in path.glob("**/*"):
+    file_paths = sorted(
+        path.glob("**/*"),
+        key=lambda item: item.relative_to(path).as_posix().lower(),
+    )
+    for file_path in file_paths:
         if file_path.is_file():
             if file_path.name.lower() == f"{exe_name}.exe".lower():
                 continue
 
+            relative_path = file_path.relative_to(path).as_posix()
             subdir = str(file_path.parent.relative_to(path))
             dir_attr = ""
             if subdir != ".":
                 dir_attr = f'Subdirectory="{subdir}"'
+            component_guid = stable_component_guid(exe_name, relative_path)
 
             # Don't generate Component Id and File Id like 'Component_{idx}' and 'File_{idx}'
             # because it will cause error
             # "Error WIX0130	The primary key 'xxxx' is duplicated in table 'Directory'"
             to_insert_lines = f"""
-{indent}<Component Guid="{uuid.uuid4()}" {dir_attr}>
+{indent}<Component Guid="{component_guid}" {dir_attr}>
 {indent}{g_indent_unit}<File Source="{file_path.as_posix()}" KeyPath="yes" Checksum="yes" />
 {indent}</Component>
 """
@@ -568,17 +583,33 @@ def update_license_file(app_name):
         f.write(license_content)
 
 
-def replace_component_guids_in_wxs():
-    langs_dir = Path(sys.argv[0]).parent.joinpath("Package")
-    for file_path in langs_dir.glob("**/*.wxs"):
+def replace_component_guids_in_wxs(app_id):
+    package_dir = Path(sys.argv[0]).parent.joinpath("Package")
+    for file_path in sorted(package_dir.glob("**/*.wxs")):
         with open(file_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
 
         # <Component Id="Product.Registry.DefaultIcon" Guid="6DBF2690-0955-4C6A-940F-634DDA503F49">
+        relative_wxs_path = file_path.relative_to(package_dir).as_posix()
         for i, line in enumerate(lines):
             match = re.search(r'Component.+Guid="([^"]+)"', line)
             if match:
-                lines[i] = re.sub(r'Guid="[^"]+"', f'Guid="{uuid.uuid4()}"', line)
+                id_match = re.search(r'Component[^>]+Id="([^"]+)"', line)
+                component_key = (
+                    id_match.group(1)
+                    if id_match
+                    else f"{relative_wxs_path}:{i}:{line.strip()}"
+                )
+                component_guid = stable_component_guid(
+                    app_id,
+                    relative_wxs_path,
+                    component_key,
+                )
+                lines[i] = re.sub(
+                    r'Guid="[^"]+"',
+                    f'Guid="{component_guid}"',
+                    line,
+                )
 
         with open(file_path, "w", encoding="utf-8") as f:
             f.writelines(lines)
@@ -603,7 +634,7 @@ if __name__ == "__main__":
         sys.exit(-1)
 
     if app_name != "RustDesk":
-        replace_component_guids_in_wxs()
+        replace_component_guids_in_wxs(args.app_id)
 
     if not gen_upgrade_info():
         sys.exit(-1)

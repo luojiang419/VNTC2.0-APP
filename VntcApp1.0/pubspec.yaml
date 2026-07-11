@@ -68,6 +68,7 @@ dependencies:
   get: ^4.6.6
   bot_toast: ^4.1.3
   package_info_plus: ^4.2.0
+  crypto: ^3.0.3
   flutter_hbb:
     path: packages/flutter_hbb
 dev_dependencies:

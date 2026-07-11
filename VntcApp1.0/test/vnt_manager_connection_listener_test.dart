@@ -48,4 +48,40 @@ void main() {
     expect(firstCalls, 1);
     expect(secondCalls, 2);
   });
+
+  test('VntConnectionGate 会阻止同配置重复创建', () {
+    final gate = VntConnectionGate();
+
+    expect(gate.begin('config-a'), isTrue);
+    expect(gate.begin('config-a'), isFalse);
+    expect(gate.isCreating, isTrue);
+    expect(gate.isCreatingKey('config-a'), isTrue);
+
+    expect(gate.finish('config-a'), isTrue);
+    expect(gate.isCreating, isFalse);
+    expect(gate.begin('config-a'), isTrue);
+  });
+
+  test('VntConnectionGate 会让创建完成前的取消生效', () {
+    final gate = VntConnectionGate();
+
+    expect(gate.begin('config-a'), isTrue);
+    gate.cancel('config-a');
+
+    expect(gate.finish('config-a'), isFalse);
+    expect(gate.isCreating, isFalse);
+    expect(gate.isCreatingKey('config-a'), isFalse);
+  });
+
+  test('VntConnectionGate 创建失败会清理 pending 状态', () {
+    final gate = VntConnectionGate();
+
+    expect(gate.begin('config-a'), isTrue);
+    gate.cancel('config-a');
+    gate.fail('config-a');
+
+    expect(gate.isCreating, isFalse);
+    expect(gate.begin('config-a'), isTrue);
+    expect(gate.finish('config-a'), isTrue);
+  });
 }

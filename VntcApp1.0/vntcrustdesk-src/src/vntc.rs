@@ -55,6 +55,7 @@ pub fn apply_profile() {
         insert_setting(&mut builtin, keys::OPTION_HIDE_SERVER_SETTINGS, "Y");
         insert_setting(&mut builtin, keys::OPTION_HIDE_PROXY_SETTINGS, "Y");
         insert_setting(&mut builtin, keys::OPTION_HIDE_WEBSOCKET_SETTINGS, "Y");
+        insert_setting(&mut builtin, keys::OPTION_HIDE_TRAY, "Y");
         insert_setting(&mut builtin, "hide-stop-service", "Y");
         insert_setting(&mut builtin, "hide-help-cards", "Y");
         insert_setting(&mut builtin, "hide-powered-by-me", "Y");
@@ -122,5 +123,19 @@ mod tests {
         assert!(normalize_direct_target("peer.example.com:49999").is_err());
         assert!(normalize_direct_target("10.0.0.8/r").is_err());
         assert!(normalize_direct_target("2001:db8::1").is_err());
+    }
+
+    #[test]
+    fn profile_hides_tray_icon() {
+        apply_profile();
+
+        assert_eq!(
+            config::BUILTIN_SETTINGS
+                .read()
+                .unwrap()
+                .get(keys::OPTION_HIDE_TRAY)
+                .map(String::as_str),
+            Some("Y"),
+        );
     }
 }

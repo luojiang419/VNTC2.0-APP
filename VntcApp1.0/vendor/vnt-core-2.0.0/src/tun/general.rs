@@ -148,6 +148,13 @@ fn create_tun(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
     #[cfg(not(any(target_os = "android", target_os = "ios", target_os = "tvos")))]
     {
         let mut builder = DeviceBuilder::new();
+        #[cfg(windows)]
+        {
+            let tun_name = managed_windows_tun_name(config.tun_name.as_deref().unwrap_or("default"));
+            cleanup_inactive_managed_windows_tuns(&tun_name);
+            builder = builder.name(tun_name);
+        }
+        #[cfg(not(windows))]
         if let Some(tun_name) = config.tun_name {
             builder = builder.name(tun_name);
         }
@@ -168,6 +175,35 @@ fn create_tun(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
             _ = dev.set_tx_queue_len(1000);
         }
         Ok(dev)
+    }
+}
+
+#[cfg(windows)]
+const MANAGED_WINDOWS_TUN_PREFIX: &str = "VNT-App-TUN-";
+
+#[cfg(windows)]
+fn managed_windows_tun_name(configured_name: &str) -> String {
+    let suffix: String = configured_name
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(48)
+        .collect();
+    format!("{MANAGED_WINDOWS_TUN_PREFIX}{}", if suffix.is_empty() { "default" } else { &suffix })
+}
+
+#[cfg(windows)]
+fn cleanup_inactive_managed_windows_tuns(active_name: &str) {
+    use std::process::Command;
+
+    let script = "Get-NetAdapter -IncludeHidden -ErrorAction SilentlyContinue | Where-Object { $_.Name -like 'VNT-App-TUN-*' -and $_.Name -ne $env:VNT_ACTIVE_TUN_NAME -and ($_.Status -eq 'Disconnected' -or $_.Status -eq 'Disabled') } | ForEach-Object { Remove-NetAdapter -Name $_.Name -Confirm:$false -ErrorAction Stop }";
+    match Command::new("powershell.exe")
+        .args(["-NoProfile", "-NonInteractive", "-Command", script])
+        .env("VNT_ACTIVE_TUN_NAME", active_name)
+        .output()
+    {
+        Ok(output) if output.status.success() => {}
+        Ok(output) => log::debug!("managed TUN cleanup skipped: {}", String::from_utf8_lossy(&output.stderr)),
+        Err(error) => log::debug!("managed TUN cleanup unavailable: {error}"),
     }
 }
 fn create(

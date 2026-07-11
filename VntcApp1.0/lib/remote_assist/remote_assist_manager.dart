@@ -43,6 +43,10 @@ class RemoteAssistManager extends ChangeNotifier {
   List<RemoteAssistPeer> get peers => UnmodifiableListView(_peers);
 
   static RemoteAssistPlatformAdapter _createAdapter() {
+    if (Platform.isAndroid &&
+        !RemoteAssistConstants.androidRemoteAssistEnabled) {
+      return const RemoteAssistUnsupportedAdapter();
+    }
     if (Platform.isWindows) {
       return RemoteAssistWindowsAdapter();
     }

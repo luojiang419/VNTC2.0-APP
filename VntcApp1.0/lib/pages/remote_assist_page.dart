@@ -227,7 +227,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           height: context.iconXLarge,
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withOpacity(0.75)],
+              colors: [primaryColor, primaryColor.withValues(alpha: 0.75)],
             ),
             borderRadius: BorderRadius.circular(context.cardRadius),
           ),
@@ -836,8 +836,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         padding: EdgeInsets.all(context.spacingMedium),
         decoration: BoxDecoration(
           color: isDark
-              ? Colors.white.withOpacity(0.04)
-              : Colors.black.withOpacity(0.02),
+              ? Colors.white.withValues(alpha: 0.04)
+              : Colors.black.withValues(alpha: 0.02),
           borderRadius: BorderRadius.circular(context.cardRadius),
         ),
         child: Row(
@@ -916,7 +916,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       width: double.infinity,
       padding: EdgeInsets.all(context.spacingMedium),
       decoration: BoxDecoration(
-        color: Colors.orange.withOpacity(0.12),
+        color: Colors.orange.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(context.cardRadius),
       ),
       child: Text(
@@ -984,13 +984,13 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           padding: EdgeInsets.all(context.spacingMedium),
           decoration: BoxDecoration(
             color: isDark
-                ? Colors.white.withOpacity(0.04)
-                : Colors.black.withOpacity(0.02),
+                ? Colors.white.withValues(alpha: 0.04)
+                : Colors.black.withValues(alpha: 0.02),
             borderRadius: BorderRadius.circular(context.cardRadius),
             border: Border.all(
               color: peer.isOnline
-                  ? primaryColor.withOpacity(0.25)
-                  : Colors.grey.withOpacity(0.25),
+                  ? primaryColor.withValues(alpha: 0.25)
+                  : Colors.grey.withValues(alpha: 0.25),
             ),
           ),
           child: Row(
@@ -1000,8 +1000,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 height: context.iconXLarge,
                 decoration: BoxDecoration(
                   color: peer.isOnline
-                      ? primaryColor.withOpacity(0.12)
-                      : Colors.grey.withOpacity(0.12),
+                      ? primaryColor.withValues(alpha: 0.12)
+                      : Colors.grey.withValues(alpha: 0.12),
                   borderRadius: BorderRadius.circular(context.cardRadius),
                 ),
                 child: Icon(
@@ -1127,8 +1127,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       ),
       decoration: BoxDecoration(
         color: isActive
-            ? Colors.green.withOpacity(0.15)
-            : Colors.grey.withOpacity(isDark ? 0.20 : 0.14),
+            ? Colors.green.withValues(alpha: 0.15)
+            : Colors.grey.withValues(alpha: isDark ? 0.20 : 0.14),
         borderRadius: BorderRadius.circular(context.cardRadius),
       ),
       child: Text(

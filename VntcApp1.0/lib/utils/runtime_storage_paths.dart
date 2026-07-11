@@ -61,12 +61,15 @@ class RuntimeStoragePaths {
     required bool isMacOS,
   }) {
     if (isMacOS) {
+      final normalizedExecutablePath = executablePath.replaceAll('\\', '/');
       final resourcesPath = resolveMacosResourcesPathForExecutable(
-        executablePath,
+        normalizedExecutablePath,
       );
       if (resourcesPath != null) {
-        return path.join(resourcesPath, relativePath);
+        return path.posix.join(resourcesPath, relativePath);
       }
+      final executableDir = path.posix.dirname(normalizedExecutablePath);
+      return path.posix.join(executableDir, relativePath);
     }
 
     final executableDir = path.dirname(executablePath);
@@ -76,12 +79,12 @@ class RuntimeStoragePaths {
   static String? resolveMacosResourcesPathForExecutable(
     String executablePath,
   ) {
-    final executableDir = path.dirname(executablePath);
-    final contentsDir = path.dirname(executableDir);
-    if (path.basename(contentsDir) != 'Contents') {
+    final executableDir = path.posix.dirname(executablePath);
+    final contentsDir = path.posix.dirname(executableDir);
+    if (path.posix.basename(contentsDir) != 'Contents') {
       return null;
     }
-    return path.join(contentsDir, 'Resources');
+    return path.posix.join(contentsDir, 'Resources');
   }
 
   static bool canWriteToDirectorySync(String directoryPath) {

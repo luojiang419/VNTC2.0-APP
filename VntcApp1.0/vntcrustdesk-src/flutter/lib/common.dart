@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 import 'dart:math';
 
 import 'package:back_button_interceptor/back_button_interceptor.dart';
@@ -2282,6 +2283,10 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         break;
       case '--password':
         password = args[i + 1];
+        i++;
+        break;
+      case '--password-file':
+        password = await File(args[i + 1]).readAsString();
         i++;
         break;
       case '--switch_uuid':

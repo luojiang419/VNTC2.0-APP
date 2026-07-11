@@ -38,7 +38,7 @@ flutter_rust_bridge::frb_generated_boilerplate!(
     default_rust_auto_opaque = RustAutoOpaqueMoi,
 );
 pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_VERSION: &str = "2.1.0";
-pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 391655432;
+pub(crate) const FLUTTER_RUST_BRIDGE_CODEGEN_CONTENT_HASH: i32 = 360596016;
 
 // Section: executor
 
@@ -538,6 +538,54 @@ fn wire__crate__api__vnt_api__VntApi_new_impl(
         },
     )
 }
+fn wire__crate__api__vnt_api__VntApi_p2p_diagnostics_impl(
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) -> flutter_rust_bridge::for_generated::WireSyncRust2DartSse {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_sync::<flutter_rust_bridge::for_generated::SseCodec, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "VntApi_p2p_diagnostics",
+            port: None,
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Sync,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            let api_that = <RustOpaqueMoi<
+                flutter_rust_bridge::for_generated::RustAutoOpaqueInner<VntApi>,
+            >>::sse_decode(&mut deserializer);
+            deserializer.end();
+            transform_result_sse::<_, ()>((move || {
+                let mut api_that_guard = None;
+                let decode_indices_ =
+                    flutter_rust_bridge::for_generated::lockable_compute_decode_order(vec![
+                        flutter_rust_bridge::for_generated::LockableOrderInfo::new(
+                            &api_that, 0, false,
+                        ),
+                    ]);
+                for i in decode_indices_ {
+                    match i {
+                        0 => api_that_guard = Some(api_that.lockable_decode_sync_ref()),
+                        _ => unreachable!(),
+                    }
+                }
+                let api_that_guard = api_that_guard.unwrap();
+                let output_ok = Result::<_, ()>::Ok(crate::api::vnt_api::VntApi::p2p_diagnostics(
+                    &*api_that_guard,
+                ))?;
+                Ok(output_ok)
+            })())
+        },
+    )
+}
 fn wire__crate__api__vnt_api__VntApi_peer_nat_info_impl(
     ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
     rust_vec_len_: i32,
@@ -942,6 +990,105 @@ fn wire__crate__api__vnt_api__init_log_with_path_impl(
                     Ok(output_ok)
                 })(),
             )
+        },
+    )
+}
+fn wire__crate__api__vnt_api__rust_current_device_info_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "rust_current_device_info_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::vnt_api::RustCurrentDeviceInfo::default())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__vnt_api__rust_nat_info_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "rust_nat_info_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::vnt_api::RustNatInfo::default())?;
+                    Ok(output_ok)
+                })())
+            }
+        },
+    )
+}
+fn wire__crate__api__vnt_api__rust_p_2_p_diagnostics_default_impl(
+    port_: flutter_rust_bridge::for_generated::MessagePort,
+    ptr_: flutter_rust_bridge::for_generated::PlatformGeneralizedUint8ListPtr,
+    rust_vec_len_: i32,
+    data_len_: i32,
+) {
+    FLUTTER_RUST_BRIDGE_HANDLER.wrap_normal::<flutter_rust_bridge::for_generated::SseCodec, _, _>(
+        flutter_rust_bridge::for_generated::TaskInfo {
+            debug_name: "rust_p_2_p_diagnostics_default",
+            port: Some(port_),
+            mode: flutter_rust_bridge::for_generated::FfiCallMode::Normal,
+        },
+        move || {
+            let message = unsafe {
+                flutter_rust_bridge::for_generated::Dart2RustMessageSse::from_wire(
+                    ptr_,
+                    rust_vec_len_,
+                    data_len_,
+                )
+            };
+            let mut deserializer =
+                flutter_rust_bridge::for_generated::SseDeserializer::new(message);
+            deserializer.end();
+            move |context| {
+                transform_result_sse::<_, ()>((move || {
+                    let output_ok =
+                        Result::<_, ()>::Ok(crate::api::vnt_api::RustP2pDiagnostics::default())?;
+                    Ok(output_ok)
+                })())
+            }
         },
     )
 }
@@ -1732,6 +1879,34 @@ impl SseDecode for crate::api::vnt_api::RustNatInfo {
     }
 }
 
+impl SseDecode for crate::api::vnt_api::RustP2pDiagnostics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
+        let mut var_state = <String>::sse_decode(deserializer);
+        let mut var_reason = <String>::sse_decode(deserializer);
+        let mut var_connectedServer = <Option<String>>::sse_decode(deserializer);
+        let mut var_natState = <String>::sse_decode(deserializer);
+        let mut var_natType = <String>::sse_decode(deserializer);
+        let mut var_publicIps = <Vec<String>>::sse_decode(deserializer);
+        let mut var_onlinePeerCount = <usize>::sse_decode(deserializer);
+        let mut var_directPeerCount = <usize>::sse_decode(deserializer);
+        let mut var_relayPeerCount = <usize>::sse_decode(deserializer);
+        let mut var_routePeerCount = <usize>::sse_decode(deserializer);
+        return crate::api::vnt_api::RustP2pDiagnostics {
+            state: var_state,
+            reason: var_reason,
+            connected_server: var_connectedServer,
+            nat_state: var_natState,
+            nat_type: var_natType,
+            public_ips: var_publicIps,
+            online_peer_count: var_onlinePeerCount,
+            direct_peer_count: var_directPeerCount,
+            relay_peer_count: var_relayPeerCount,
+            route_peer_count: var_routePeerCount,
+        };
+    }
+}
+
 impl SseDecode for crate::api::vnt_api::RustPeerClientInfo {
     // Codec=Sse (Serialization based), see doc to use other codecs
     fn sse_decode(deserializer: &mut flutter_rust_bridge::for_generated::SseDeserializer) -> Self {
@@ -1892,8 +2067,23 @@ fn pde_ffi_dispatcher_primary_impl(
     // Codec=Pde (Serialization + dispatch), see doc to use other codecs
     match func_id {
         10 => wire__crate__api__vnt_api__VntApi_new_impl(port, ptr, rust_vec_len, data_len),
-        18 => wire__crate__api__vnt_api__init_app_impl(port, ptr, rust_vec_len, data_len),
-        20 => wire__crate__api__vnt_api__vnt_init_impl(port, ptr, rust_vec_len, data_len),
+        19 => wire__crate__api__vnt_api__init_app_impl(port, ptr, rust_vec_len, data_len),
+        21 => wire__crate__api__vnt_api__rust_current_device_info_default_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        22 => {
+            wire__crate__api__vnt_api__rust_nat_info_default_impl(port, ptr, rust_vec_len, data_len)
+        }
+        23 => wire__crate__api__vnt_api__rust_p_2_p_diagnostics_default_impl(
+            port,
+            ptr,
+            rust_vec_len,
+            data_len,
+        ),
+        24 => wire__crate__api__vnt_api__vnt_init_impl(port, ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -1917,14 +2107,15 @@ fn pde_ffi_dispatcher_sync_impl(
         7 => wire__crate__api__vnt_api__VntApi_ip_up_stream_total_impl(ptr, rust_vec_len, data_len),
         8 => wire__crate__api__vnt_api__VntApi_is_stopped_impl(ptr, rust_vec_len, data_len),
         9 => wire__crate__api__vnt_api__VntApi_nat_info_impl(ptr, rust_vec_len, data_len),
-        11 => wire__crate__api__vnt_api__VntApi_peer_nat_info_impl(ptr, rust_vec_len, data_len),
-        12 => wire__crate__api__vnt_api__VntApi_route_impl(ptr, rust_vec_len, data_len),
-        13 => wire__crate__api__vnt_api__VntApi_route_list_impl(ptr, rust_vec_len, data_len),
-        14 => wire__crate__api__vnt_api__VntApi_stop_impl(ptr, rust_vec_len, data_len),
-        15 => wire__crate__api__vnt_api__VntApi_stream_all_impl(ptr, rust_vec_len, data_len),
-        16 => wire__crate__api__vnt_api__VntApi_up_stream_impl(ptr, rust_vec_len, data_len),
-        17 => wire__crate__api__vnt_api__VntApi_up_stream_line_impl(ptr, rust_vec_len, data_len),
-        19 => wire__crate__api__vnt_api__init_log_with_path_impl(ptr, rust_vec_len, data_len),
+        11 => wire__crate__api__vnt_api__VntApi_p2p_diagnostics_impl(ptr, rust_vec_len, data_len),
+        12 => wire__crate__api__vnt_api__VntApi_peer_nat_info_impl(ptr, rust_vec_len, data_len),
+        13 => wire__crate__api__vnt_api__VntApi_route_impl(ptr, rust_vec_len, data_len),
+        14 => wire__crate__api__vnt_api__VntApi_route_list_impl(ptr, rust_vec_len, data_len),
+        15 => wire__crate__api__vnt_api__VntApi_stop_impl(ptr, rust_vec_len, data_len),
+        16 => wire__crate__api__vnt_api__VntApi_stream_all_impl(ptr, rust_vec_len, data_len),
+        17 => wire__crate__api__vnt_api__VntApi_up_stream_impl(ptr, rust_vec_len, data_len),
+        18 => wire__crate__api__vnt_api__VntApi_up_stream_line_impl(ptr, rust_vec_len, data_len),
+        20 => wire__crate__api__vnt_api__init_log_with_path_impl(ptr, rust_vec_len, data_len),
         _ => unreachable!(),
     }
 }
@@ -2143,6 +2334,35 @@ impl flutter_rust_bridge::IntoIntoDart<crate::api::vnt_api::RustNatInfo>
     for crate::api::vnt_api::RustNatInfo
 {
     fn into_into_dart(self) -> crate::api::vnt_api::RustNatInfo {
+        self
+    }
+}
+// Codec=Dco (DartCObject based), see doc to use other codecs
+impl flutter_rust_bridge::IntoDart for crate::api::vnt_api::RustP2pDiagnostics {
+    fn into_dart(self) -> flutter_rust_bridge::for_generated::DartAbi {
+        [
+            self.state.into_into_dart().into_dart(),
+            self.reason.into_into_dart().into_dart(),
+            self.connected_server.into_into_dart().into_dart(),
+            self.nat_state.into_into_dart().into_dart(),
+            self.nat_type.into_into_dart().into_dart(),
+            self.public_ips.into_into_dart().into_dart(),
+            self.online_peer_count.into_into_dart().into_dart(),
+            self.direct_peer_count.into_into_dart().into_dart(),
+            self.relay_peer_count.into_into_dart().into_dart(),
+            self.route_peer_count.into_into_dart().into_dart(),
+        ]
+        .into_dart()
+    }
+}
+impl flutter_rust_bridge::for_generated::IntoDartExceptPrimitive
+    for crate::api::vnt_api::RustP2pDiagnostics
+{
+}
+impl flutter_rust_bridge::IntoIntoDart<crate::api::vnt_api::RustP2pDiagnostics>
+    for crate::api::vnt_api::RustP2pDiagnostics
+{
+    fn into_into_dart(self) -> crate::api::vnt_api::RustP2pDiagnostics {
         self
     }
 }
@@ -2643,6 +2863,22 @@ impl SseEncode for crate::api::vnt_api::RustNatInfo {
         <String>::sse_encode(self.nat_type, serializer);
         <Option<String>>::sse_encode(self.local_ipv4, serializer);
         <Option<String>>::sse_encode(self.ipv6, serializer);
+    }
+}
+
+impl SseEncode for crate::api::vnt_api::RustP2pDiagnostics {
+    // Codec=Sse (Serialization based), see doc to use other codecs
+    fn sse_encode(self, serializer: &mut flutter_rust_bridge::for_generated::SseSerializer) {
+        <String>::sse_encode(self.state, serializer);
+        <String>::sse_encode(self.reason, serializer);
+        <Option<String>>::sse_encode(self.connected_server, serializer);
+        <String>::sse_encode(self.nat_state, serializer);
+        <String>::sse_encode(self.nat_type, serializer);
+        <Vec<String>>::sse_encode(self.public_ips, serializer);
+        <usize>::sse_encode(self.online_peer_count, serializer);
+        <usize>::sse_encode(self.direct_peer_count, serializer);
+        <usize>::sse_encode(self.relay_peer_count, serializer);
+        <usize>::sse_encode(self.route_peer_count, serializer);
     }
 }
 

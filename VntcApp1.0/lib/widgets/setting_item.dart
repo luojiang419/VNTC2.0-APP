@@ -46,14 +46,15 @@ class SettingItem extends StatelessWidget {
                 width: context.w(40),
                 height: context.w(40),
                 decoration: BoxDecoration(
-                  color: effectiveIconColor.withOpacity(enabled ? 0.1 : 0.05),
+                  color: effectiveIconColor.withValues(
+                      alpha: enabled ? 0.1 : 0.05),
                   borderRadius: BorderRadius.circular(context.radius(10)),
                 ),
                 child: Icon(
                   icon,
                   color: enabled
                       ? effectiveIconColor
-                      : effectiveIconColor.withOpacity(0.5),
+                      : effectiveIconColor.withValues(alpha: 0.5),
                   size: context.iconSmall,
                 ),
               ),
@@ -142,11 +143,9 @@ class SettingSwitchItem extends StatelessWidget {
       trailing: Switch(
         value: value,
         onChanged: enabled ? onChanged : null,
-        activeColor: primaryColor,
+        activeThumbColor: primaryColor,
       ),
-      onTap: enabled && onChanged != null
-          ? () => onChanged!(!value)
-          : null,
+      onTap: enabled && onChanged != null ? () => onChanged!(!value) : null,
     );
   }
 }
@@ -167,20 +166,20 @@ class SettingGroupTitle extends StatelessWidget {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Padding(
-      padding: padding ?? EdgeInsets.fromLTRB(
-        context.spacing(16),
-        context.spacing(24),
-        context.spacing(16),
-        context.spacing(8),
-      ),
+      padding: padding ??
+          EdgeInsets.fromLTRB(
+            context.spacing(16),
+            context.spacing(24),
+            context.spacing(16),
+            context.spacing(8),
+          ),
       child: Text(
         title,
         style: TextStyle(
           fontSize: context.fontSmall,
           fontWeight: FontWeight.w600,
-          color: isDark
-              ? AppTheme.darkTextSecondary
-              : AppTheme.lightTextSecondary,
+          color:
+              isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
           letterSpacing: 0.5,
         ),
       ),
@@ -210,7 +209,8 @@ class SettingGroup extends StatelessWidget {
       children: [
         if (title != null) SettingGroupTitle(title: title!),
         Container(
-          margin: margin ?? EdgeInsets.symmetric(horizontal: context.spacing(16)),
+          margin:
+              margin ?? EdgeInsets.symmetric(horizontal: context.spacing(16)),
           decoration: BoxDecoration(
             color: isDark
                 ? AppTheme.darkCardBackground
@@ -218,7 +218,7 @@ class SettingGroup extends StatelessWidget {
             borderRadius: BorderRadius.circular(context.radius(12)),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
+                color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
                 blurRadius: 8,
                 offset: const Offset(0, 2),
               ),

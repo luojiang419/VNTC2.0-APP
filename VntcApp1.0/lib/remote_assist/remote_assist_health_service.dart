@@ -6,6 +6,15 @@ import 'remote_assist_launcher.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
 
+bool isRemoteAssistRuntimeReady({
+  required bool serviceRunning,
+  required bool hasServiceProcess,
+  required bool hasServerProcess,
+  required bool portListening,
+}) {
+  return portListening;
+}
+
 class RemoteAssistHealthService {
   RemoteAssistHealthService({
     RemoteAssistLauncher? launcher,
@@ -77,10 +86,15 @@ class RemoteAssistHealthService {
       processIds: runtimeProcesses.processIds,
       port: RemoteAssistConstants.directAccessPort,
     );
-    final runtimeReady = serviceInfo.isRunning ||
+    final processRunning = serviceInfo.isRunning ||
         runtimeProcesses.hasServiceProcess ||
-        runtimeProcesses.hasServerProcess ||
-        portListening;
+        runtimeProcesses.hasServerProcess;
+    final runtimeReady = isRemoteAssistRuntimeReady(
+      serviceRunning: serviceInfo.isRunning,
+      hasServiceProcess: runtimeProcesses.hasServiceProcess,
+      hasServerProcess: runtimeProcesses.hasServerProcess,
+      portListening: portListening,
+    );
 
     final issues = <String>[];
     if (!vntConnected) {
@@ -94,7 +108,8 @@ class RemoteAssistHealthService {
       }
     }
     if (serviceInfo.exists && !runtimeReady) {
-      issues.add('vntcrustdesk 服务未运行');
+      issues.add(
+          processRunning ? 'vntcrustdesk 服务未达到监听就绪状态' : 'vntcrustdesk 服务未运行');
     }
     if (executablePath.isNotEmpty &&
         !serviceInfo.exists &&
@@ -138,7 +153,7 @@ class RemoteAssistHealthService {
       runtimeAvailable: executablePath.isNotEmpty,
       serviceInstalled:
           serviceInfo.exists || runtimeProcesses.hasServiceProcess,
-      serviceRunning: runtimeReady,
+      serviceRunning: processRunning,
       portListening: portListening,
       firewallTcpRulePresent: tcpRule.exists,
       firewallUdpRulePresent: udpRule.exists,
@@ -204,17 +219,9 @@ if (\$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
       await RemoteAssistLog.write('静默启动服务后仍未达到监听就绪状态');
     }
 
-    if (await _launcher.tryStartBackgroundServer()) {
-      await Future<void>.delayed(const Duration(seconds: 2));
-      if (await _isRuntimeReady(
-        executablePath: executablePath,
-        port: RemoteAssistConstants.directAccessPort,
-      )) {
-        await RemoteAssistLog.write('状态刷新时已静默拉起 vntcrustdesk 监听进程');
-        return true;
-      }
-      await RemoteAssistLog.write('直接拉起 vntcrustdesk 监听进程后仍未检测到 49999 监听');
-    }
+    await RemoteAssistLog.write(
+      '静默预热未直接拉起 vntcrustdesk --server，避免创建额外托盘进程',
+    );
 
     return false;
   }
@@ -264,9 +271,12 @@ if (\$principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
       processIds: runtimeProcesses.processIds,
       port: port,
     );
-    return runtimeProcesses.hasServiceProcess ||
-        runtimeProcesses.hasServerProcess ||
-        portListening;
+    return isRemoteAssistRuntimeReady(
+      serviceRunning: false,
+      hasServiceProcess: runtimeProcesses.hasServiceProcess,
+      hasServerProcess: runtimeProcesses.hasServerProcess,
+      portListening: portListening,
+    );
   }
 
   Future<void> restartService() async {

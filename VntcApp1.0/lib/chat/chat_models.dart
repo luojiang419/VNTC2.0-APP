@@ -136,12 +136,25 @@ String normalizeChatHallId(String hallId) {
   );
 }
 
+String normalizeChatVirtualIp(String virtualIp) {
+  var normalized = virtualIp.trim().toLowerCase();
+  if (normalized.length > 2 &&
+      normalized.startsWith('[') &&
+      normalized.endsWith(']')) {
+    normalized = normalized.substring(1, normalized.length - 1);
+  }
+  return normalized;
+}
+
 String buildDirectConversationId({
   required String hallId,
   required String firstVirtualIp,
   required String secondVirtualIp,
 }) {
-  final ips = [firstVirtualIp, secondVirtualIp]..sort();
+  final ips = [
+    normalizeChatVirtualIp(firstVirtualIp),
+    normalizeChatVirtualIp(secondVirtualIp),
+  ]..sort();
   return 'dm:${normalizeChatHallId(hallId)}:${ips[0]}|${ips[1]}';
 }
 

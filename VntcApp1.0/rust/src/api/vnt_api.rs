@@ -3,15 +3,15 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{anyhow, Context};
+use anyhow::{Context, anyhow};
 use flutter_rust_bridge::DartFnFuture;
 use ipnet::Ipv4Net;
 use rust_p2p_core::nat::NatInfo;
 use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use vnt_core::api::VntApi as CoreVntApi;
-use vnt_core::context::config::Config as CoreConfig;
 use vnt_core::context::NetworkAddr;
+use vnt_core::context::config::Config as CoreConfig;
 use vnt_core::core::{NetworkManager, RegisterResponse};
 use vnt_core::nat::NetInput;
 use vnt_core::port_mapping::PortMapping;
@@ -37,23 +37,25 @@ pub fn init_app() {
 #[flutter_rust_bridge::frb(sync)]
 pub fn init_log_with_path(log_dir: String, config_path: String) -> anyhow::Result<()> {
     use log::LevelFilter;
+    use log4rs::append::rolling_file::RollingFileAppender;
+    use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
     use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
     use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
-    use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
-    use log4rs::append::rolling_file::RollingFileAppender;
     use log4rs::config::{Appender, Config, Root};
     use log4rs::encode::pattern::PatternEncoder;
     use std::path::PathBuf;
 
     let log_path = PathBuf::from(&log_dir);
     if !log_path.exists() {
-        std::fs::create_dir_all(&log_path)
-            .context(format!("创建日志目录失败: {}", log_dir))?;
+        std::fs::create_dir_all(&log_path).context(format!("创建日志目录失败: {}", log_dir))?;
     }
 
     let log_file = log_path.join("vnt-core.log");
     let trigger = SizeTrigger::new(10 * 1024 * 1024);
-    let roller_pattern = log_path.join("vnt-core.{}.log").to_string_lossy().to_string();
+    let roller_pattern = log_path
+        .join("vnt-core.{}.log")
+        .to_string_lossy()
+        .to_string();
     let roller = FixedWindowRoller::builder()
         .build(&roller_pattern, 5)
         .context("创建日志滚动器失败")?;
@@ -68,7 +70,11 @@ pub fn init_log_with_path(log_dir: String, config_path: String) -> anyhow::Resul
 
     let config = Config::builder()
         .appender(Appender::builder().build("rolling_file", Box::new(appender)))
-        .build(Root::builder().appender("rolling_file").build(LevelFilter::Info))
+        .build(
+            Root::builder()
+                .appender("rolling_file")
+                .build(LevelFilter::Info),
+        )
         .context("构建日志配置失败")?;
 
     log4rs::init_config(config).context("初始化日志系统失败")?;
@@ -210,7 +216,12 @@ impl VntApi {
         if self.stopped.swap(true, Ordering::SeqCst) {
             return;
         }
-        if let Some(network_manager) = self.network_manager.lock().ok().and_then(|mut guard| guard.take()) {
+        if let Some(network_manager) = self
+            .network_manager
+            .lock()
+            .ok()
+            .and_then(|mut guard| guard.take())
+        {
             drop(network_manager);
         }
     }
@@ -270,6 +281,14 @@ impl VntApi {
             .nat_info()
             .map(RustNatInfo::from)
             .unwrap_or_default()
+    }
+
+    #[flutter_rust_bridge::frb(sync)]
+    pub fn p2p_diagnostics(&self) -> RustP2pDiagnostics {
+        if self.is_stopped() {
+            return RustP2pDiagnostics::stopped();
+        }
+        p2p_diagnostics_from_api(&self.core_api)
     }
 
     #[flutter_rust_bridge::frb(sync)]
@@ -386,9 +405,10 @@ async fn start_network(
     task_group: vnt_core::utils::task_control::TaskGroup,
     call: VntApiCallback,
 ) -> anyhow::Result<(NetworkManager, NetworkAddr)> {
-    let mut network_manager = NetworkManager::create_network(Box::new(core_config.clone()), task_group)
-        .await
-        .context("创建 VNT 2.0 网络实例失败")?;
+    let mut network_manager =
+        NetworkManager::create_network(Box::new(core_config.clone()), task_group)
+            .await
+            .context("创建 VNT 2.0 网络实例失败")?;
     let register_response = network_manager
         .register()
         .await
@@ -478,15 +498,12 @@ fn build_android_tun_config(
 
 fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig, Vec<String>)> {
     let server_addr = parse_server_addresses(&vnt_config.server_address_str)?;
-    let connect_targets: Vec<String> =
-        server_addr.iter().map(|address| address.to_string()).collect();
+    let connect_targets: Vec<String> = server_addr
+        .iter()
+        .map(|address| address.to_string())
+        .collect();
     let bridge_options = decode_bridge_options(&vnt_config.cipher_model)?;
-    let cert_mode = decode_cert_mode(
-        bridge_options
-            .cert_mode
-            .as_deref()
-            .unwrap_or("skip"),
-    )?;
+    let cert_mode = decode_cert_mode(bridge_options.cert_mode.as_deref().unwrap_or("skip"))?;
 
     let input = vnt_config
         .in_ips
@@ -539,7 +556,7 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
     );
     let tcp_stun = normalize_stun_servers(
         if bridge_options.tcp_stun.is_empty() {
-            udp_stun.clone()
+            vec![]
         } else {
             bridge_options.tcp_stun.clone()
         },
@@ -572,7 +589,9 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
             output,
             no_nat: vnt_config.no_proxy,
             no_tun: bridge_options.no_tun,
-            mtu: vnt_config.mtu.map(|value| value.min(u16::MAX as u32) as u16),
+            mtu: vnt_config
+                .mtu
+                .map(|value| value.min(u16::MAX as u32) as u16),
             port_mapping,
             allow_port_mapping: bridge_options.allow_mapping,
             udp_stun,
@@ -623,6 +642,7 @@ fn decode_cert_mode(payload: &str) -> anyhow::Result<CertValidationMode> {
     CertValidationMode::from_str(payload.trim()).map_err(anyhow::Error::msg)
 }
 
+#[flutter_rust_bridge::frb(ignore)]
 #[derive(Debug, Default, Deserialize)]
 struct BridgeOptions {
     #[serde(default)]
@@ -714,7 +734,13 @@ fn total_traffic(api: &CoreVntApi, upstream: bool) -> u64 {
     }
     api.all_traffic_info()
         .into_iter()
-        .map(|info| if upstream { info.tx_bytes } else { info.rx_bytes })
+        .map(|info| {
+            if upstream {
+                info.tx_bytes
+            } else {
+                info.rx_bytes
+            }
+        })
         .sum()
 }
 
@@ -766,6 +792,70 @@ fn build_route_from_api(api: &CoreVntApi, ip: Ipv4Addr) -> Option<RustRoute> {
         metric: if is_direct { 1 } else { 2 },
         rt: i64::from(rt),
     })
+}
+
+fn p2p_diagnostics_from_api(api: &CoreVntApi) -> RustP2pDiagnostics {
+    let server_nodes = api.server_node_list();
+    let connected_server = server_nodes
+        .iter()
+        .find(|node| node.connected)
+        .map(|node| node.server_addr.to_string());
+    let nat_info = api.nat_info().map(RustNatInfo::from);
+    let clients = api.client_ips();
+    let online_peer_count = clients.iter().filter(|client| client.online).count();
+    let direct_peer_count = clients
+        .iter()
+        .filter(|client| client.online && api.is_direct(&client.ip))
+        .count();
+    let relay_peer_count = online_peer_count.saturating_sub(direct_peer_count);
+    let route_peer_count = api
+        .route_table()
+        .into_iter()
+        .filter(|(_, routes)| !routes.is_empty())
+        .count();
+    let (state, reason) = p2p_diagnostic_state(
+        connected_server.is_some(),
+        nat_info.is_some(),
+        online_peer_count,
+        direct_peer_count,
+    );
+    let nat_info = nat_info.unwrap_or_default();
+
+    RustP2pDiagnostics {
+        state: state.to_string(),
+        reason: reason.to_string(),
+        connected_server,
+        nat_state: if nat_info.nat_type.is_empty() {
+            "pending".to_string()
+        } else {
+            "ready".to_string()
+        },
+        nat_type: nat_info.nat_type,
+        public_ips: nat_info.public_ips,
+        online_peer_count,
+        direct_peer_count,
+        relay_peer_count,
+        route_peer_count,
+    }
+}
+
+fn p2p_diagnostic_state(
+    server_connected: bool,
+    nat_available: bool,
+    online_peer_count: usize,
+    direct_peer_count: usize,
+) -> (&'static str, &'static str) {
+    if !server_connected {
+        ("server_disconnected", "server_connection_unavailable")
+    } else if !nat_available {
+        ("nat_discovering", "nat_info_not_ready")
+    } else if online_peer_count == 0 {
+        ("waiting_for_peer", "no_online_peer")
+    } else if direct_peer_count > 0 {
+        ("p2p_ready", "direct_route_available")
+    } else {
+        ("relay_ready", "p2p_route_not_available")
+    }
 }
 
 fn prefix_to_netmask(prefix_len: u8) -> Ipv4Addr {
@@ -838,9 +928,9 @@ impl VntApiCallback {
         register_fn: impl Fn(RustRegisterInfo) -> DartFnFuture<bool> + Send + Sync + 'static,
         generate_tun_fn: impl Fn(RustDeviceConfig) -> DartFnFuture<u32> + Send + Sync + 'static,
         peer_client_list_fn: impl Fn(Vec<RustPeerClientInfo>) -> DartFnFuture<()>
-            + Send
-            + Sync
-            + 'static,
+        + Send
+        + Sync
+        + 'static,
         error_fn: impl Fn(RustErrorInfo) -> DartFnFuture<()> + Send + Sync + 'static,
         stop_fn: impl Fn() -> DartFnFuture<()> + Send + Sync + 'static,
     ) -> VntApiCallback {
@@ -1021,6 +1111,31 @@ pub struct RustRoute {
 }
 
 #[derive(Debug, Default)]
+pub struct RustP2pDiagnostics {
+    pub state: String,
+    pub reason: String,
+    pub connected_server: Option<String>,
+    pub nat_state: String,
+    pub nat_type: String,
+    pub public_ips: Vec<String>,
+    pub online_peer_count: usize,
+    pub direct_peer_count: usize,
+    pub relay_peer_count: usize,
+    pub route_peer_count: usize,
+}
+
+impl RustP2pDiagnostics {
+    fn stopped() -> Self {
+        Self {
+            state: "stopped".to_string(),
+            reason: "connection_stopped".to_string(),
+            nat_state: "unavailable".to_string(),
+            ..Self::default()
+        }
+    }
+}
+
+#[derive(Debug, Default)]
 pub struct RustNatInfo {
     pub public_ips: Vec<String>,
     pub nat_type: String,
@@ -1046,6 +1161,39 @@ impl From<NatInfo> for RustNatInfo {
             local_ipv4,
             ipv6,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::p2p_diagnostic_state;
+
+    #[test]
+    fn p2p_diagnostics_prioritizes_server_and_nat_readiness() {
+        assert_eq!(
+            p2p_diagnostic_state(false, false, 0, 0),
+            ("server_disconnected", "server_connection_unavailable")
+        );
+        assert_eq!(
+            p2p_diagnostic_state(true, false, 0, 0),
+            ("nat_discovering", "nat_info_not_ready")
+        );
+    }
+
+    #[test]
+    fn p2p_diagnostics_distinguishes_waiting_relay_and_direct_routes() {
+        assert_eq!(
+            p2p_diagnostic_state(true, true, 0, 0),
+            ("waiting_for_peer", "no_online_peer")
+        );
+        assert_eq!(
+            p2p_diagnostic_state(true, true, 2, 0),
+            ("relay_ready", "p2p_route_not_available")
+        );
+        assert_eq!(
+            p2p_diagnostic_state(true, true, 2, 1),
+            ("p2p_ready", "direct_route_available")
+        );
     }
 }
 

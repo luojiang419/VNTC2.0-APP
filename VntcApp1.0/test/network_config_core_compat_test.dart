@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/network_config.dart';
+import 'package:vnt_app/network_config_input_page.dart';
 
 void main() {
   test('旧版配置升级后仍能推导出 2.0 核心默认值', () {
@@ -38,7 +39,8 @@ void main() {
     expect(config.primaryServerAddress, 'legacy.example.com:29872');
     expect(config.serverList, ['legacy.example.com:29872']);
     expect(config.normalizedProtocol, 'QUIC');
-    expect(config.v2CompatiblePrimaryServerAddress, 'quic://legacy.example.com:29872');
+    expect(config.v2CompatiblePrimaryServerAddress,
+        'quic://legacy.example.com:29872');
     expect(config.ctrlPort, 21233);
     expect(config.certMode, 'skip');
     expect(config.effectiveCertMode, 'skip');
@@ -95,6 +97,16 @@ void main() {
     expect(json['local_ipv4'], '192.168.1.20');
   });
 
+  test('未配置 TCP STUN 时不会复用 UDP STUN 地址', () {
+    final config = NetworkConfig.fromJson({
+      'stun_server': ['udp-stun.example.com:3478'],
+    });
+
+    expect(config.effectiveUdpStun, ['udp-stun.example.com:3478']);
+    expect(config.effectiveTcpStun, isEmpty);
+    expect(config.bridgeCipherModelPayload, contains('"tcp_stun":[]'));
+  });
+
   test('旧协议前缀与动态地址可归一化为 2.0 服务端语义', () {
     final config = NetworkConfig.fromJson({
       'itemKey': 'legacy-2',
@@ -124,7 +136,22 @@ void main() {
     });
 
     expect(config.normalizedProtocol, 'DYNAMIC');
-    expect(config.v2CompatiblePrimaryServerAddress, 'dynamic://edge.example.com');
+    expect(
+        config.v2CompatiblePrimaryServerAddress, 'dynamic://edge.example.com');
     expect(config.effectiveCertMode, 'finger:abc123');
+  });
+
+  test('WireGuard 允许访问字段在配置和表单单选值之间保持正向映射', () {
+    final enabled = NetworkConfig.fromJson({'allow_wire_guard': true});
+    final disabled = NetworkConfig.fromJson({'allow_wire_guard': false});
+
+    expect(enabled.allowWg, isTrue);
+    expect(disabled.allowWg, isFalse);
+    expect(enabled.toJson()['allow_wire_guard'], isTrue);
+    expect(disabled.toJson()['allow_wire_guard'], isFalse);
+    expect(allowWgToRadioValue(true), 'TRUE');
+    expect(allowWgToRadioValue(false), 'FALSE');
+    expect(allowWgFromRadioValue('TRUE'), isTrue);
+    expect(allowWgFromRadioValue('FALSE'), isFalse);
   });
 }
