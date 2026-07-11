@@ -187,6 +187,36 @@ void main() {
         isFalse,
       );
     });
+
+    test('accepts unsigned installer only after sha256 verification', () {
+      expect(
+        isAcceptedWindowsInstallerTrust(
+          status: 'NotSigned',
+          subject: '',
+          trustedPublisher: '',
+          sha256Verified: true,
+        ),
+        isTrue,
+      );
+      expect(
+        isAcceptedWindowsInstallerTrust(
+          status: 'NotSigned',
+          subject: '',
+          trustedPublisher: '',
+          sha256Verified: false,
+        ),
+        isFalse,
+      );
+      expect(
+        isAcceptedWindowsInstallerTrust(
+          status: 'NotSigned',
+          subject: '',
+          trustedPublisher: 'VNTC Publisher',
+          sha256Verified: true,
+        ),
+        isFalse,
+      );
+    });
   });
 
   group('AppUpdateProxyResolver', () {
