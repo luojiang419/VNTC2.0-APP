@@ -241,7 +241,11 @@ impl VntApi {
             .into_iter()
             .map(|client| RustPeerClientInfo {
                 virtual_ip: client.ip.to_string(),
-                name: client.ip.to_string(),
+                name: if client.name.trim().is_empty() {
+                    client.ip.to_string()
+                } else {
+                    client.name
+                },
                 status: if client.online {
                     "Online".to_string()
                 } else {

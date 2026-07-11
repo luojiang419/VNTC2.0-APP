@@ -21,6 +21,7 @@ import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/window_restore_guard.dart';
 import 'package:vnt_app/utils/log_utils.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
+import 'package:vnt_app/utils/silent_start_policy.dart';
 import 'package:vnt_app/utils/system_tray_icon_path.dart';
 import 'package:vnt_app/utils/text_editing_shortcuts.dart';
 import 'package:vnt_app/system_tray_manager.dart';
@@ -261,7 +262,8 @@ Future<void> main(List<String> args) async {
         await windowManager.setMaximizable(false);
 
         if (isSilentStart) {
-          await appWindow.hide();
+          await windowManager.setSkipTaskbar(true);
+          await windowManager.hide();
         } else {
           await appWindow.show();
         }
@@ -312,7 +314,8 @@ Future<void> main(List<String> args) async {
         await dataPersistence.saveWindowPosition(placement.position);
 
         if (isSilentStart) {
-          await appWindow.hide();
+          await windowManager.setSkipTaskbar(true);
+          await windowManager.hide();
         } else {
           await appWindow.show();
           await windowManager.focus();
@@ -449,7 +452,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
     super.initState();
 
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
-      _systemTrayInitialization = initSystemTray();
+      _systemTrayInitialization = _initializeSystemTrayForStartup();
       // 设置窗口关闭拦截
       windowManager.setPreventClose(true);
       windowManager.addListener(this);
@@ -568,6 +571,32 @@ class _MainAppState extends State<MainApp> with WindowListener {
         VntAppCall.updateWidgetAndTile(vntManager.hasConnection());
       }
     });
+  }
+
+  Future<bool> _initializeSystemTrayForStartup() async {
+    final initialized = await initSystemTray();
+    final action = resolveSilentStartWindowAction(
+      silentStart: isSilentStart,
+      trayInitialized: initialized,
+    );
+    switch (action) {
+      case SilentStartWindowAction.showNormally:
+        break;
+      case SilentStartWindowAction.keepHidden:
+        await windowManager.setSkipTaskbar(true);
+        await windowManager.hide();
+        _writeBootTrace(
+            'silent start confirmed hidden after tray initialization');
+        break;
+      case SilentStartWindowAction.showTrayFailureFallback:
+        await windowManager.setSkipTaskbar(false);
+        await windowManager.show();
+        await windowManager.focus();
+        _writeBootTrace(
+            'silent start fallback shown because tray initialization failed');
+        break;
+    }
+    return initialized;
   }
 
   Future<void> _prepareForAppExit() async {
