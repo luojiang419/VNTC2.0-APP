@@ -8,7 +8,55 @@ enum ChatMessageContentType { text, image, video, file, voice }
 
 enum ChatMessageStatus { sending, sent, failed, missingAttachment }
 
+enum ChatAttachmentTransferPhase { preparing, uploading }
+
 enum ChatMainTab { hall, direct }
+
+class ChatAttachmentTransferProgress {
+  const ChatAttachmentTransferProgress({
+    required this.messageId,
+    required this.totalBytes,
+    required this.transferredBytes,
+    required this.bytesPerSecond,
+    required this.startedAtEpochMs,
+    required this.phase,
+  });
+
+  final String messageId;
+  final int totalBytes;
+  final int transferredBytes;
+  final int bytesPerSecond;
+  final int startedAtEpochMs;
+  final ChatAttachmentTransferPhase phase;
+
+  int get progressPercent {
+    if (totalBytes <= 0) {
+      return 0;
+    }
+    return ((transferredBytes * 100) / totalBytes).clamp(0, 100).round();
+  }
+
+  double get progress => progressPercent / 100;
+
+  bool get isActive =>
+      phase == ChatAttachmentTransferPhase.preparing ||
+      phase == ChatAttachmentTransferPhase.uploading;
+
+  ChatAttachmentTransferProgress copyWith({
+    int? transferredBytes,
+    int? bytesPerSecond,
+    ChatAttachmentTransferPhase? phase,
+  }) {
+    return ChatAttachmentTransferProgress(
+      messageId: messageId,
+      totalBytes: totalBytes,
+      transferredBytes: transferredBytes ?? this.transferredBytes,
+      bytesPerSecond: bytesPerSecond ?? this.bytesPerSecond,
+      startedAtEpochMs: startedAtEpochMs,
+      phase: phase ?? this.phase,
+    );
+  }
+}
 
 class ChatSendResult {
   const ChatSendResult({
@@ -919,20 +967,23 @@ class ChatTransportPacket {
     required this.type,
     this.message,
     this.syncRequest,
-    this.attachmentBase64,
+    this.replyPort,
+    this.transferOffset,
   });
 
   final String type;
   final ChatMessageRecord? message;
   final ChatSyncRequestPayload? syncRequest;
-  final String? attachmentBase64;
+  final int? replyPort;
+  final int? transferOffset;
 
   Map<String, dynamic> toJson() {
     return {
       'type': type,
       'message': message?.toTransportJson(),
       'syncRequest': syncRequest?.toJson(),
-      'attachmentBase64': attachmentBase64,
+      'replyPort': replyPort,
+      'transferOffset': transferOffset,
     };
   }
 
@@ -959,7 +1010,11 @@ class ChatTransportPacket {
                   ),
                 )
               : null),
-      attachmentBase64: map['attachmentBase64']?.toString(),
+      replyPort:
+          map['replyPort'] == null ? null : int.tryParse('${map['replyPort']}'),
+      transferOffset: map['transferOffset'] == null
+          ? null
+          : int.tryParse('${map['transferOffset']}'),
     );
   }
 

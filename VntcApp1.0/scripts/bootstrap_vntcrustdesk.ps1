@@ -114,9 +114,7 @@ function Resolve-ExecutablePath {
 }
 
 function Get-MsiInstallArguments {
-    param($ExistingEntry)
-
-    $arguments = @(
+    return @(
         '/i',
         (Quote-ProcessArgument -Value $MsiPath),
         '/qn',
@@ -124,15 +122,6 @@ function Get-MsiInstallArguments {
         '/l*v',
         (Quote-ProcessArgument -Value $installLog)
     )
-
-    if ($null -ne $ExistingEntry) {
-        $arguments += @(
-            'REINSTALL=ALL',
-            'REINSTALLMODE=amus'
-        )
-    }
-
-    return $arguments
 }
 
 function Get-MsiProperty {
@@ -392,7 +381,7 @@ if ($runtimePresent -and
 }
 
 if ($shouldInstallMsi) {
-    $installProcess = Invoke-MsiProcess -Arguments (Get-MsiInstallArguments -ExistingEntry $existingEntry)
+    $installProcess = Invoke-MsiProcess -Arguments (Get-MsiInstallArguments)
 
     if ($installProcess.ExitCode -notin @(0, 3010)) {
         throw "vntcrustdesk MSI install failed: $($installProcess.ExitCode)"
