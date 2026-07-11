@@ -326,10 +326,13 @@ async fn sync_online_client_list(
                 let client_list = response
                     .list
                     .into_iter()
-                    .map(|client| crate::protocol::control_message::ClientSimpleInfo {
-                        ip: client.ip.into(),
-                        online: client.online,
-                    })
+                    .map(
+                        |client| crate::protocol::control_message::ClientSimpleInfo {
+                            ip: client.ip.into(),
+                            name: client.name,
+                            online: client.online,
+                        },
+                    )
                     .collect();
                 server_info.replace_client_list_from_rpc(server_id, self_ip, client_list);
                 log::debug!(

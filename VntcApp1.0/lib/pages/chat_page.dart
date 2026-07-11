@@ -1028,79 +1028,105 @@ class _ChatPageState extends State<ChatPage>
         ? _manager.attachmentTransferProgressFor(message.id)
         : null;
 
-    return Align(
-      alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
-      child: ConstrainedBox(
-        constraints: BoxConstraints(maxWidth: context.w(560)),
-        child: Container(
-          margin: EdgeInsets.only(bottom: context.spacingSmall),
-          padding: EdgeInsets.all(context.spacingMedium),
-          decoration: BoxDecoration(
-            color: bubbleColor,
-            borderRadius: BorderRadius.circular(context.cardRadius),
-          ),
-          child: Column(
-            crossAxisAlignment:
-                isOutgoing ? CrossAxisAlignment.end : CrossAxisAlignment.start,
-            children: [
-              Text(
-                message.senderName,
-                style: TextStyle(
-                  fontSize: context.fontXSmall,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
-                ),
-              ),
-              SizedBox(height: context.spacingXXSmall),
-              _buildMessageContent(context, isDark, message, textColor),
-              if (transferProgress?.isActive == true) ...[
-                SizedBox(height: context.spacingSmall),
-                _buildAttachmentTransferProgress(
-                  context,
-                  isDark,
-                  transferProgress!,
-                ),
-              ],
-              SizedBox(height: context.spacingXXSmall),
-              Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    _formatTime(message.sentAtEpochMs),
-                    style: TextStyle(
-                      fontSize: context.fontXSmall,
-                      color: isDark
-                          ? AppTheme.darkTextSecondary
-                          : AppTheme.lightTextSecondary,
-                    ),
+    return GestureDetector(
+      behavior: HitTestBehavior.deferToChild,
+      onSecondaryTapDown: (details) => unawaited(
+        _showMessageMenu(context, details.globalPosition, message),
+      ),
+      child: Align(
+        alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
+        child: ConstrainedBox(
+          constraints: BoxConstraints(maxWidth: context.w(560)),
+          child: Container(
+            margin: EdgeInsets.only(bottom: context.spacingSmall),
+            padding: EdgeInsets.all(context.spacingMedium),
+            decoration: BoxDecoration(
+              color: bubbleColor,
+              borderRadius: BorderRadius.circular(context.cardRadius),
+            ),
+            child: Column(
+              crossAxisAlignment: isOutgoing
+                  ? CrossAxisAlignment.end
+                  : CrossAxisAlignment.start,
+              children: [
+                Text(
+                  message.senderName,
+                  style: TextStyle(
+                    fontSize: context.fontXSmall,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
                   ),
-                  if (message.status == ChatMessageStatus.failed) ...[
-                    SizedBox(width: context.spacingXSmall),
+                ),
+                SizedBox(height: context.spacingXXSmall),
+                _buildMessageContent(context, isDark, message, textColor),
+                if (transferProgress?.isActive == true) ...[
+                  SizedBox(height: context.spacingSmall),
+                  _buildAttachmentTransferProgress(
+                    context,
+                    isDark,
+                    transferProgress!,
+                  ),
+                ],
+                SizedBox(height: context.spacingXXSmall),
+                Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    if (message.hasAttachment) ...[
+                      IconButton(
+                        onPressed: message.attachment?.payloadAvailable == true
+                            ? () => _saveAttachmentAs(message.attachment!)
+                            : null,
+                        tooltip: message.attachment?.payloadAvailable == true
+                            ? '下载附件'
+                            : '附件内容不可用',
+                        icon: const Icon(Icons.download_outlined),
+                        iconSize: context.iconXSmall,
+                        padding: EdgeInsets.zero,
+                        visualDensity: VisualDensity.compact,
+                        constraints: const BoxConstraints.tightFor(
+                          width: 28,
+                          height: 28,
+                        ),
+                      ),
+                      SizedBox(width: context.spacingXXSmall),
+                    ],
                     Text(
-                      '发送失败',
+                      _formatTime(message.sentAtEpochMs),
                       style: TextStyle(
                         fontSize: context.fontXSmall,
-                        color: Colors.red,
-                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary,
                       ),
                     ),
-                    SizedBox(width: context.spacingXSmall),
-                    InkWell(
-                      onTap: () => _retryMessage(message),
-                      child: Text(
-                        '重发',
+                    if (message.status == ChatMessageStatus.failed) ...[
+                      SizedBox(width: context.spacingXSmall),
+                      Text(
+                        '发送失败',
                         style: TextStyle(
                           fontSize: context.fontXSmall,
-                          color: Theme.of(context).primaryColor,
+                          color: Colors.red,
                           fontWeight: FontWeight.w700,
                         ),
                       ),
-                    ),
+                      SizedBox(width: context.spacingXSmall),
+                      InkWell(
+                        onTap: () => _retryMessage(message),
+                        child: Text(
+                          '重发',
+                          style: TextStyle(
+                            fontSize: context.fontXSmall,
+                            color: Theme.of(context).primaryColor,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ),
+                    ],
                   ],
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
         ),
       ),
@@ -1606,6 +1632,75 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
+  Future<void> _showMessageMenu(
+    BuildContext context,
+    Offset position,
+    ChatMessageRecord message,
+  ) async {
+    final value = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: const [
+        PopupMenuItem<String>(
+          value: 'delete',
+          child: Row(
+            children: [
+              Icon(Icons.delete_outline, color: Colors.red),
+              SizedBox(width: 8),
+              Text('删除消息'),
+            ],
+          ),
+        ),
+      ],
+    );
+    if (value != 'delete' || !mounted) {
+      return;
+    }
+
+    final confirmed = await showDialog<bool>(
+          context: this.context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('删除消息'),
+            content: const Text('确定删除这条消息吗？删除后无法恢复。'),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('删除'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    try {
+      final deleted = await _manager.deleteMessage(message);
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        this.context,
+        deleted ? '消息已删除' : '消息不存在或已被删除',
+        isSuccess: deleted,
+      );
+    } catch (error) {
+      if (mounted) {
+        showTopToast(this.context, '删除消息失败: $error', isSuccess: false);
+      }
+    }
+  }
+
   Future<void> _showCreateRoomDialog(String hallId) async {
     final controller = TextEditingController();
     try {
@@ -1881,6 +1976,44 @@ class _ChatPageState extends State<ChatPage>
         return;
       }
       showTopToast(context, '打开附件失败: $error', isSuccess: false);
+    }
+  }
+
+  Future<void> _saveAttachmentAs(ChatAttachmentRecord attachment) async {
+    if (!attachment.payloadAvailable) {
+      showTopToast(context, '附件内容不可用，无法下载', isSuccess: false);
+      return;
+    }
+
+    try {
+      final sourcePath = await _manager.resolveAttachmentPath(attachment);
+      final sourceFile = File(sourcePath);
+      if (!await sourceFile.exists()) {
+        throw StateError('附件缓存文件不存在');
+      }
+
+      final savePath = await FilePicker.platform.saveFile(
+        dialogTitle: '保存附件',
+        fileName: attachment.fileName,
+        lockParentWindow: true,
+      );
+      if (savePath == null || savePath.trim().isEmpty) {
+        return;
+      }
+
+      if (!path.equals(
+        path.normalize(path.absolute(sourcePath)),
+        path.normalize(path.absolute(savePath)),
+      )) {
+        await sourceFile.copy(savePath);
+      }
+      if (mounted) {
+        showTopToast(context, '附件已保存到 $savePath', isSuccess: true);
+      }
+    } catch (error) {
+      if (mounted) {
+        showTopToast(context, '保存附件失败: $error', isSuccess: false);
+      }
     }
   }
 
