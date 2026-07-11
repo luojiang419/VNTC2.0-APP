@@ -44,6 +44,7 @@ class ChatTransportService {
   ChatAttachmentStreamHandler? _attachmentStreamHandler;
   final Map<String, _AttachmentAcknowledgementWaiter>
       _attachmentAcknowledgements = {};
+  final Map<String, Future<void>> _attachmentTransfers = {};
 
   bool get isRunning => _server != null;
   int? get listeningPort => _server?.port;
@@ -135,10 +136,39 @@ class ChatTransportService {
     }
     final acknowledgementKey =
         _attachmentAcknowledgementKey(targetIp, messageId);
-    final acknowledgement = _AttachmentAcknowledgementWaiter();
-    if (_attachmentAcknowledgements.containsKey(acknowledgementKey)) {
-      throw StateError('附件流确认已在等待中');
+    final existingTransfer = _attachmentTransfers[acknowledgementKey];
+    if (existingTransfer != null) {
+      return existingTransfer;
     }
+    final transfer = _sendAttachmentStreamOnce(
+      targetIp: targetIp,
+      packet: packet,
+      sourceFactory: sourceFactory,
+      totalBytes: totalBytes,
+      port: port,
+      onProgress: onProgress,
+      acknowledgementKey: acknowledgementKey,
+    );
+    _attachmentTransfers[acknowledgementKey] = transfer;
+    try {
+      await transfer;
+    } finally {
+      if (_attachmentTransfers[acknowledgementKey] == transfer) {
+        _attachmentTransfers.remove(acknowledgementKey);
+      }
+    }
+  }
+
+  Future<void> _sendAttachmentStreamOnce({
+    required String targetIp,
+    required ChatTransportPacket packet,
+    required Stream<List<int>> Function(int startOffset) sourceFactory,
+    required int totalBytes,
+    required String acknowledgementKey,
+    int? port,
+    ChatPacketProgressCallback? onProgress,
+  }) async {
+    final acknowledgement = _AttachmentAcknowledgementWaiter();
     _attachmentAcknowledgements[acknowledgementKey] = acknowledgement;
     await ChatLog.write(
       '发送二进制附件流 target=$targetIp port=${port ?? ChatConstants.transportPort} bytes=$totalBytes',
@@ -336,10 +366,11 @@ class ChatTransportService {
           }
         } catch (error) {
           await attachmentSink?.abort();
-          await socket.close();
           await ChatLog.write(
             '聊天报文解码失败 remote=$remoteEndpoint error=$error bytes=${bytes.length}',
           );
+        } finally {
+          await socket.close();
         }
       },
       onError: (error) async {

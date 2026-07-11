@@ -16,6 +16,7 @@ import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/update/update_dialog.dart';
+import 'package:vnt_app/windows_startup_manager.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -38,6 +39,7 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final DataPersistence _dataPersistence = DataPersistence();
+  final WindowsStartupManager _windowsStartupManager = WindowsStartupManager();
 
   bool _autoStart = false;
   bool _silentStart = false;
@@ -56,6 +58,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Future<void> _loadData() async {
     _autoStart = await _dataPersistence.loadAutoStart() ?? false;
+    _silentStart = await _dataPersistence.loadSilentStart() ?? false;
+    if (Platform.isWindows) {
+      _autoStart = await _windowsStartupManager.isEnabled(
+        Platform.resolvedExecutable,
+      );
+      await _dataPersistence.saveAutoStart(_autoStart);
+    }
     // Linux 以实际文件存在为准（每次都检查，防止用户手动删除）
     if (Platform.isLinux) {
       final home = Platform.environment['SUDO_USER'] != null
@@ -72,7 +81,6 @@ class _SettingsPageState extends State<SettingsPage> {
       }
     }
     _autoConnect = await _dataPersistence.loadAutoConnect() ?? false;
-    _silentStart = await _dataPersistence.loadSilentStart() ?? false;
     _closeBehavior = await _dataPersistence.loadWindowCloseBehavior();
     _defaultKey = await _dataPersistence.loadDefaultKey() ?? '';
 
@@ -95,62 +103,21 @@ class _SettingsPageState extends State<SettingsPage> {
     }
   }
 
-  Future<void> _setStartupWithAdmin(bool enable,
+  Future<bool> _setWindowsAutoStart(bool enable,
       {bool silentStart = false}) async {
     if (!Platform.isWindows) {
-      return;
+      return false;
     }
-    final String executablePath = Platform.resolvedExecutable;
-    const String taskName = "VNTAppStartup";
-
     try {
-      final String username = Platform.environment['USERNAME'] ?? 'SYSTEM';
-
-      if (enable) {
-        final argClause = silentStart ? " -Argument '--silent'" : '';
-        final psScript = '''
-\$action = New-ScheduledTaskAction -Execute '$executablePath'$argClause
-\$trigger = New-ScheduledTaskTrigger -AtLogOn
-\$principal = New-ScheduledTaskPrincipal -UserId '$username' -RunLevel Highest
-\$settings = New-ScheduledTaskSettingsSet -DisallowStartIfOnBatteries \$false
-Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger -Principal \$principal -Settings \$settings -Force
-''';
-
-        final result = await Process.run('powershell', ['-Command', psScript],
-            runInShell: true);
-
-        if (result.exitCode == 0) {
-          debugPrint("Scheduled task created successfully.");
-        } else {
-          debugPrint("Error creating scheduled task: ${result.stderr}");
-        }
-      } else {
-        List<String> args = [
-          '/DELETE',
-          '/TN',
-          taskName,
-          '/F',
-        ];
-
-        final result =
-            await Process.run('SCHTASKS.EXE', args, runInShell: true);
-
-        if (result.exitCode == 0) {
-          debugPrint("Scheduled task deleted successfully.");
-        } else {
-          debugPrint("Error deleting scheduled task: ${result.stderr}");
-        }
-      }
+      await _windowsStartupManager.setEnabled(
+        enabled: enable,
+        executablePath: Platform.resolvedExecutable,
+        silentStart: silentStart,
+      );
+      return true;
     } catch (e) {
       debugPrint('Exception in setting up startup: $e');
-    }
-  }
-
-  void _openTaskScheduler() async {
-    try {
-      await Process.run('taskschd.msc', [], runInShell: true);
-    } catch (e) {
-      debugPrint('Failed to open Task Scheduler: $e');
+      return false;
     }
   }
 
@@ -661,33 +628,30 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                       ? '写入 ~/.config/autostart 实现开机自启'
                       : '下次开机时自动启动应用',
               trailing: Platform.isWindows
-                  ? Row(
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Switch(
-                          value: _autoStart,
-                          onChanged: (value) async {
-                            await _setStartupWithAdmin(value,
-                                silentStart: _silentStart);
-                            await _dataPersistence.saveAutoStart(value);
-                            setState(() {
-                              _autoStart = value;
-                            });
-                          },
-                          activeThumbColor: Theme.of(context).primaryColor,
-                        ),
-                        IconButton(
-                          icon: Icon(
-                            Icons.edit_calendar,
-                            size: context.iconSmall,
-                            color: isDark
-                                ? AppTheme.darkTextSecondary
-                                : AppTheme.lightTextSecondary,
-                          ),
-                          onPressed: _openTaskScheduler,
-                          tooltip: '编辑任务计划',
-                        ),
-                      ],
+                  ? Switch(
+                      value: _autoStart,
+                      onChanged: (value) async {
+                        final succeeded = await _setWindowsAutoStart(
+                          value,
+                          silentStart: _silentStart,
+                        );
+                        if (!succeeded) {
+                          if (mounted) {
+                            showTopToast(context, '开机自启设置失败', isSuccess: false);
+                          }
+                          return;
+                        }
+                        await _dataPersistence.saveAutoStart(value);
+                        if (mounted) {
+                          setState(() => _autoStart = value);
+                          showTopToast(
+                            context,
+                            value ? '开机自启已启用' : '开机自启已关闭',
+                            isSuccess: true,
+                          );
+                        }
+                      },
+                      activeThumbColor: Theme.of(context).primaryColor,
                     )
                   : Switch(
                       value: _autoStart,
@@ -727,7 +691,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                     // 如果开机自启已开启，重新创建计划任务以更新 --silent 参数
                     if (_autoStart) {
                       if (Platform.isWindows) {
-                        await _setStartupWithAdmin(true, silentStart: value);
+                        await _setWindowsAutoStart(true, silentStart: value);
                       } else if (Platform.isLinux) {
                         await _setLinuxAutoStart(true);
                       }
@@ -1277,7 +1241,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             onPressed: () async {
               Navigator.pop(dialogContext);
               await _dataPersistence.clear();
-              await _setStartupWithAdmin(false);
+              await _setWindowsAutoStart(false);
               if (mounted) {
                 showTopToast(context, '数据已清除', isSuccess: true);
                 _loadData();
