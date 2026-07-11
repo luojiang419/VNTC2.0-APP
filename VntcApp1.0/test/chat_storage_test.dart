@@ -316,6 +316,127 @@ void main() {
     );
   });
 
+  test('删除消息会同步删除附件并重算会话状态', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    const conversationId = 'dm:hall:test:10.0.0.2';
+    await storage.upsertConversation(
+      const ChatConversation(
+        id: conversationId,
+        type: ChatConversationType.direct,
+        hallId: 'hall:test',
+        title: '设备 B',
+        unreadCount: 0,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 0,
+        updatedAtEpochMs: 0,
+        metadataJson: '{}',
+      ),
+    );
+    const firstMessage = ChatMessageRecord(
+      id: 'message-first',
+      conversationId: conversationId,
+      hallId: 'hall:test',
+      conversationType: ChatConversationType.direct,
+      senderVirtualIp: '10.0.0.2',
+      senderName: '设备 B',
+      senderSeq: 1,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.text,
+      status: ChatMessageStatus.sent,
+      text: '第一条',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 1000,
+      createdAtEpochMs: 1000,
+      metadataJson: '{}',
+    );
+    const attachment = ChatAttachmentRecord(
+      id: 'attachment-second',
+      messageId: 'message-second',
+      fileName: 'sample.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      relativePath: 'message-second.txt',
+      autoSyncEligible: true,
+      payloadAvailable: true,
+      needsManualResend: false,
+      createdAtEpochMs: 2000,
+    );
+    const secondMessage = ChatMessageRecord(
+      id: 'message-second',
+      conversationId: conversationId,
+      hallId: 'hall:test',
+      conversationType: ChatConversationType.direct,
+      senderVirtualIp: '10.0.0.2',
+      senderName: '设备 B',
+      senderSeq: 2,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.file,
+      status: ChatMessageStatus.sent,
+      text: 'sample.txt',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 2000,
+      createdAtEpochMs: 2000,
+      metadataJson: '{}',
+      attachmentId: 'attachment-second',
+      attachment: attachment,
+    );
+    await storage.upsertMessage(firstMessage, incrementUnread: true);
+    await storage.upsertMessage(
+      secondMessage,
+      attachment: attachment,
+      incrementUnread: true,
+    );
+    await storage.writeAttachmentBytes(attachment.relativePath, [1, 2, 3, 4]);
+
+    expect(await storage.deleteMessage(secondMessage.id), isTrue);
+    final remainingMessages = await storage.loadMessages(conversationId);
+    expect(remainingMessages, hasLength(1));
+    expect(remainingMessages.single.id, firstMessage.id);
+    expect(remainingMessages.single.text, firstMessage.text);
+    expect(
+      await File(
+        await storage.resolveAttachmentPath(attachment.relativePath),
+      ).exists(),
+      isFalse,
+    );
+    final conversation = await storage.getConversation(conversationId);
+    expect(conversation?.unreadCount, 1);
+    expect(conversation?.lastMessageAtEpochMs, firstMessage.sentAtEpochMs);
+    expect(await storage.deleteMessage(secondMessage.id), isFalse);
+
+    await storage.close();
+    final reopened = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(reopened);
+    await reopened.init();
+    await reopened.upsertMessage(secondMessage, attachment: attachment);
+
+    final afterRemoteReplay = await reopened.loadMessages(conversationId);
+    expect(afterRemoteReplay.map((message) => message.id), [firstMessage.id]);
+    expect(
+      await reopened.buildSummaryForConversations(
+        conversationIds: const [conversationId],
+      ),
+      {
+        conversationId: {'10.0.0.2': 2},
+      },
+    );
+    expect(
+      await reopened.nextSenderSequence(conversationId, '10.0.0.2'),
+      3,
+    );
+  });
+
   group('默认聊天室存储目录', () {
     test('macOS 类平台使用应用支持目录，避免写入根目录 /config', () {
       final resolved =

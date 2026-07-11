@@ -48,7 +48,7 @@ class ChatStorage {
 
     _db = await openDatabase(
       dbPath,
-      version: 1,
+      version: 2,
       onCreate: (db, version) async {
         await db.execute('''
 CREATE TABLE conversations (
@@ -127,6 +127,7 @@ CREATE TABLE sync_checkpoints (
   updated_at INTEGER NOT NULL DEFAULT 0
 )
 ''');
+        await _createDeletedMessagesTable(db);
         await db.execute(
           'CREATE INDEX idx_messages_conversation_sent_at ON messages(conversation_id, sent_at)',
         );
@@ -134,8 +135,26 @@ CREATE TABLE sync_checkpoints (
           'CREATE INDEX idx_messages_hall_sender_seq ON messages(hall_id, sender_virtual_ip, sender_seq)',
         );
       },
+      onUpgrade: (db, oldVersion, newVersion) async {
+        if (oldVersion < 2) {
+          await _createDeletedMessagesTable(db);
+        }
+      },
     );
     return _db!;
+  }
+
+  Future<void> _createDeletedMessagesTable(DatabaseExecutor db) {
+    return db.execute('''
+CREATE TABLE IF NOT EXISTS deleted_messages (
+  message_id TEXT PRIMARY KEY,
+  conversation_id TEXT NOT NULL,
+  sender_virtual_ip TEXT NOT NULL,
+  sender_seq INTEGER NOT NULL,
+  deleted_at INTEGER NOT NULL,
+  UNIQUE(conversation_id, sender_virtual_ip, sender_seq)
+)
+''');
   }
 
   Future<String> _resolveDefaultDatabasePath() async {
@@ -400,6 +419,107 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
         .toList(growable: false);
   }
 
+  Future<bool> deleteMessage(String messageId) async {
+    final db = await _ensureDatabase();
+    final result = await db.transaction<(bool, String?)>((txn) async {
+      final messageRows = await txn.query(
+        'messages',
+        columns: const [
+          'conversation_id',
+          'sender_virtual_ip',
+          'sender_seq',
+        ],
+        where: 'id = ?',
+        whereArgs: [messageId],
+        limit: 1,
+      );
+      if (messageRows.isEmpty) {
+        return (false, null);
+      }
+
+      final conversationId =
+          (messageRows.first['conversation_id'] ?? '').toString();
+      final senderVirtualIp =
+          (messageRows.first['sender_virtual_ip'] ?? '').toString();
+      final senderSeq = int.tryParse('${messageRows.first['sender_seq']}') ?? 0;
+      final attachmentRows = await txn.query(
+        'attachments',
+        columns: const ['relative_path'],
+        where: 'message_id = ?',
+        whereArgs: [messageId],
+        limit: 1,
+      );
+      final relativePath = attachmentRows.isEmpty
+          ? null
+          : attachmentRows.first['relative_path']?.toString();
+
+      await txn.insert(
+        'deleted_messages',
+        {
+          'message_id': messageId,
+          'conversation_id': conversationId,
+          'sender_virtual_ip': senderVirtualIp,
+          'sender_seq': senderSeq,
+          'deleted_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        conflictAlgorithm: ConflictAlgorithm.ignore,
+      );
+
+      await txn.delete(
+        'attachments',
+        where: 'message_id = ?',
+        whereArgs: [messageId],
+      );
+      await txn.delete(
+        'messages',
+        where: 'id = ?',
+        whereArgs: [messageId],
+      );
+
+      final unreadRows = await txn.rawQuery('''
+SELECT COUNT(*) AS total
+FROM messages
+WHERE conversation_id = ? AND direction = ? AND is_read = 0
+''', [
+        conversationId,
+        chatEnumName(ChatMessageDirection.incoming),
+      ]);
+      final latestRows = await txn.rawQuery('''
+SELECT MAX(sent_at) AS latest
+FROM messages
+WHERE conversation_id = ?
+''', [conversationId]);
+      await txn.update(
+        'conversations',
+        {
+          'unread_count': unreadRows.isEmpty
+              ? 0
+              : int.tryParse('${unreadRows.first['total']}') ?? 0,
+          'last_message_at': latestRows.isEmpty
+              ? 0
+              : int.tryParse('${latestRows.first['latest']}') ?? 0,
+          'updated_at': DateTime.now().millisecondsSinceEpoch,
+        },
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+      return (true, relativePath);
+    });
+
+    final relativePath = result.$2?.trim() ?? '';
+    if (relativePath.isNotEmpty) {
+      try {
+        final attachmentFile = File(await resolveAttachmentPath(relativePath));
+        if (await attachmentFile.exists()) {
+          await attachmentFile.delete();
+        }
+      } on FileSystemException {
+        // 消息已经删除，附件缓存被占用时留待后续缓存清理。
+      }
+    }
+    return result.$1;
+  }
+
   Future<Map<String, ChatAttachmentRecord>> _loadAttachmentsByIds(
     List<String> ids,
   ) async {
@@ -427,6 +547,24 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
   }) async {
     final db = await _ensureDatabase();
     await db.transaction((txn) async {
+      final deletedMessage = await txn.query(
+        'deleted_messages',
+        columns: const ['message_id'],
+        where: '''
+message_id = ? OR
+(conversation_id = ? AND sender_virtual_ip = ? AND sender_seq = ?)
+''',
+        whereArgs: [
+          message.id,
+          message.conversationId,
+          message.senderVirtualIp,
+          message.senderSeq,
+        ],
+        limit: 1,
+      );
+      if (deletedMessage.isNotEmpty) {
+        return;
+      }
       final existingMessage = await txn.query(
         'messages',
         where: 'id = ?',
@@ -538,9 +676,14 @@ WHERE type = ?
     final db = await _ensureDatabase();
     final rows = await db.rawQuery('''
 SELECT MAX(sender_seq) AS max_seq
-FROM messages
-WHERE conversation_id = ? AND sender_virtual_ip = ?
-''', [conversationId, senderVirtualIp]);
+FROM (
+  SELECT sender_seq FROM messages
+  WHERE conversation_id = ? AND sender_virtual_ip = ?
+  UNION ALL
+  SELECT sender_seq FROM deleted_messages
+  WHERE conversation_id = ? AND sender_virtual_ip = ?
+)
+''', [conversationId, senderVirtualIp, conversationId, senderVirtualIp]);
     final current =
         rows.isEmpty ? 0 : int.tryParse('${rows.first['max_seq']}') ?? 0;
     return current + 1;
@@ -554,10 +697,15 @@ WHERE conversation_id = ? AND sender_virtual_ip = ?
     for (final conversationId in conversationIds.toSet()) {
       final rows = await db.rawQuery('''
 SELECT sender_virtual_ip, MAX(sender_seq) AS max_seq
-FROM messages
-WHERE conversation_id = ?
+FROM (
+  SELECT sender_virtual_ip, sender_seq FROM messages
+  WHERE conversation_id = ?
+  UNION ALL
+  SELECT sender_virtual_ip, sender_seq FROM deleted_messages
+  WHERE conversation_id = ?
+)
 GROUP BY sender_virtual_ip
-''', [conversationId]);
+''', [conversationId, conversationId]);
       final senderMap = <String, int>{};
       for (final row in rows) {
         senderMap[(row['sender_virtual_ip'] ?? '').toString()] =

@@ -35,6 +35,12 @@ bool HasNonEmptyArgument(const std::vector<std::string>& arguments,
   });
 }
 
+bool HasArgument(const std::vector<std::string>& arguments,
+                 const std::string& expected) {
+  return std::find(arguments.begin(), arguments.end(), expected) !=
+         arguments.end();
+}
+
 bool IsCompleteUpdateSession(const std::vector<std::string>& arguments) {
   constexpr std::array<const char*, 8> required_prefixes = {
       "--run-update-session=", "--update-token=",       "--update-version=",
@@ -68,6 +74,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   std::vector<std::string> command_line_arguments =
       GetCommandLineArguments();
+  const bool start_hidden =
+      HasArgument(command_line_arguments, "--silent");
   HANDLE single_instance_mutex = nullptr;
   if (!IsCompleteUpdateSession(command_line_arguments)) {
     ::SetLastError(ERROR_SUCCESS);
@@ -77,7 +85,9 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
       return EXIT_FAILURE;
     }
     if (::GetLastError() == ERROR_ALREADY_EXISTS) {
-      NotifyPrimaryInstance();
+      if (!start_hidden) {
+        NotifyPrimaryInstance();
+      }
       ::CloseHandle(single_instance_mutex);
       return EXIT_SUCCESS;
     }
@@ -91,7 +101,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   project.set_dart_entrypoint_arguments(std::move(command_line_arguments));
 
-  FlutterWindow window(project);
+  FlutterWindow window(project, start_hidden);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
   if (!window.Create(VNT_APP_WINDOW_TITLE, origin, size)) {

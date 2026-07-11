@@ -1527,12 +1527,25 @@ class _DashboardPageState extends State<DashboardPage> {
     final primaryColor = Theme.of(context).primaryColor;
     // 获取所有设备的流量数据
     List<(String, BigInt, BigInt)> deviceTrafficList = [];
+    final deviceNamesByIp = <String, String>{};
 
     final allVnts = vntManager.map;
     for (var entry in allVnts.entries) {
       final vntBox = entry.value;
       if (!vntBox.isClosed()) {
         deviceTrafficList = vntBox.vntApi.streamAll();
+        for (final device in vntBox.peerDeviceList()) {
+          final name = device.name.trim();
+          if (name.isNotEmpty) {
+            deviceNamesByIp[device.virtualIp] = name;
+          }
+        }
+        final currentDevice = vntBox.currentDevice();
+        final currentIp = (currentDevice['virtualIp'] as String? ?? '').trim();
+        final currentName = vntBox.getNetConfig()?.deviceName.trim() ?? '';
+        if (currentIp.isNotEmpty && currentName.isNotEmpty) {
+          deviceNamesByIp[currentIp] = currentName;
+        }
         break; // 只取第一个连接的数据
       }
     }
@@ -1547,6 +1560,7 @@ class _DashboardPageState extends State<DashboardPage> {
       totalBytes += deviceTotal;
 
       return {
+        'name': deviceNamesByIp[ip] ?? ip,
         'ip': ip,
         'upBytes': upBytes,
         'downBytes': downBytes,
@@ -1917,14 +1931,14 @@ class _DashboardPageState extends State<DashboardPage> {
                                       ),
                                     ),
                                     const SizedBox(width: 12),
-                                    // IP地址
+                                    // 设备名称和IP地址
                                     Expanded(
                                       child: Column(
                                         crossAxisAlignment:
                                             CrossAxisAlignment.start,
                                         children: [
                                           Text(
-                                            device['ip'],
+                                            device['name'],
                                             style: TextStyle(
                                               fontSize: context.fontBody,
                                               fontWeight: FontWeight.w600,
@@ -4548,8 +4562,39 @@ class _DashboardPageState extends State<DashboardPage> {
     for (var entry in allVnts.entries) {
       final vntBox = entry.value;
       if (!vntBox.isClosed()) {
+        final config = vntBox.getNetConfig();
+        final currentDevice = vntBox.currentDevice();
+        final currentVirtualIp =
+            (currentDevice['virtualIp'] as String? ?? '').trim();
+        if (currentVirtualIp.isNotEmpty) {
+          final isOnline =
+              _isDeviceOnline(currentDevice['status'] as String? ?? 'Online');
+          if (isOnline) {
+            onlineCount++;
+          } else {
+            offlineCount++;
+          }
+
+          final configuredName = config?.deviceName.trim() ?? '';
+          deviceList.add({
+            'name':
+                configuredName.isNotEmpty ? configuredName : currentVirtualIp,
+            'ip': currentVirtualIp,
+            'status': currentDevice['status'] ?? '',
+            'isOnline': isOnline,
+            'isSelf': true,
+            'p2pRelay': '',
+            'rt': '',
+            'rtValue': 0,
+            'natType': currentDevice['natType'] ?? '',
+          });
+        }
+
         final devices = vntBox.peerDeviceList();
         for (var device in devices) {
+          if (device.virtualIp == currentVirtualIp) {
+            continue;
+          }
           bool isOnline = _isDeviceOnline(device.status);
           if (isOnline) {
             onlineCount++;
@@ -4580,6 +4625,7 @@ class _DashboardPageState extends State<DashboardPage> {
             'ip': device.virtualIp,
             'status': device.status,
             'isOnline': isOnline,
+            'isSelf': false,
             'p2pRelay': p2pRelay,
             'rt': rt,
             'rtValue': rtValue,
@@ -4593,6 +4639,8 @@ class _DashboardPageState extends State<DashboardPage> {
     deviceList.sort((a, b) {
       if (a['isOnline'] && !b['isOnline']) return -1;
       if (!a['isOnline'] && b['isOnline']) return 1;
+      if (a['isSelf'] && !b['isSelf']) return -1;
+      if (!a['isSelf'] && b['isSelf']) return 1;
       // 按IP地址排序
       return _compareIpAddresses(a['ip'], b['ip']);
     });
@@ -4750,6 +4798,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               int index = entry.key;
                               Map<String, dynamic> device = entry.value;
                               bool isOnline = device['isOnline'];
+                              bool isSelf = device['isSelf'];
 
                               // 如果是第一个离线设备，显示离线设备标题
                               bool showOfflineTitle = false;
@@ -4835,18 +4884,58 @@ class _DashboardPageState extends State<DashboardPage> {
                                             ),
                                             const SizedBox(width: 8),
                                             Expanded(
-                                              child: Text(
-                                                device['name'].isNotEmpty
-                                                    ? device['name']
-                                                    : '未命名设备',
-                                                style: TextStyle(
-                                                  fontSize: context.fontMedium,
-                                                  fontWeight: FontWeight.w600,
-                                                  color: isDark
-                                                      ? Colors.white
-                                                      : Colors.black87,
-                                                ),
-                                                overflow: TextOverflow.ellipsis,
+                                              child: Row(
+                                                children: [
+                                                  Flexible(
+                                                    child: Text(
+                                                      device['name'].isNotEmpty
+                                                          ? device['name']
+                                                          : '未命名设备',
+                                                      style: TextStyle(
+                                                        fontSize:
+                                                            context.fontMedium,
+                                                        fontWeight:
+                                                            FontWeight.w600,
+                                                        color: isDark
+                                                            ? Colors.white
+                                                            : Colors.black87,
+                                                      ),
+                                                      overflow:
+                                                          TextOverflow.ellipsis,
+                                                    ),
+                                                  ),
+                                                  if (isSelf) ...[
+                                                    const SizedBox(width: 8),
+                                                    Container(
+                                                      padding:
+                                                          EdgeInsets.symmetric(
+                                                        horizontal: context
+                                                            .spacingXSmall,
+                                                        vertical: context
+                                                                .spacingXSmall /
+                                                            4,
+                                                      ),
+                                                      decoration: BoxDecoration(
+                                                        color: primaryColor
+                                                            .withValues(
+                                                                alpha: 0.18),
+                                                        borderRadius:
+                                                            BorderRadius
+                                                                .circular(6),
+                                                      ),
+                                                      child: Text(
+                                                        '自己',
+                                                        style: TextStyle(
+                                                          fontSize: context
+                                                              .fontXSmall,
+                                                          fontWeight:
+                                                              FontWeight.bold,
+                                                          color: primaryColor,
+                                                        ),
+                                                      ),
+                                                    ),
+                                                  ],
+                                                ],
                                               ),
                                             ),
                                             Container(
