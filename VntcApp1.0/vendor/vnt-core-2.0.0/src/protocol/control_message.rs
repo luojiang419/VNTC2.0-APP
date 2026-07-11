@@ -235,12 +235,14 @@ impl SelectiveBroadcast {
 #[derive(Debug, Clone)]
 pub struct ClientSimpleInfo {
     pub ip: Ipv4Addr,
+    pub name: String,
     pub online: bool,
 }
 impl ClientSimpleInfo {
     pub fn from(msg: proto::ClientSimpleInfo) -> anyhow::Result<Self> {
         Ok(Self {
             ip: msg.ip.into(),
+            name: String::new(),
             online: msg.online,
         })
     }

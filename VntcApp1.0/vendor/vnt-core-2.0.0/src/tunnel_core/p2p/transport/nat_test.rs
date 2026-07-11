@@ -36,10 +36,8 @@ pub async fn my_nat_info(app_context: AppState, socket_manager: SocketManager) {
     loop {
         tokio::time::sleep(NETWORK_CHANGE_POLL_INTERVAL).await;
         let next_fingerprint = local_interface_fingerprint(app_context.network.network().as_ref());
-        let network_changed = should_reprobe_for_network_change(
-            last_fingerprint.as_ref(),
-            next_fingerprint.as_ref(),
-        );
+        let network_changed =
+            should_reprobe_for_network_change(last_fingerprint.as_ref(), next_fingerprint.as_ref());
         let periodic_refresh_due = last_probe.elapsed() >= NAT_INFO_REFRESH_INTERVAL;
         if network_changed || periodic_refresh_due {
             if network_changed {
@@ -526,7 +524,10 @@ mod tests {
         let second = LocalInterfaceFingerprint::new(vec![ethernet, wifi], vec![ipv6, ipv6]);
 
         assert_eq!(first, second);
-        assert!(!should_reprobe_for_network_change(Some(&first), Some(&second)));
+        assert!(!should_reprobe_for_network_change(
+            Some(&first),
+            Some(&second)
+        ));
     }
 
     #[test]
@@ -534,7 +535,10 @@ mod tests {
         let previous = LocalInterfaceFingerprint::new(vec![Ipv4Addr::new(192, 168, 1, 20)], vec![]);
         let current = LocalInterfaceFingerprint::new(vec![Ipv4Addr::new(10, 0, 0, 20)], vec![]);
 
-        assert!(should_reprobe_for_network_change(Some(&previous), Some(&current)));
+        assert!(should_reprobe_for_network_change(
+            Some(&previous),
+            Some(&current)
+        ));
         assert!(!should_reprobe_for_network_change(Some(&previous), None));
         assert_eq!(NAT_INFO_REFRESH_INTERVAL, Duration::from_secs(60 * 30));
     }

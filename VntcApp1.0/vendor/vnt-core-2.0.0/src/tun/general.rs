@@ -150,7 +150,8 @@ fn create_tun(config: DeviceConfig) -> anyhow::Result<AsyncDevice> {
         let mut builder = DeviceBuilder::new();
         #[cfg(windows)]
         {
-            let tun_name = managed_windows_tun_name(config.tun_name.as_deref().unwrap_or("default"));
+            let tun_name =
+                managed_windows_tun_name(config.tun_name.as_deref().unwrap_or("default"));
             cleanup_inactive_managed_windows_tuns(&tun_name);
             builder = builder.name(tun_name);
         }
@@ -188,7 +189,14 @@ fn managed_windows_tun_name(configured_name: &str) -> String {
         .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
         .take(48)
         .collect();
-    format!("{MANAGED_WINDOWS_TUN_PREFIX}{}", if suffix.is_empty() { "default" } else { &suffix })
+    format!(
+        "{MANAGED_WINDOWS_TUN_PREFIX}{}",
+        if suffix.is_empty() {
+            "default"
+        } else {
+            &suffix
+        }
+    )
 }
 
 #[cfg(windows)]
@@ -202,7 +210,10 @@ fn cleanup_inactive_managed_windows_tuns(active_name: &str) {
         .output()
     {
         Ok(output) if output.status.success() => {}
-        Ok(output) => log::debug!("managed TUN cleanup skipped: {}", String::from_utf8_lossy(&output.stderr)),
+        Ok(output) => log::debug!(
+            "managed TUN cleanup skipped: {}",
+            String::from_utf8_lossy(&output.stderr)
+        ),
         Err(error) => log::debug!("managed TUN cleanup unavailable: {error}"),
     }
 }

@@ -127,6 +127,7 @@ class ChatManager extends ChangeNotifier {
   final Map<String, List<ChatMessageRecord>> _messageCache = {};
   final Map<String, ChatAttachmentTransferProgress>
       _attachmentTransferProgress = {};
+  final Set<String> _locallyDeletedMessageIds = {};
   final Map<String, _IncomingAttachmentTransferState>
       _incomingAttachmentTransfers = {};
   int _privateUnreadTotal = 0;
@@ -1133,6 +1134,18 @@ class ChatManager extends ChangeNotifier {
     );
   }
 
+  Future<bool> deleteMessage(ChatMessageRecord message) async {
+    _locallyDeletedMessageIds.add(message.id);
+    final deleted = await _storage.deleteMessage(message.id);
+    _attachmentTransferProgress.remove(message.id);
+    if (deleted) {
+      await loadConversationMessages(message.conversationId);
+      await reloadFromStorage(notify: false);
+    }
+    notifyListeners();
+    return deleted;
+  }
+
   Future<void> markConversationRead(
     String conversationId, {
     bool notify = true,
@@ -1533,13 +1546,16 @@ class ChatManager extends ChangeNotifier {
         }
       }
     } catch (error) {
-      await _storage.upsertMessage(
-        localMessage.copyWith(status: ChatMessageStatus.failed),
-        attachment: attachment,
-      );
-      await loadConversationMessages(conversation.id);
-      await reloadFromStorage(notify: false);
+      if (!_locallyDeletedMessageIds.contains(messageId)) {
+        await _storage.upsertMessage(
+          localMessage.copyWith(status: ChatMessageStatus.failed),
+          attachment: attachment,
+        );
+        await loadConversationMessages(conversation.id);
+        await reloadFromStorage(notify: false);
+      }
       _clearAttachmentTransfer(messageId);
+      _locallyDeletedMessageIds.remove(messageId);
       notifyListeners();
       rethrow;
     }
@@ -1547,13 +1563,16 @@ class ChatManager extends ChangeNotifier {
         ? ChatMessageStatus.sent
         : ChatMessageStatus.failed;
 
-    await _storage.upsertMessage(
-      localMessage.copyWith(status: finalStatus),
-      attachment: attachment,
-    );
-    await loadConversationMessages(conversation.id);
-    await reloadFromStorage(notify: false);
+    if (!_locallyDeletedMessageIds.contains(messageId)) {
+      await _storage.upsertMessage(
+        localMessage.copyWith(status: finalStatus),
+        attachment: attachment,
+      );
+      await loadConversationMessages(conversation.id);
+      await reloadFromStorage(notify: false);
+    }
     _clearAttachmentTransfer(messageId);
+    _locallyDeletedMessageIds.remove(messageId);
     notifyListeners();
     final result = ChatSendResult(
       conversationId: conversation.id,

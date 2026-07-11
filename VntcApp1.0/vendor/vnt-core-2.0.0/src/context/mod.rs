@@ -513,7 +513,14 @@ impl ServerInfoCollection {
             .list
             .into_iter()
             .filter(|v| v.ip != self_ip)
-            .map(|info| (info.ip, info))
+            .map(|mut info| {
+                if info.name.is_empty()
+                    && let Some(existing) = server_node.client_map.get(&info.ip)
+                {
+                    info.name.clone_from(&existing.name);
+                }
+                (info.ip, info)
+            })
             .collect();
 
         if client_simple_list.is_all {
@@ -547,6 +554,9 @@ impl ServerInfoCollection {
                 if let Some(v) = client_simple_map.get_mut(&x.ip) {
                     if x.online {
                         v.online = true;
+                    }
+                    if v.name.is_empty() && !x.name.is_empty() {
+                        v.name.clone_from(&x.name);
                     }
                 } else {
                     client_simple_map.insert(x.ip, x.clone());
@@ -721,7 +731,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn rpc_client_list_replaces_one_server_and_preserves_other_server_clients() {
+    fn rpc_client_names_survive_incremental_updates_across_servers() {
         let collection = ServerInfoCollection::default();
         let self_ip = Ipv4Addr::new(10, 0, 0, 1);
         let first_peer = Ipv4Addr::new(10, 0, 0, 2);
@@ -733,10 +743,12 @@ mod tests {
             vec![
                 ClientSimpleInfo {
                     ip: self_ip,
+                    name: "self".to_string(),
                     online: true,
                 },
                 ClientSimpleInfo {
                     ip: first_peer,
+                    name: "first-peer".to_string(),
                     online: true,
                 },
             ],
@@ -746,21 +758,44 @@ mod tests {
             self_ip,
             vec![ClientSimpleInfo {
                 ip: second_peer,
+                name: "second-peer".to_string(),
                 online: true,
             }],
         );
-        collection.replace_client_list_from_rpc(
+        collection.update_client_simple_list(
             0,
             self_ip,
-            vec![ClientSimpleInfo {
-                ip: first_peer,
-                online: false,
-            }],
+            ClientSimpleInfoList {
+                data_version: 1,
+                list: vec![ClientSimpleInfo {
+                    ip: first_peer,
+                    name: String::new(),
+                    online: false,
+                }],
+                is_all: true,
+                time: 0,
+            },
+            1,
         );
 
         assert!(!collection.exists_online_client_ip(&self_ip));
         assert!(!collection.exists_online_client_ip(&first_peer));
         assert!(collection.exists_online_client_ip(&second_peer));
+        let clients = collection.client_ips();
+        assert_eq!(
+            clients
+                .iter()
+                .find(|client| client.ip == first_peer)
+                .map(|client| client.name.as_str()),
+            Some("first-peer")
+        );
+        assert_eq!(
+            clients
+                .iter()
+                .find(|client| client.ip == second_peer)
+                .map(|client| client.name.as_str()),
+            Some("second-peer")
+        );
     }
 }
 impl AppState {

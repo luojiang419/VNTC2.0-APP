@@ -76,6 +76,11 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     return status.trim().toLowerCase() == 'online';
   }
 
+  String _deviceDisplayName(RustPeerClientInfo device) {
+    final name = device.name.trim();
+    return name.isNotEmpty ? name : device.virtualIp;
+  }
+
   String _p2pDiagnosticLabel() {
     switch (_p2pDiagnostics?['state']) {
       case 'nat_discovering':
@@ -1160,7 +1165,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                         crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Text(
-                            device.name,
+                            _deviceDisplayName(device),
                             style: TextStyle(
                               fontSize: context.fontMedium,
                               fontWeight: FontWeight.w600,
@@ -1813,7 +1818,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Text(
-                              device.name,
+                              _deviceDisplayName(device),
                               style: TextStyle(
                                 fontSize: titleFontSize,
                                 fontWeight: FontWeight.w600,

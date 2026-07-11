@@ -13,7 +13,7 @@ futures = "0.3"
 tun-rs = { version = "2", features = ["async", "async_framed"] }
 
 rust-p2p-core = { version="0.4" }
-tcp_ip = { git = "https://github.com/rustp2p/tcp_ip" }
+tcp_ip = { git = "https://github.com/rustp2p/tcp_ip", rev = "09c64c81da70a35248dfef4ef42bb9f5e8b6e05e" }
 
 anyhow = "1"
 parking_lot = "0.12"
