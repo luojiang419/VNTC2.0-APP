@@ -29,8 +29,9 @@ class ChatStorage {
   }
 
   Future<void> init() async {
-    await _ensureDatabase();
-    await ensureAttachmentsDirectory();
+    final db = await _ensureDatabase();
+    final attachmentsDirectory = await ensureAttachmentsDirectory();
+    await _repairLegacyAbsoluteAttachmentPaths(db, attachmentsDirectory);
   }
 
   Future<Database> _ensureDatabase() async {
@@ -633,10 +634,43 @@ GROUP BY sender_virtual_ip
   Future<String> createIncomingAttachmentPath({
     required String originalFileName,
   }) async {
-    final attachmentsDir = await ensureAttachmentsDirectory();
+    await ensureAttachmentsDirectory();
     final extension = path.extension(originalFileName);
-    final uniqueName = '${_uuid.v4()}$extension';
-    return path.join(attachmentsDir, uniqueName);
+    return '${_uuid.v4()}$extension';
+  }
+
+  Future<void> _repairLegacyAbsoluteAttachmentPaths(
+    Database db,
+    String attachmentsDirectory,
+  ) async {
+    final rows = await db.query(
+      'attachments',
+      columns: <String>['id', 'relative_path'],
+    );
+    final root = path.canonicalize(path.absolute(attachmentsDirectory));
+    for (final row in rows) {
+      final value = (row['relative_path'] ?? '').toString();
+      if (!path.isAbsolute(value) &&
+          !path.windows.isAbsolute(value) &&
+          !path.posix.isAbsolute(value)) {
+        continue;
+      }
+      final candidate = path.canonicalize(path.absolute(value));
+      final isInside = path.isWithin(root, candidate);
+      final replacement = isInside
+          ? path.relative(candidate, from: root)
+          : '${row['id']}${path.extension(value)}';
+      await db.update(
+        'attachments',
+        <String, Object?>{
+          'relative_path': replacement,
+          if (!isInside) 'payload_available': 0,
+          if (!isInside) 'needs_manual_resend': 1,
+        },
+        where: 'id = ?',
+        whereArgs: <Object?>[row['id']],
+      );
+    }
   }
 
   Future<String> resolveAttachmentPath(String relativePath) async {
