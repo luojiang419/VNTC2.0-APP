@@ -11,6 +11,8 @@ class RemoteAssistCommandSecurity {
   static const String configurePasswordOption = '--configure-access-password';
   static const String configurePasswordFileOption =
       '--configure-access-password-file';
+  static const String configureSuccessPrefix =
+      'VNTC_ACCESS_PASSWORD_CONFIGURED:';
   static const String redactedValue = '<redacted>';
 
   static List<String> connectArguments({
@@ -46,6 +48,13 @@ class RemoteAssistCommandSecurity {
       }
     }
     return redacted;
+  }
+
+  static bool isConfigurePasswordSuccess(String output, String accessMode) {
+    return output
+        .split(RegExp(r'[\r\n]+'))
+        .map((line) => line.trim())
+        .contains('$configureSuccessPrefix$accessMode');
   }
 
   static String redactText(String value, {String? secret}) {

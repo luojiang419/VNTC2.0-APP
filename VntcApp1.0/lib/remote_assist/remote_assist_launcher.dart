@@ -171,23 +171,35 @@ try {
       passwordFilePath: secretFile?.path,
     );
     await RemoteAssistLog.write('设置远程协助访问密码: mode=$accessMode');
-    final ProcessResult result;
+    late ProcessResult result;
     try {
-      result = await Process.run(
-        executablePath,
-        arguments,
-        workingDirectory: path.dirname(executablePath),
-      );
+      for (var attempt = 1; attempt <= 3; attempt += 1) {
+        result = await Process.run(
+          executablePath,
+          arguments,
+          workingDirectory: path.dirname(executablePath),
+        );
+        if (result.exitCode == 0 || attempt == 3) {
+          break;
+        }
+        await Future<void>.delayed(const Duration(milliseconds: 500));
+      }
     } finally {
       await secretFile?.delete();
     }
-    if (result.exitCode == 0) {
+    final stdout = result.stdout.toString();
+    final configurationConfirmed =
+        RemoteAssistCommandSecurity.isConfigurePasswordSuccess(
+      stdout,
+      accessMode,
+    );
+    if (result.exitCode == 0 && configurationConfirmed) {
       await RemoteAssistLog.write('远程协助访问密码配置完成: mode=$accessMode');
       return;
     }
 
     final message = [
-      result.stdout.toString().trim(),
+      stdout.trim(),
       result.stderr.toString().trim(),
     ]
         .where((item) => item.isNotEmpty)
@@ -199,8 +211,11 @@ try {
         )
         .join(' | ');
     await RemoteAssistLog.write(
-      '远程协助访问密码配置失败 exit=${result.exitCode} mode=$accessMode message=$message',
+      '远程协助访问密码配置失败 exit=${result.exitCode} mode=$accessMode confirmed=$configurationConfirmed message=$message',
     );
+    if (result.exitCode == 0 && !configurationConfirmed) {
+      throw StateError('远程协助组件版本过旧或配置未真正生效，请先点击“安装/修复”后重试');
+    }
     throw StateError(
       message.isEmpty ? '远程密码配置失败，请稍后重试' : '远程密码配置失败：$message',
     );

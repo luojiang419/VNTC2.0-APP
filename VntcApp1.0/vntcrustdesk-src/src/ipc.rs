@@ -1275,6 +1275,11 @@ pub async fn get_options() -> HashMap<String, String> {
     get_options_async().await
 }
 
+#[tokio::main(flavor = "current_thread")]
+pub async fn get_options_from_service() -> ResultType<HashMap<String, String>> {
+    get_options_(1000).await
+}
+
 pub async fn get_option_async(key: &str) -> String {
     if let Some(v) = get_options_async().await.get(key) {
         v.clone()
@@ -1303,6 +1308,16 @@ pub async fn set_options(value: HashMap<String, String>) -> ResultType<()> {
     }
     Config::set_options(value);
     Ok(())
+}
+
+#[tokio::main(flavor = "current_thread")]
+pub async fn set_options_on_service(value: HashMap<String, String>) -> ResultType<()> {
+    let mut c = connect(1000, "").await?;
+    c.send(&Data::Options(Some(value))).await?;
+    match c.next_timeout(1000).await? {
+        Some(Data::Options(None)) => Ok(()),
+        _ => bail!("remote service did not acknowledge options update"),
+    }
 }
 
 #[inline]

@@ -1,6 +1,7 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/chat/chat_models.dart';
@@ -211,9 +212,10 @@ void main() {
     }
   });
 
-  test('聊天TCP传输服务可以携带附件负载', () async {
+  test('聊天TCP传输服务会分块回报发送进度', () async {
     final service = ChatTransportService();
     final completer = Completer<ChatTransportPacket>();
+    final progressUpdates = <({int sentBytes, int totalBytes})>[];
 
     await service.start(
       onPacket: (packet, remoteAddress) async {
@@ -226,8 +228,78 @@ void main() {
     final port = service.listeningPort;
     expect(port, isNotNull);
 
-    const packet = ChatTransportPacket(
+    final packet = ChatTransportPacket(
       type: 'message',
+      message: ChatMessageRecord(
+        id: 'msg-transport-progress',
+        conversationId: 'hall:test',
+        hallId: 'hall:test',
+        conversationType: ChatConversationType.hall,
+        senderVirtualIp: '127.0.0.1',
+        senderName: '本机',
+        senderSeq: 2,
+        direction: ChatMessageDirection.outgoing,
+        contentType: ChatMessageContentType.text,
+        status: ChatMessageStatus.sent,
+        text: List<String>.filled(256 * 1024, 'x').join(),
+        isSyncMessage: false,
+        isRead: true,
+        sentAtEpochMs: 1717286402000,
+        createdAtEpochMs: 1717286402000,
+        metadataJson: '{}',
+      ),
+    );
+
+    try {
+      await service.sendPacket(
+        targetIp: InternetAddress.loopbackIPv4.address,
+        packet: packet,
+        port: port,
+        onProgress: (sentBytes, totalBytes) {
+          progressUpdates.add((
+            sentBytes: sentBytes,
+            totalBytes: totalBytes,
+          ));
+        },
+      );
+      await completer.future.timeout(const Duration(seconds: 3));
+
+      expect(progressUpdates.length, greaterThan(1));
+      expect(progressUpdates.last.sentBytes, progressUpdates.last.totalBytes);
+    } finally {
+      await service.stop();
+    }
+  });
+
+  test('聊天TCP传输服务可以直接传输二进制附件流', () async {
+    final service = ChatTransportService();
+    final completer = Completer<ChatTransportPacket>();
+    final streamClosed = Completer<void>();
+    final receivedBytes = BytesBuilder(copy: false)..add(<int>[0, 1]);
+
+    await service.start(
+      onPacket: (packet, remoteAddress) async {
+        if (!completer.isCompleted) {
+          completer.complete(packet);
+        }
+      },
+      onAttachmentStream: (packet, remoteAddress) async {
+        if (!completer.isCompleted) {
+          completer.complete(packet);
+        }
+        return _MemoryAttachmentStreamSink(
+          receivedBytes,
+          resumeOffset: 2,
+          onClose: () => streamClosed.complete(),
+        );
+      },
+      listenPort: 0,
+    );
+    final port = service.listeningPort;
+    expect(port, isNotNull);
+
+    const packet = ChatTransportPacket(
+      type: 'attachment_stream',
       message: ChatMessageRecord(
         id: 'msg-transport-attachment',
         conversationId: 'hall:test',
@@ -251,7 +323,7 @@ void main() {
           messageId: 'msg-transport-attachment',
           fileName: 'sample.txt',
           mimeType: 'text/plain',
-          sizeBytes: 11,
+          sizeBytes: 5,
           relativePath: 'sample.txt',
           autoSyncEligible: true,
           payloadAvailable: true,
@@ -259,19 +331,24 @@ void main() {
           createdAtEpochMs: 1717286402000,
         ),
       ),
-      attachmentBase64: 'aGVsbG8gd29ybGQ=',
     );
 
     try {
-      await service.sendPacket(
+      await service.sendAttachmentStream(
         targetIp: InternetAddress.loopbackIPv4.address,
         packet: packet,
+        sourceFactory: (startOffset) {
+          expect(startOffset, 2);
+          return Stream<List<int>>.value(<int>[2, 3, 255]);
+        },
+        totalBytes: 5,
         port: port,
       );
       final received =
           await completer.future.timeout(const Duration(seconds: 3));
+      await streamClosed.future.timeout(const Duration(seconds: 3));
       expect(received.message?.attachment?.fileName, 'sample.txt');
-      expect(received.attachmentBase64, 'aGVsbG8gd29ybGQ=');
+      expect(receivedBytes.toBytes(), <int>[0, 1, 2, 3, 255]);
     } finally {
       await service.stop();
     }
@@ -352,4 +429,29 @@ void main() {
       await service.stop();
     }
   });
+}
+
+class _MemoryAttachmentStreamSink implements ChatAttachmentStreamSink {
+  _MemoryAttachmentStreamSink(
+    this._bytes, {
+    required this.resumeOffset,
+    required this.onClose,
+  });
+
+  final BytesBuilder _bytes;
+  final void Function() onClose;
+
+  @override
+  final int resumeOffset;
+
+  @override
+  Future<void> abort() async {}
+
+  @override
+  Future<void> add(List<int> bytes) async {
+    _bytes.add(bytes);
+  }
+
+  @override
+  Future<void> close() async => onClose();
 }

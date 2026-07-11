@@ -4,7 +4,7 @@
 		<Property Id="UpgradesFile" Value="1" />
 
 		<!--$UpgradeStart$-->
-			<Upgrade Id="2ef8612a-a825-4031-831c-5b12c974175c">
+			<Upgrade Id="0520546d-ff39-4fb3-8b4a-92d122d9d9cc">
 				<UpgradeVersion Property="OLD_VERSION_FOUND" Minimum="1.0.0" Maximum="1.99.99" IncludeMinimum="yes" IncludeMaximum="yes" OnlyDetect="no" IgnoreRemoveFailure="yes" MigrateFeatures="yes" />
 			</Upgrade>
 		<!--$UpgradeEnd$-->

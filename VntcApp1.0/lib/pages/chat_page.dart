@@ -1024,6 +1024,9 @@ class _ChatPageState extends State<ChatPage>
             : Colors.black.withValues(alpha: 0.03));
     final textColor =
         isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+    final transferProgress = isOutgoing && message.hasAttachment
+        ? _manager.attachmentTransferProgressFor(message.id)
+        : null;
 
     return Align(
       alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
@@ -1051,6 +1054,14 @@ class _ChatPageState extends State<ChatPage>
               ),
               SizedBox(height: context.spacingXXSmall),
               _buildMessageContent(context, isDark, message, textColor),
+              if (transferProgress?.isActive == true) ...[
+                SizedBox(height: context.spacingSmall),
+                _buildAttachmentTransferProgress(
+                  context,
+                  isDark,
+                  transferProgress!,
+                ),
+              ],
               SizedBox(height: context.spacingXXSmall),
               Row(
                 mainAxisSize: MainAxisSize.min,
@@ -1092,6 +1103,59 @@ class _ChatPageState extends State<ChatPage>
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  Widget _buildAttachmentTransferProgress(
+    BuildContext context,
+    bool isDark,
+    ChatAttachmentTransferProgress progress,
+  ) {
+    final label = progress.phase == ChatAttachmentTransferPhase.preparing
+        ? '准备上传'
+        : '上传中';
+    final secondaryColor =
+        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+
+    return SizedBox(
+      width: context.w(280),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Icon(
+                Icons.upload_file_outlined,
+                size: context.fontSmall,
+                color: Theme.of(context).primaryColor,
+              ),
+              SizedBox(width: context.spacingXXSmall),
+              Text(
+                '$label ${progress.progressPercent}%',
+                style: TextStyle(
+                  fontSize: context.fontXSmall,
+                  color: secondaryColor,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              const Spacer(),
+              Text(
+                '${_formatFileSize(progress.bytesPerSecond)}/s',
+                style: TextStyle(
+                  fontSize: context.fontXSmall,
+                  color: secondaryColor,
+                ),
+              ),
+            ],
+          ),
+          SizedBox(height: context.spacingXXSmall),
+          LinearProgressIndicator(
+            value: progress.progress,
+            minHeight: 4,
+            borderRadius: BorderRadius.circular(2),
+          ),
+        ],
       ),
     );
   }

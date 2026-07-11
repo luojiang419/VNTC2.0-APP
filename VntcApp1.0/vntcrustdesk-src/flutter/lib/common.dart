@@ -2286,7 +2286,7 @@ bool handleUriLink({List<String>? cmdArgs, Uri? uri, String? uriString}) {
         i++;
         break;
       case '--password-file':
-        password = await File(args[i + 1]).readAsString();
+        password = File(args[i + 1]).readAsStringSync();
         i++;
         break;
       case '--switch_uuid':

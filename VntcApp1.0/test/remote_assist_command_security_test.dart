@@ -52,6 +52,27 @@ void main() {
     ]);
   });
 
+  test('configure success requires the exact runtime confirmation marker', () {
+    expect(
+      RemoteAssistCommandSecurity.isConfigurePasswordSuccess(
+        'startup\r\nVNTC_ACCESS_PASSWORD_CONFIGURED:password\r\n',
+        'password',
+      ),
+      isTrue,
+    );
+    expect(
+      RemoteAssistCommandSecurity.isConfigurePasswordSuccess('', 'password'),
+      isFalse,
+    );
+    expect(
+      RemoteAssistCommandSecurity.isConfigurePasswordSuccess(
+        'VNTC_ACCESS_PASSWORD_CONFIGURED:click',
+        'password',
+      ),
+      isFalse,
+    );
+  });
+
   test('createSecretFile writes and deletes a temporary secret file', () async {
     final secretFile =
         await RemoteAssistCommandSecurity.createSecretFile('plain-secret');

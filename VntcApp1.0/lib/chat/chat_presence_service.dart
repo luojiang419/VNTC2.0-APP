@@ -16,6 +16,7 @@ class ChatPresenceService {
   Timer? _broadcastTimer;
   Timer? _cleanupTimer;
   List<ChatPresenceContext> _contexts = const [];
+  String? _contextsSignature;
   final Map<String, ChatPresenceAnnouncement> _announcements = {};
   void Function(Map<String, ChatPresenceAnnouncement>)? _onSnapshot;
 
@@ -26,11 +27,16 @@ class ChatPresenceService {
     required List<ChatPresenceContext> contexts,
     required void Function(Map<String, ChatPresenceAnnouncement>) onSnapshot,
   }) async {
-    _contexts = contexts
+    final nextContexts = contexts
         .where(
           (context) => context.virtualIp.trim().isNotEmpty,
         )
         .toList(growable: false);
+    final nextSignature = _signatureForContexts(nextContexts);
+    final shouldBroadcastNow =
+        _socket == null || nextSignature != _contextsSignature;
+    _contexts = nextContexts;
+    _contextsSignature = nextSignature;
     _onSnapshot = onSnapshot;
 
     if (_contexts.isEmpty) {
@@ -40,7 +46,9 @@ class ChatPresenceService {
 
     await _ensureSocket();
     _ensureTimers();
-    await _broadcastNow();
+    if (shouldBroadcastNow) {
+      await _broadcastNow();
+    }
   }
 
   Future<void> stop() async {
@@ -49,6 +57,7 @@ class ChatPresenceService {
     _broadcastTimer = null;
     _cleanupTimer = null;
     _contexts = const [];
+    _contextsSignature = null;
     _announcements.clear();
 
     final socket = _socket;
@@ -81,6 +90,30 @@ class ChatPresenceService {
       ChatConstants.presenceBroadcastInterval,
       (_) => _cleanupExpired(),
     );
+  }
+
+  String _signatureForContexts(List<ChatPresenceContext> contexts) {
+    final signatures = contexts.map((context) {
+      final peers = context.peerVirtualIps
+          .map((peer) => peer.trim())
+          .where((peer) => peer.isNotEmpty)
+          .toSet()
+          .toList(growable: false)
+        ..sort();
+      final rooms = context.rooms.toList(growable: false)
+        ..sort((left, right) => left.roomId.compareTo(right.roomId));
+      return jsonEncode(<String, Object?>{
+        'hallId': context.hallId,
+        'hallTitle': context.hallTitle,
+        'displayName': context.displayName,
+        'virtualIp': context.virtualIp,
+        'peers': peers,
+        'rooms':
+            rooms.map((room) => room.toTransportJson()).toList(growable: false),
+      });
+    }).toList(growable: false)
+      ..sort();
+    return signatures.join('\n');
   }
 
   void _handleSocketEvent(RawSocketEvent event) {
