@@ -55,4 +55,12 @@ void main() {
     expect(portableScript, contains('Get-VntBuildVersion -VersionFile'));
     expect(installerScript, contains('Get-VntBuildVersion -VersionFile'));
   });
+
+  test('Windows installer preserves user configuration during upgrades', () {
+    final installerScript = _readProjectFile(
+      'scripts/export_installer_package.ps1',
+    );
+
+    expect(installerScript, contains('Excludes: "config\\*"'));
+  });
 }
