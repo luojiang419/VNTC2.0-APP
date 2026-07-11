@@ -32,6 +32,8 @@ class RemoteAssistConstants {
   static const String capabilityController = 'remote_assist_controller';
   static const String capabilityControlled = 'remote_assist_controlled';
 
+  static const bool androidRemoteAssistEnabled = false;
+
   static const String androidPermissionNotification = 'notification';
   static const String androidPermissionScreenCapture = 'screen_capture';
   static const String androidPermissionAccessibility = 'accessibility';
@@ -54,5 +56,6 @@ class RemoteAssistConstants {
 
   static const Duration presenceBroadcastInterval = Duration(seconds: 5);
   static const Duration presenceExpiry = Duration(seconds: 20);
+  static const Duration presenceMaxFutureSkew = Duration(seconds: 10);
   static const Duration refreshInterval = Duration(seconds: 6);
 }

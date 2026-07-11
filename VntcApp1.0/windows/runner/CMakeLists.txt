@@ -22,10 +22,6 @@ add_executable(${BINARY_NAME} WIN32
 # that need different build settings.
 apply_standard_settings(${BINARY_NAME})
 
-# CRITICAL: Link YY-Thunks FIRST before any other libraries for Windows 7 support
-# This ensures YY-Thunks can intercept all Win8+ API calls
-target_link_libraries(${BINARY_NAME} PRIVATE "${YY_THUNKS_OBJ}")
-
 # Add preprocessor definitions for the build version.
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION=\"${FLUTTER_VERSION}\"")
 target_compile_definitions(${BINARY_NAME} PRIVATE "FLUTTER_VERSION_MAJOR=${FLUTTER_VERSION_MAJOR}")

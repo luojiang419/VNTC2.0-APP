@@ -753,6 +753,13 @@ fn core_main_invoke_new_connection(mut args: std::env::Args) -> Option<Vec<Strin
                     param_array.push(format!("password={password}"));
                 }
             }
+            "--password-file" => {
+                if let Some(password_file) = args.next() {
+                    if let Ok(password) = std::fs::read_to_string(password_file) {
+                        param_array.push(format!("password={password}"));
+                    }
+                }
+            }
             "--relay" => {
                 relay_requested = true;
             }

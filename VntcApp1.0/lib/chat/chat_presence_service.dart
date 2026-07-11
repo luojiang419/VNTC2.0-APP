@@ -4,8 +4,14 @@ import 'dart:io';
 
 import 'package:vnt_app/chat/chat_constants.dart';
 import 'package:vnt_app/chat/chat_models.dart';
+import 'package:vnt_app/chat/chat_security.dart';
 
 class ChatPresenceService {
+  ChatPresenceService({
+    int? listenPort,
+  }) : _listenPort = listenPort ?? ChatConstants.presencePort;
+
+  final int _listenPort;
   RawDatagramSocket? _socket;
   Timer? _broadcastTimer;
   Timer? _cleanupTimer;
@@ -14,6 +20,7 @@ class ChatPresenceService {
   void Function(Map<String, ChatPresenceAnnouncement>)? _onSnapshot;
 
   bool get isRunning => _socket != null;
+  int? get listeningPort => _socket?.port;
 
   Future<void> updateContexts({
     required List<ChatPresenceContext> contexts,
@@ -56,7 +63,7 @@ class ChatPresenceService {
     }
     final socket = await RawDatagramSocket.bind(
       InternetAddress.anyIPv4,
-      ChatConstants.presencePort,
+      _listenPort,
     );
     socket.readEventsEnabled = true;
     socket.writeEventsEnabled = false;
@@ -83,7 +90,9 @@ class ChatPresenceService {
 
     Datagram? datagram;
     while ((datagram = _socket!.receive()) != null) {
-      final payload = utf8.decode(datagram!.data, allowMalformed: true).trim();
+      final currentDatagram = datagram!;
+      final payload =
+          utf8.decode(currentDatagram.data, allowMalformed: true).trim();
       if (payload.isEmpty) {
         continue;
       }
@@ -98,6 +107,12 @@ class ChatPresenceService {
           continue;
         }
         final announcement = ChatPresenceAnnouncement.fromJson(decoded);
+        if (!isChatRemoteAddressConsistent(
+          remoteAddress: currentDatagram.address.address,
+          declaredVirtualIp: announcement.virtualIp,
+        )) {
+          continue;
+        }
         final isSelf = _contexts.any(
           (context) =>
               context.hallId == announcement.hallId &&
@@ -106,12 +121,10 @@ class ChatPresenceService {
         if (isSelf) {
           continue;
         }
-        _announcements[
-          buildPresencePeerKey(
-            hallId: announcement.hallId,
-            virtualIp: announcement.virtualIp,
-          )
-        ] = announcement;
+        _announcements[buildPresencePeerKey(
+          hallId: announcement.hallId,
+          virtualIp: announcement.virtualIp,
+        )] = announcement;
         _emitSnapshot();
       } catch (_) {
         // 忽略非法报文

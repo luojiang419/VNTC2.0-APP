@@ -24,11 +24,12 @@ class StatsCard extends StatelessWidget {
     return Container(
       padding: ResponsiveUtils.padding(context, all: 16),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.radius(16)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -43,7 +44,7 @@ class StatsCard extends StatelessWidget {
                 width: context.w(36),
                 height: context.w(36),
                 decoration: BoxDecoration(
-                  color: color.withOpacity(0.1),
+                  color: color.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(context.radius(10)),
                 ),
                 child: Icon(
@@ -61,7 +62,8 @@ class StatsCard extends StatelessWidget {
             style: TextStyle(
               fontSize: context.fontLarge,
               fontWeight: FontWeight.bold,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
           SizedBox(height: context.spacing(4)),
@@ -69,7 +71,9 @@ class StatsCard extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: context.fontSmall,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
         ],

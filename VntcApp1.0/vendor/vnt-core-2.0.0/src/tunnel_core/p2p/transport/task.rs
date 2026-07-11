@@ -9,8 +9,9 @@ use crate::tunnel_core::p2p::route_table::RouteTable;
 use crate::tunnel_core::p2p::transport::nat_test::{
     my_nat_info, query_tcp_public_addr_loop, query_udp_public_addr_loop,
 };
-use crate::tunnel_core::p2p::transport::punch::{PunchTaskContext, punch_task};
+use crate::tunnel_core::p2p::transport::punch::{PunchRequestQueue, PunchTaskContext, punch_task};
 use crate::tunnel_core::server::outbound::ServerOutbound;
+use crate::tunnel_core::server::rpc::ServerRPC;
 use crate::utils::task_control::TaskGroup;
 use rust_p2p_core::punch::Puncher;
 use rust_p2p_core::tunnel::{Tunnel, TunnelDispatcher, new_tunnel_component};
@@ -18,10 +19,15 @@ use std::net::Ipv4Addr;
 use std::sync::Arc;
 use std::time::Duration;
 
+const INITIAL_RELAY_PROBE_DELAY: Duration = Duration::from_secs(3);
+const RETRY_RELAY_PROBE_DELAY: Duration = Duration::from_secs(5);
+const RELAY_PROBE_INTERVAL: Duration = Duration::from_secs(60);
+
 pub async fn init_tunnel(
     task_group: TaskGroup,
     app_state: AppState,
     tunnel_to_server: ServerOutbound,
+    server_rpc: ServerRPC,
     packet_crypto: PacketCrypto,
     tunnel_port: Option<u16>,
 ) -> anyhow::Result<(Puncher, P2pOutbound, P2pTask)> {
@@ -40,10 +46,12 @@ pub async fn init_tunnel(
         .set_tcp_tunnel_config(tcp_config);
     let (tunnel_dispatcher, puncher) = new_tunnel_component(config)?;
     let route_table = app_state.route_table.clone();
+    let (priority_punch_queue, priority_punch_requests) = PunchRequestQueue::new();
     let socket_manager = P2pOutbound::new(
         tunnel_dispatcher.socket_manager(),
         route_table.clone(),
         packet_crypto,
+        priority_punch_queue.clone(),
     );
     task_group.spawn(my_nat_info(
         app_state.clone(),
@@ -66,8 +74,14 @@ pub async fn init_tunnel(
         server_info: app_state.server_info_collection.clone(),
         punch_backoff: app_state.punch_backoff.clone(),
         punch_info_getter: Arc::new(move || app_state_for_punch.get_punch_info()),
+        priority_queue: priority_punch_queue,
     };
-    task_group.spawn(punch_task(tunnel_to_server, route_table.clone(), punch_ctx));
+    task_group.spawn(punch_task(
+        tunnel_to_server,
+        route_table.clone(),
+        punch_ctx,
+        priority_punch_requests,
+    ));
     task_group.spawn(ping_all(
         app_state.network.clone(),
         app_state.packet_loss_stats.clone(),
@@ -79,6 +93,7 @@ pub async fn init_tunnel(
         app_state.server_info_collection.clone(),
         route_table.clone(),
         socket_manager.clone(),
+        server_rpc,
     ));
     let p2p_task = P2pTask {
         task_group,
@@ -145,10 +160,7 @@ pub async fn ping_all(
         }
     }
 }
-pub async fn route_timeout_task(
-    route_table: RouteTable,
-    packet_loss_stats: PacketLossStats,
-) {
+pub async fn route_timeout_task(route_table: RouteTable, packet_loss_stats: PacketLossStats) {
     loop {
         tokio::time::sleep(Duration::from_secs(10)).await;
         let expired_time = std::time::Instant::now() - Duration::from_secs(10);
@@ -160,20 +172,30 @@ pub async fn route_timeout_task(
 }
 
 /// 客户端中继探测任务
-/// 每5分钟执行一次，找到所有未直连的目标IP，通过Ping消息发送给已打洞的客户端
+/// 注册完成后主动同步在线列表，并对未直连目标通过已打洞客户端中继探测。
 pub async fn relay_probe_task(
     network: SharedNetworkAddr,
     server_info: crate::context::ServerInfoCollection,
     route_table: RouteTable,
     socket_manager: P2pOutbound,
+    server_rpc: ServerRPC,
 ) {
     use rand::prelude::*;
 
+    let mut delay = INITIAL_RELAY_PROBE_DELAY;
     loop {
-        tokio::time::sleep(Duration::from_secs(300)).await; // 5分钟
+        tokio::time::sleep(delay).await;
 
         let Some(src) = network.ip() else {
+            delay = RETRY_RELAY_PROBE_DELAY;
             continue;
+        };
+
+        let synced = sync_online_client_list(&server_rpc, &server_info, src).await;
+        delay = if synced {
+            RELAY_PROBE_INTERVAL
+        } else {
+            RETRY_RELAY_PROBE_DELAY
         };
 
         let online_ips = server_info.client_online_ips();
@@ -283,6 +305,62 @@ pub async fn relay_probe_task(
             non_direct_count,
             direct_peers.len()
         );
+    }
+}
+
+async fn sync_online_client_list(
+    server_rpc: &ServerRPC,
+    server_info: &crate::context::ServerInfoCollection,
+    self_ip: Ipv4Addr,
+) -> bool {
+    let mut synced = false;
+    for server_id in server_rpc.server_id_list() {
+        if !server_info.is_server_connected(server_id) {
+            continue;
+        }
+
+        match server_rpc.client_list_target(server_id).await {
+            Ok(response) => {
+                let client_count = response.list.len();
+                let online_count = response.list.iter().filter(|client| client.online).count();
+                let client_list = response
+                    .list
+                    .into_iter()
+                    .map(|client| crate::protocol::control_message::ClientSimpleInfo {
+                        ip: client.ip.into(),
+                        online: client.online,
+                    })
+                    .collect();
+                server_info.replace_client_list_from_rpc(server_id, self_ip, client_list);
+                log::debug!(
+                    "Relay probe synchronized {} clients ({} online) from server {}",
+                    client_count,
+                    online_count,
+                    server_id
+                );
+                synced = true;
+            }
+            Err(error) => {
+                log::debug!(
+                    "Relay probe client-list synchronization failed for server {}: {}",
+                    server_id,
+                    error
+                );
+            }
+        }
+    }
+    synced
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn relay_probe_retries_quickly_until_the_client_list_is_synchronized() {
+        assert_eq!(INITIAL_RELAY_PROBE_DELAY, Duration::from_secs(3));
+        assert_eq!(RETRY_RELAY_PROBE_DELAY, Duration::from_secs(5));
+        assert!(RETRY_RELAY_PROBE_DELAY < RELAY_PROBE_INTERVAL);
     }
 }
 

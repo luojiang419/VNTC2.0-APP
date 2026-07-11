@@ -1,5 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
+import 'package:vnt_app/remote_assist/remote_assist_health_service.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
 
 void main() {
@@ -136,5 +137,30 @@ void main() {
 
     expect(status.controllerReady, isFalse);
     expect(status.controlledReady, isFalse);
+  });
+
+  test('runtime ready requires listener port, not just service process', () {
+    expect(
+      isRemoteAssistRuntimeReady(
+        serviceRunning: true,
+        hasServiceProcess: true,
+        hasServerProcess: true,
+        portListening: false,
+      ),
+      isFalse,
+    );
+    expect(
+      isRemoteAssistRuntimeReady(
+        serviceRunning: false,
+        hasServiceProcess: false,
+        hasServerProcess: false,
+        portListening: true,
+      ),
+      isTrue,
+    );
+  });
+
+  test('Android remote assist remains explicitly hidden by default', () {
+    expect(RemoteAssistConstants.androidRemoteAssistEnabled, isFalse);
   });
 }

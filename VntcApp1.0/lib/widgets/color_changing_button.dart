@@ -6,14 +6,15 @@ class ColorChangingButton extends StatefulWidget {
   final List<Color> colors;
   final VoidCallback onPressed;
 
-  const ColorChangingButton({super.key, 
+  const ColorChangingButton({
+    super.key,
     required this.icon,
     required this.colors,
     required this.onPressed,
   });
 
   @override
-  _ColorChangingButtonState createState() => _ColorChangingButtonState();
+  State<ColorChangingButton> createState() => _ColorChangingButtonState();
 }
 
 class _ColorChangingButtonState extends State<ColorChangingButton> {

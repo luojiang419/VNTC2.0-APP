@@ -5,6 +5,7 @@ import 'dart:convert';
 import 'package:uuid/uuid.dart';
 import 'dart:io';
 import 'config_manager.dart';
+import 'package:synchronized/synchronized.dart';
 import 'window_close_behavior.dart';
 
 class DataPersistence {
@@ -22,33 +23,65 @@ class DataPersistence {
     'is-always-on-top',
     'is-close-app',
   };
+  static final Lock _dataLock = Lock();
 
   ConfigManager? _configManager;
+
+  @visibleForTesting
+  static Map<String, dynamic> buildWindowsImportValuesForTesting(
+    Map<String, dynamic> winSettings,
+  ) {
+    final result = DataPersistence()._buildWindowsImportValues(winSettings);
+    return {
+      'values': result.values,
+      'removeKeys': result.removeKeys,
+    };
+  }
 
   Future<ConfigManager> _getConfigManager() async {
     if (Platform.isWindows) {
       _configManager ??= ConfigManager();
+      await _configManager!.init();
       return _configManager!;
     }
     throw Exception('ConfigManager only for Windows');
   }
 
   Future<void> saveData(List<NetworkConfig> configs) async {
-    List<String> jsonDataList =
-        configs.map((config) => jsonEncode(config.toJson())).toList();
+    await _dataLock.synchronized(() => _saveDataUnlocked(configs));
+  }
+
+  Future<void> _saveDataUnlocked(List<NetworkConfig> configs) async {
+    final values = _buildConfigDataValues(configs);
 
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
-      await configManager.setStringList(dataKey, jsonDataList);
-      await configManager.setString(dataKeyForNative, jsonEncode(jsonDataList));
+      await configManager.setValues(values);
     } else {
+      final jsonDataList = values[dataKey] as List<String>;
       final prefs = await SharedPreferences.getInstance();
       await prefs.setStringList(dataKey, jsonDataList);
-      await prefs.setString(dataKeyForNative, jsonEncode(jsonDataList));
+      await prefs.setString(
+        dataKeyForNative,
+        values[dataKeyForNative] as String,
+      );
     }
   }
 
+  Map<String, dynamic> _buildConfigDataValues(List<NetworkConfig> configs) {
+    final jsonDataList =
+        configs.map((config) => jsonEncode(config.toJson())).toList();
+    return {
+      dataKey: jsonDataList,
+      dataKeyForNative: jsonEncode(jsonDataList),
+    };
+  }
+
   Future<List<NetworkConfig>> loadData() async {
+    return _dataLock.synchronized(_loadDataUnlocked);
+  }
+
+  Future<List<NetworkConfig>> _loadDataUnlocked() async {
     List<String>? jsonDataList;
 
     if (Platform.isWindows) {
@@ -134,8 +167,10 @@ class DataPersistence {
     }
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
-      await configManager.setDouble('window-width', size.width);
-      await configManager.setDouble('window-height', size.height);
+      await configManager.setValues({
+        'window-width': size.width,
+        'window-height': size.height,
+      });
     } else {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('window-width', size.width);
@@ -184,8 +219,10 @@ class DataPersistence {
   Future<void> saveWindowPosition(Offset position) async {
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
-      await configManager.setDouble('window-x', position.dx);
-      await configManager.setDouble('window-y', position.dy);
+      await configManager.setValues({
+        'window-x': position.dx,
+        'window-y': position.dy,
+      });
     } else {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setDouble('window-x', position.dx);
@@ -373,10 +410,10 @@ class DataPersistence {
   Future<void> saveCustomThemeColor(Color color) async {
     if (Platform.isWindows) {
       final configManager = await _getConfigManager();
-      await configManager.setInt('custom-theme-color', color.value);
+      await configManager.setInt('custom-theme-color', color.toARGB32());
     } else {
       final prefs = await SharedPreferences.getInstance();
-      await prefs.setInt('custom-theme-color', color.value);
+      await prefs.setInt('custom-theme-color', color.toARGB32());
     }
   }
 
@@ -429,7 +466,7 @@ class DataPersistence {
           if (windowPosition != null)
             'window_position': {'x': windowPosition.dx, 'y': windowPosition.dy},
           if (themeMode != null) 'theme_mode': themeMode.index,
-          if (customColor != null) 'custom_theme_color': customColor.value,
+          if (customColor != null) 'custom_theme_color': customColor.toARGB32(),
           if (autoStart != null) 'auto_start': autoStart,
           if (silentStart != null) 'silent_start': silentStart,
           if (autoConnect != null) 'auto_connect': autoConnect,
@@ -444,7 +481,8 @@ class DataPersistence {
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
-      await file.writeAsString(JsonEncoder.withIndent('  ').convert(jsonData));
+      await file
+          .writeAsString(const JsonEncoder.withIndent('  ').convert(jsonData));
       debugPrint('配置导出成功: $filePath');
     } catch (e) {
       debugPrint('配置导出失败: $e');
@@ -461,60 +499,41 @@ class DataPersistence {
       }
       final content = await file.readAsString();
       final jsonData = jsonDecode(content);
-      final configs = (jsonData['configs'] as List)
-          .map((c) => NetworkConfig.fromJson(c))
-          .toList();
-      await saveData(configs);
-
-      // Windows平台恢复窗口和系统配置
-      if (Platform.isWindows && jsonData.containsKey('windows_settings')) {
-        final winSettings =
-            jsonData['windows_settings'] as Map<String, dynamic>;
-
-        if (winSettings.containsKey('window_size')) {
-          final size = winSettings['window_size'];
-          await saveWindowSize(Size(size['width'], size['height']));
-        }
-
-        if (winSettings.containsKey('window_position')) {
-          final pos = winSettings['window_position'];
-          await saveWindowPosition(Offset(pos['x'], pos['y']));
-        }
-
-        if (winSettings.containsKey('theme_mode')) {
-          await saveThemeMode(ThemeMode.values[winSettings['theme_mode']]);
-        }
-
-        if (winSettings.containsKey('custom_theme_color')) {
-          await saveCustomThemeColor(Color(winSettings['custom_theme_color']));
-        }
-
-        if (winSettings.containsKey('auto_start')) {
-          await saveAutoStart(winSettings['auto_start']);
-        }
-
-        if (winSettings.containsKey('silent_start')) {
-          await saveSilentStart(winSettings['silent_start']);
-        }
-
-        if (winSettings.containsKey('auto_connect')) {
-          await saveAutoConnect(winSettings['auto_connect']);
-        }
-
-        if (winSettings.containsKey('default_key')) {
-          await saveDefaultKey(winSettings['default_key']);
-        }
-
-        if (winSettings.containsKey('close_app')) {
-          await saveCloseApp(winSettings['close_app']);
-        }
-
-        if (winSettings.containsKey('always_on_top')) {
-          await saveAlwaysOnTop(winSettings['always_on_top']);
-        }
-
-        debugPrint('Windows配置恢复成功');
+      if (jsonData is! Map<String, dynamic>) {
+        throw const FormatException('配置文件格式错误：根节点必须是对象');
       }
+      final configItems = jsonData['configs'];
+      if (configItems is! List) {
+        throw const FormatException('配置文件格式错误：configs 必须是数组');
+      }
+      final configs = configItems
+          .map((c) => NetworkConfig.fromJson(Map<String, dynamic>.from(c)))
+          .toList();
+
+      await _dataLock.synchronized(() async {
+        if (Platform.isWindows) {
+          final values = _buildConfigDataValues(configs);
+          final removeKeys = <String>[];
+          final winSettings = jsonData['windows_settings'];
+          if (winSettings != null) {
+            if (winSettings is! Map<String, dynamic>) {
+              throw const FormatException(
+                '配置文件格式错误：windows_settings 必须是对象',
+              );
+            }
+            final winValues = _buildWindowsImportValues(winSettings);
+            values.addAll(winValues.values);
+            removeKeys.addAll(winValues.removeKeys);
+          }
+          final configManager = await _getConfigManager();
+          await configManager.setValues(values, removeKeys: removeKeys);
+          if (winSettings != null) {
+            debugPrint('Windows配置恢复成功');
+          }
+        } else {
+          await _saveDataUnlocked(configs);
+        }
+      });
 
       debugPrint('配置导入成功: ${configs.length}个配置');
     } catch (e) {
@@ -537,7 +556,8 @@ class DataPersistence {
       if (!await dir.exists()) {
         await dir.create(recursive: true);
       }
-      await file.writeAsString(JsonEncoder.withIndent('  ').convert(jsonData));
+      await file
+          .writeAsString(const JsonEncoder.withIndent('  ').convert(jsonData));
       debugPrint('单个配置导出成功: $filePath');
     } catch (e) {
       debugPrint('单个配置导出失败: $e');
@@ -554,15 +574,138 @@ class DataPersistence {
       }
       final content = await file.readAsString();
       final jsonData = jsonDecode(content);
-      final config = NetworkConfig.fromJson(jsonData['config']);
-      final configs = await loadData();
-      configs.add(config);
-      await saveData(configs);
+      if (jsonData is! Map<String, dynamic>) {
+        throw const FormatException('配置文件格式错误：根节点必须是对象');
+      }
+      final configJson = jsonData['config'];
+      if (configJson is! Map<String, dynamic>) {
+        throw const FormatException('配置文件格式错误：config 必须是对象');
+      }
+      final config = NetworkConfig.fromJson(configJson);
+      await _dataLock.synchronized(() async {
+        final configs = await _loadDataUnlocked();
+        configs.add(config);
+        await _saveDataUnlocked(configs);
+      });
       debugPrint('单个配置导入成功: ${config.configName}');
     } catch (e) {
       debugPrint('单个配置导入失败: $e');
       rethrow;
     }
+  }
+
+  _WindowsImportValues _buildWindowsImportValues(
+    Map<String, dynamic> winSettings,
+  ) {
+    final values = <String, dynamic>{};
+    final removeKeys = <String>[];
+
+    if (winSettings.containsKey('window_size')) {
+      final size = _requiredMap(winSettings['window_size'], 'window_size');
+      values['window-width'] =
+          _requiredDouble(size['width'], 'window_size.width');
+      values['window-height'] =
+          _requiredDouble(size['height'], 'window_size.height');
+    }
+
+    if (winSettings.containsKey('window_position')) {
+      final position =
+          _requiredMap(winSettings['window_position'], 'window_position');
+      values['window-x'] = _requiredDouble(position['x'], 'window_position.x');
+      values['window-y'] = _requiredDouble(position['y'], 'window_position.y');
+    }
+
+    if (winSettings.containsKey('theme_mode')) {
+      final themeModeIndex =
+          _requiredInt(winSettings['theme_mode'], 'theme_mode');
+      if (themeModeIndex < 0 || themeModeIndex >= ThemeMode.values.length) {
+        throw RangeError.range(
+          themeModeIndex,
+          0,
+          ThemeMode.values.length - 1,
+          'theme_mode',
+        );
+      }
+      values['theme-mode'] = themeModeIndex;
+    }
+
+    if (winSettings.containsKey('custom_theme_color')) {
+      values['custom-theme-color'] = _requiredInt(
+        winSettings['custom_theme_color'],
+        'custom_theme_color',
+      );
+    }
+
+    if (winSettings.containsKey('auto_start')) {
+      values['is-auto-start'] =
+          _requiredBool(winSettings['auto_start'], 'auto_start');
+    }
+
+    if (winSettings.containsKey('silent_start')) {
+      values['is-silent-start'] =
+          _requiredBool(winSettings['silent_start'], 'silent_start');
+    }
+
+    if (winSettings.containsKey('auto_connect')) {
+      values['is-auto-connect'] =
+          _requiredBool(winSettings['auto_connect'], 'auto_connect');
+    }
+
+    if (winSettings.containsKey('default_key')) {
+      values['default-key'] =
+          _requiredString(winSettings['default_key'], 'default_key');
+    }
+
+    if (winSettings.containsKey('close_app')) {
+      final closeApp = winSettings['close_app'];
+      if (closeApp == null) {
+        removeKeys.add('is-close-app');
+      } else {
+        values['is-close-app'] = _requiredBool(closeApp, 'close_app');
+      }
+    }
+
+    if (winSettings.containsKey('always_on_top')) {
+      values['is-always-on-top'] =
+          _requiredBool(winSettings['always_on_top'], 'always_on_top');
+    }
+
+    return _WindowsImportValues(values, removeKeys);
+  }
+
+  Map<String, dynamic> _requiredMap(dynamic value, String label) {
+    if (value is Map<String, dynamic>) {
+      return value;
+    }
+    throw FormatException('$label 必须是对象');
+  }
+
+  double _requiredDouble(dynamic value, String label) {
+    if (value is num) {
+      return value.toDouble();
+    }
+    throw FormatException('$label 必须是数字');
+  }
+
+  int _requiredInt(dynamic value, String label) {
+    if (value is int) {
+      return value;
+    }
+    throw FormatException('$label 必须是整数');
+  }
+
+  bool _requiredBool(dynamic value, String label) {
+    if (value is bool) {
+      return value;
+    }
+    throw FormatException('$label 必须是布尔值');
+  }
+
+  String _requiredString(dynamic value, String label) {
+    if (value is String) {
+      return value;
+    }
+    throw FormatException('$label 必须是字符串');
   }
 
   /// 获取持久化配置文件路径（用于日志打印）
@@ -624,4 +767,11 @@ class DataPersistence {
       const JsonEncoder.withIndent('  ').convert(sanitized),
     );
   }
+}
+
+class _WindowsImportValues {
+  const _WindowsImportValues(this.values, this.removeKeys);
+
+  final Map<String, dynamic> values;
+  final List<String> removeKeys;
 }

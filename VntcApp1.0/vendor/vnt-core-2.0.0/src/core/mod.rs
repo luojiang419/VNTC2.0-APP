@@ -73,6 +73,7 @@ impl NetworkManager {
                 task_group.clone(),
                 app_state.clone(),
                 tunnel_to_server.clone(),
+                server_rpc.clone(),
                 packet_crypto.clone(),
                 config.tunnel_port,
             )

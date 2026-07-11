@@ -44,6 +44,8 @@ flutter run
 
 - 便携包：`scripts/export_portable_package.ps1`
 - 安装包：`scripts/export_installer_package.ps1`
+- 便携包产物：`release/portable`
+- 安装包产物：`release/installer`
 
 版本号由 `scripts/build_version.txt` 自动管理，编译成功后自动递增。
 

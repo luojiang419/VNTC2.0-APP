@@ -3,8 +3,10 @@ $ErrorActionPreference = 'Stop'
 $projectDir = Resolve-Path (Join-Path $PSScriptRoot '..')
 $portableScript = Join-Path $PSScriptRoot 'export_portable_package.ps1'
 $versionFile = Join-Path $PSScriptRoot 'build_version.txt'
-$portableRoot = Join-Path $projectDir 'dist\portable'
-$installerRoot = Join-Path $projectDir 'dist\installer'
+$versionUtils = Join-Path $PSScriptRoot 'build_version_utils.ps1'
+$releaseRoot = Join-Path $projectDir 'release'
+$portableRoot = Join-Path $releaseRoot 'portable'
+$installerRoot = Join-Path $releaseRoot 'installer'
 $stageDir = Join-Path $installerRoot 'stage'
 $currentBuildVersion = ''
 $portablePackageDir = ''
@@ -148,29 +150,9 @@ function Convert-ToInnoPath {
     return ($Path -replace '\\', '\\')
 }
 
-function Get-CurrentBuildVersion {
-    $version = (Get-Content -LiteralPath $versionFile -Raw -Encoding UTF8).Trim()
-    if ([string]::IsNullOrWhiteSpace($version)) {
-        throw "Build version file is empty: $versionFile"
-    }
-    return $version
-}
-
-function Get-NextBuildVersion {
-    param([Parameter(Mandatory = $true)][string]$CurrentVersion)
-
-    $nextVersion = [decimal]::Parse(
-        $CurrentVersion,
-        [System.Globalization.CultureInfo]::InvariantCulture
-    ) + [decimal]'0.1'
-    return $nextVersion.ToString(
-        '0.0',
-        [System.Globalization.CultureInfo]::InvariantCulture
-    )
-}
-
 Require-Path -Path $portableScript -Label 'Portable export script'
 Require-Path -Path $versionFile -Label 'Build version file'
+Require-Path -Path $versionUtils -Label 'Build version utility script'
 Require-Path -Path $iconSource -Label 'Application icon'
 Require-Path -Path $languageSource -Label 'Chinese language file'
 Require-Path -Path $localizedTextSource -Label 'Chinese installer text file'
@@ -179,8 +161,9 @@ Require-Path -Path $bootstrapScriptSource -Label 'vntcrustdesk bootstrap script'
 Require-Path -Path $uninstallScriptSource -Label 'vntcrustdesk uninstall script'
 $innoCompiler = Ensure-InnoSetup
 Require-Path -Path $innoCompiler -Label 'Inno Setup compiler'
+. $versionUtils
 
-$currentBuildVersion = Get-CurrentBuildVersion
+$currentBuildVersion = Get-VntBuildVersion -VersionFile $versionFile
 $portablePackageDir = Join-Path $portableRoot "VNT_App_${currentBuildVersion}_Windows_Portable"
 $setupPath = Join-Path $installerRoot "VNT_App_${currentBuildVersion}_Windows_Setup.exe"
 $shaPath = Join-Path $installerRoot "VNT_App_${currentBuildVersion}_Windows_Setup.sha256"
@@ -194,14 +177,11 @@ if (-not $?) {
 
 Require-Path -Path $portablePackageDir -Label 'Portable package directory'
 Require-Path -Path (Join-Path $portablePackageDir 'vnt_app.exe') -Label 'Portable main executable'
-Require-Path -Path (Join-Path $portablePackageDir 'audio_io.dll') -Label 'Portable audio io dll'
-Require-Path -Path (Join-Path $portablePackageDir 'audioplayers_windows_plugin.dll') -Label 'Portable audioplayers plugin dll'
 Require-Path -Path (Join-Path $portablePackageDir 'dartjni.dll') -Label 'Portable dartjni dll'
 Require-Path -Path (Join-Path $portablePackageDir 'record_windows_plugin.dll') -Label 'Portable record plugin dll'
 Require-Path -Path (Join-Path $portablePackageDir 'sqlite3.dll') -Label 'Portable sqlite runtime dll'
 Require-Path -Path (Join-Path $portablePackageDir 'wintun.dll') -Label 'Portable wintun dll'
 Require-Path -Path (Join-Path $portablePackageDir 'native_assets.json') -Label 'Portable native assets manifest'
-Require-Path -Path (Join-Path $portablePackageDir 'config') -Label 'Portable config directory'
 Require-Path -Path (Join-Path $portablePackageDir 'dlls') -Label 'Portable dll directory'
 
 if (-not (Test-Path -LiteralPath $installerRoot)) {
@@ -264,6 +244,9 @@ DisableProgramGroupPage=no
 DisableDirPage=no
 DisableReadyMemo=no
 ShowLanguageDialog=no
+CloseApplications=yes
+RestartApplications=no
+RestartIfNeededByRun=no
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: ".\ChineseSimplified.isl"
@@ -300,7 +283,7 @@ Require-Path -Path $setupPath -Label 'Installer exe'
 $setupHash = Get-FileSha256 -Path $setupPath
 Set-Content -LiteralPath $shaPath -Value "$setupHash *VNT_App_${currentBuildVersion}_Windows_Setup.exe" -Encoding ASCII
 
-$nextBuildVersion = Get-NextBuildVersion -CurrentVersion $currentBuildVersion
+$nextBuildVersion = Get-NextVntBuildVersion -CurrentVersion $currentBuildVersion
 Set-Content -LiteralPath $versionFile -Value $nextBuildVersion -Encoding ASCII
 
 Write-Host "[OK] Installer exe: $setupPath"

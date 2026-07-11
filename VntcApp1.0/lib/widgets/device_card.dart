@@ -53,7 +53,7 @@ class DeviceCard extends StatelessWidget {
                 height: context.w(48),
                 decoration: BoxDecoration(
                   color: isOnline
-                      ? AppTheme.successColor.withOpacity(0.1)
+                      ? AppTheme.successColor.withValues(alpha: 0.1)
                       : (isDark ? Colors.grey[800] : Colors.grey[100]),
                   borderRadius: BorderRadius.circular(context.radius(12)),
                 ),
@@ -119,8 +119,9 @@ class DeviceCard extends StatelessWidget {
                               vertical: context.spacing(2),
                             ),
                             decoration: BoxDecoration(
-                              color: primaryColor.withOpacity(0.1),
-                              borderRadius: BorderRadius.circular(context.radius(4)),
+                              color: primaryColor.withValues(alpha: 0.1),
+                              borderRadius:
+                                  BorderRadius.circular(context.radius(4)),
                             ),
                             child: Text(
                               '本机',
@@ -195,7 +196,7 @@ class DeviceCard extends StatelessWidget {
                   vertical: context.spacing(4),
                 ),
                 decoration: BoxDecoration(
-                  color: _getStatusColor().withOpacity(0.1),
+                  color: _getStatusColor().withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(context.radius(6)),
                 ),
                 child: Text(
@@ -216,7 +217,9 @@ class DeviceCard extends StatelessWidget {
 
   IconData _getDeviceIcon() {
     final lowerName = name.toLowerCase();
-    if (lowerName.contains('phone') || lowerName.contains('android') || lowerName.contains('ios')) {
+    if (lowerName.contains('phone') ||
+        lowerName.contains('android') ||
+        lowerName.contains('ios')) {
       return Icons.phone_android;
     } else if (lowerName.contains('mac') || lowerName.contains('imac')) {
       return Icons.desktop_mac;
@@ -275,9 +278,8 @@ class DeviceListHeader extends StatelessWidget {
             style: TextStyle(
               fontSize: context.sp(18),
               fontWeight: FontWeight.w600,
-              color: isDark
-                  ? AppTheme.darkTextPrimary
-                  : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
           SizedBox(width: context.spacing(12)),
@@ -287,7 +289,7 @@ class DeviceListHeader extends StatelessWidget {
               vertical: context.spacing(4),
             ),
             decoration: BoxDecoration(
-              color: AppTheme.successColor.withOpacity(0.1),
+              color: AppTheme.successColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(context.radius(12)),
             ),
             child: Text(

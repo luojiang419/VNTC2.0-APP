@@ -521,8 +521,28 @@ impl ServerInfoCollection {
         } else {
             server_node.client_map.extend(map);
         }
+        self.refresh_client_simple_list(&guard);
+    }
+    /// 使用 RPC 返回的全量客户端列表刷新指定服务器的缓存。
+    /// RPC 列表不携带 data_version，因此保留原有版本，让后续 PingTurn 继续请求增量推送。
+    pub(crate) fn replace_client_list_from_rpc(
+        &self,
+        server_id: u32,
+        self_ip: Ipv4Addr,
+        client_list: Vec<ClientSimpleInfo>,
+    ) {
+        let mut guard = self.server_node_map.write();
+        let server_node = guard.entry(server_id).or_default();
+        server_node.client_map = client_list
+            .into_iter()
+            .filter(|v| v.ip != self_ip)
+            .map(|info| (info.ip, info))
+            .collect();
+        self.refresh_client_simple_list(&guard);
+    }
+    fn refresh_client_simple_list(&self, server_node_map: &HashMap<u32, ServerNodeInfo>) {
         let mut client_simple_map = HashMap::<Ipv4Addr, ClientSimpleInfo>::new();
-        for (_, server_node) in guard.iter() {
+        for server_node in server_node_map.values() {
             for (_, x) in server_node.client_map.iter() {
                 if let Some(v) = client_simple_map.get_mut(&x.ip) {
                     if x.online {
@@ -535,7 +555,7 @@ impl ServerInfoCollection {
         }
 
         let mut guard = self.client_simple_list.write();
-        *guard = client_simple_map.into_values().collect()
+        *guard = client_simple_map.into_values().collect();
     }
     pub fn set_server_connected(&self, server_id: u32, val: bool) -> bool {
         let mut mutex_guard = self.server_node_map.write();
@@ -693,6 +713,54 @@ impl AppState {
             .as_ref()
             .map(|v| v.tcp_stun.clone())
             .unwrap_or_default()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rpc_client_list_replaces_one_server_and_preserves_other_server_clients() {
+        let collection = ServerInfoCollection::default();
+        let self_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let first_peer = Ipv4Addr::new(10, 0, 0, 2);
+        let second_peer = Ipv4Addr::new(10, 0, 0, 3);
+
+        collection.replace_client_list_from_rpc(
+            0,
+            self_ip,
+            vec![
+                ClientSimpleInfo {
+                    ip: self_ip,
+                    online: true,
+                },
+                ClientSimpleInfo {
+                    ip: first_peer,
+                    online: true,
+                },
+            ],
+        );
+        collection.replace_client_list_from_rpc(
+            1,
+            self_ip,
+            vec![ClientSimpleInfo {
+                ip: second_peer,
+                online: true,
+            }],
+        );
+        collection.replace_client_list_from_rpc(
+            0,
+            self_ip,
+            vec![ClientSimpleInfo {
+                ip: first_peer,
+                online: false,
+            }],
+        );
+
+        assert!(!collection.exists_online_client_ip(&self_ip));
+        assert!(!collection.exists_online_client_ip(&first_peer));
+        assert!(collection.exists_online_client_ip(&second_peer));
     }
 }
 impl AppState {

@@ -6,20 +6,19 @@
 import '../frb_generated.dart';
 import 'package:flutter_rust_bridge/flutter_rust_bridge_for_generated.dart';
 
-// These functions are ignored because they are not marked as `pub`: `convert`
-// These types are ignored because they are not used by any `pub` functions: `VntApiCallbackInner`
-// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `connect`, `create_tun`, `error`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `from`, `handshake`, `peer_client_list`, `register`, `stop`, `success`
+// These functions are ignored because they are not marked as `pub`: `attempts_supports_tcp_fallback`, `build_android_tun_config`, `build_route_from_api`, `convert_to_core_config`, `convert`, `current_device_from_api`, `decode_bridge_options`, `decode_cert_mode`, `emit_connect`, `emit_error`, `emit_handshake`, `emit_register`, `emit_success`, `error_info_from_error`, `from_network_addr`, `is_transport_retryable_error`, `looks_like_ipv4`, `normalize_server_address_legacy`, `normalize_stun_servers`, `p2p_diagnostic_state`, `p2p_diagnostics_from_api`, `parse_server_addresses`, `prefix_from_mask`, `prefix_to_netmask`, `request_android_vpn_fd`, `spawn_dart_future`, `start_network`, `stopped`, `tcp_fallback_config_for_quic`, `total_traffic`
+// These types are ignored because they are not used by any `pub` functions: `BridgeOptions`, `VntApiCallbackInner`
+// These function are ignored because they are on traits that is not defined in current crate (put an empty `#[frb]` on it to unignore): `clone`, `clone`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `fmt`, `from`
+// These functions are ignored (category: IgnoreBecauseOwnerTyShouldIgnore): `default`
 
 Future<VntApi> vntInit(
         {required VntConfig vntConfig, required VntApiCallback call}) =>
     RustLib.instance.api
         .crateApiVntApiVntInit(vntConfig: vntConfig, call: call);
 
-/// 初始化日志系统，支持所有平台
-/// log_dir: 日志目录路径，例如 "logs" 或 "/data/data/app/logs"
-/// config_path: 持久化配置文件路径（用于打印到日志）
 void initLogWithPath({required String logDir, required String configPath}) =>
-    RustLib.instance.api.crateApiVntApiInitLogWithPath(logDir: logDir, configPath: configPath);
+    RustLib.instance.api
+        .crateApiVntApiInitLogWithPath(logDir: logDir, configPath: configPath);
 
 // Rust type: RustOpaqueMoi<flutter_rust_bridge::for_generated::RustAutoOpaqueInner<VntApi>>
 abstract class VntApi implements RustOpaqueInterface {
@@ -44,6 +43,8 @@ abstract class VntApi implements RustOpaqueInterface {
           {required VntConfig vntConfig, required VntApiCallback call}) =>
       RustLib.instance.api
           .crateApiVntApiVntApiNew(vntConfig: vntConfig, call: call);
+
+  RustP2pDiagnostics p2PDiagnostics();
 
   RustNatInfo? peerNatInfo({required String ip});
 
@@ -124,6 +125,9 @@ class RustCurrentDeviceInfo {
     required this.connectServer,
     required this.status,
   });
+
+  static Future<RustCurrentDeviceInfo> default_() =>
+      RustLib.instance.api.crateApiVntApiRustCurrentDeviceInfoDefault();
 
   @override
   int get hashCode =>
@@ -273,6 +277,9 @@ class RustNatInfo {
     this.ipv6,
   });
 
+  static Future<RustNatInfo> default_() =>
+      RustLib.instance.api.crateApiVntApiRustNatInfoDefault();
+
   @override
   int get hashCode =>
       publicIps.hashCode ^
@@ -289,6 +296,64 @@ class RustNatInfo {
           natType == other.natType &&
           localIpv4 == other.localIpv4 &&
           ipv6 == other.ipv6;
+}
+
+class RustP2pDiagnostics {
+  final String state;
+  final String reason;
+  final String? connectedServer;
+  final String natState;
+  final String natType;
+  final List<String> publicIps;
+  final BigInt onlinePeerCount;
+  final BigInt directPeerCount;
+  final BigInt relayPeerCount;
+  final BigInt routePeerCount;
+
+  const RustP2pDiagnostics({
+    required this.state,
+    required this.reason,
+    this.connectedServer,
+    required this.natState,
+    required this.natType,
+    required this.publicIps,
+    required this.onlinePeerCount,
+    required this.directPeerCount,
+    required this.relayPeerCount,
+    required this.routePeerCount,
+  });
+
+  static Future<RustP2pDiagnostics> default_() =>
+      RustLib.instance.api.crateApiVntApiRustP2PDiagnosticsDefault();
+
+  @override
+  int get hashCode =>
+      state.hashCode ^
+      reason.hashCode ^
+      connectedServer.hashCode ^
+      natState.hashCode ^
+      natType.hashCode ^
+      publicIps.hashCode ^
+      onlinePeerCount.hashCode ^
+      directPeerCount.hashCode ^
+      relayPeerCount.hashCode ^
+      routePeerCount.hashCode;
+
+  @override
+  bool operator ==(Object other) =>
+      identical(this, other) ||
+      other is RustP2pDiagnostics &&
+          runtimeType == other.runtimeType &&
+          state == other.state &&
+          reason == other.reason &&
+          connectedServer == other.connectedServer &&
+          natState == other.natState &&
+          natType == other.natType &&
+          publicIps == other.publicIps &&
+          onlinePeerCount == other.onlinePeerCount &&
+          directPeerCount == other.directPeerCount &&
+          relayPeerCount == other.relayPeerCount &&
+          routePeerCount == other.routePeerCount;
 }
 
 class RustPeerClientInfo {
