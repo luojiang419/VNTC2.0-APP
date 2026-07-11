@@ -6,19 +6,19 @@
 		<!-- Regs for shortcuts are defined in "Fragments/ShortcutProperties.wxs" -->
 		<!-- Component that persists the property values to the registry so they are available during an upgrade/modify -->
 		<DirectoryRef Id="INSTALLFOLDER_INNER">
-			<Component Id="Product.Registry.InstallFolder" Guid="4f9f42ce-20b3-4eb9-84a9-a76d1a8c63fa">
+			<Component Id="Product.Registry.InstallFolder" Guid="3821b55d-a894-4d7a-a07b-5b7a361c4de8">
 				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)">
 					<RegistryValue Type="string" Name="INSTALLFOLDER" Value="[INSTALLFOLDER_INNER]" />
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.DefaultIcon" Guid="582ff1df-9586-44ad-b0a8-e104ae903f71">
+			<Component Id="Product.Registry.DefaultIcon" Guid="3b2a4381-7ce1-4289-87ab-b4a63a6b9602">
 				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\DefaultIcon">
 					<RegistryValue Type="string" Value='"[INSTALLFOLDER_INNER]$(var.ExecutableName).exe",0' />
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.CommandPlay" Guid="92348ca6-fe36-46bb-b399-04531eec0911">
+			<Component Id="Product.Registry.CommandPlay" Guid="52bd2267-abc2-4eaf-80b3-b09a180ca141">
 				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell" />
 				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell\open" />
 				<RegistryKey Root="HKCR" Key="$(var.RegKeyRoot)\shell\open\command">
@@ -26,13 +26,13 @@
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.URLProtocol" Guid="6a719614-1300-4335-b345-4488e97c0039">
+			<Component Id="Product.Registry.URLProtocol" Guid="4ac5beba-3f9f-41ec-be3f-d5c495452fd4">
 				<RegistryKey Root="HKCR" Key="$(var.UriScheme)">
 					<RegistryValue Type="string" Name="URL Protocol" Value="" />
 				</RegistryKey>
 			</Component>
 
-			<Component Id="Product.Registry.Command" Guid="a9971f77-2f3a-4704-bf8d-acdcde0fa6ea">
+			<Component Id="Product.Registry.Command" Guid="63c8764c-e2f1-45c6-996a-c50cea00ca04">
 				<RegistryKey Root="HKCR" Key="$(var.UriScheme)\shell" />
 				<RegistryKey Root="HKCR" Key="$(var.UriScheme)\shell\open" />
 				<RegistryKey Root="HKCR" Key="$(var.UriScheme)\shell\open\command">
@@ -41,7 +41,7 @@
 			</Component>
 
 			<!--For compatibility with registry values from previous versions-->
-			<Component Id="Product.Registry.UninstallApp" Guid="2af1c3db-34df-4319-91bf-e909119270d7">
+			<Component Id="Product.Registry.UninstallApp" Guid="b9cc029b-58af-4474-bf9f-11d9cf3a1d90">
 				<RegistryKey Root="HKLM" Key="Software\Microsoft\Windows\CurrentVersion\Uninstall\$(var.Product)" >
 					<RegistryValue Type="string" Name="BuildDate" Value="$(var.BuildDate)" />
 					<RegistryValue Type="string" Name="share_rdp" Value="" />
@@ -50,18 +50,18 @@
 					<!--https://learn.microsoft.com/en-us/windows/win32/msi/property-reference-->
 					<RegistryValue Type="string" Name="DisplayName" Value="VNTC RustDesk" />
 					<RegistryValue Type="string" Name="DisplayIcon" Value="[INSTALLFOLDER_INNER]vntcrustdesk.exe" />
-					<RegistryValue Type="string" Name="DisplayVersion" Value="1.4.6.29676582" />
+					<RegistryValue Type="string" Name="DisplayVersion" Value="1.4.6.29726946" />
 					<RegistryValue Type="string" Name="Publisher" Value="VNTC" />
-					<RegistryValue Type="string" Name="InstallDate" Value="20260605" />
+					<RegistryValue Type="string" Name="InstallDate" Value="20260710" />
 					<RegistryValue Type="string" Name="InstallLocation" Value="[INSTALLFOLDER_INNER]" />
 					<RegistryValue Type="string" Name="InstallSource" Value="[InstallSource]" />
 					<RegistryValue Type="integer" Name="Language" Value="[ProductLanguage]" />
-					<RegistryValue Type="integer" Name="EstimatedSize" Value="77917" />
+					<RegistryValue Type="integer" Name="EstimatedSize" Value="76630" />
 					<RegistryValue Type="expandable" Name="ModifyPath" Value="MsiExec.exe /X [ProductCode]" />
 					<RegistryValue Type="integer" Id="NoModify" Value="1" />
 					<RegistryValue Type="expandable" Name="UninstallString" Value="MsiExec.exe /X [ProductCode]" />
 					<RegistryValue Type="expandable" Name="QuietUninstallString" Value="MsiExec.exe /qn /X [ProductCode]" />
-					<RegistryValue Type="string" Name="Version" Value="1.4.6.29676582" />
+					<RegistryValue Type="string" Name="Version" Value="1.4.6.29726946" />
 					<RegistryValue Type="integer" Name="VersionMajor" Value="1" />
 					<RegistryValue Type="integer" Name="VersionMinor" Value="4" />
 					<RegistryValue Type="integer" Name="VersionBuild" Value="6" />

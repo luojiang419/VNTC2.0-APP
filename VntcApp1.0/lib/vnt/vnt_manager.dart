@@ -87,7 +87,7 @@ end tell
       return null;
     }
 
-    return executablePath.substring(0, contentsIndex) + '.app';
+    return '${executablePath.substring(0, contentsIndex)}.app';
   }
 
   /// 启动时检查并请求权限（用于 app 启动时调用）
@@ -113,7 +113,7 @@ end tell
 
     final hasPrivilege = await hasRootPrivilege();
     if (hasPrivilege) {
-      print('✓ 已有管理员权限');
+      debugPrint('✓ 已有管理员权限');
       return false;
     }
 
@@ -247,6 +247,23 @@ class VntBox {
       'natType': natInfo.natType,
       'localIpv4': natInfo.localIpv4,
       'ipv6': natInfo.ipv6,
+      'p2pDiagnostics': p2pDiagnostics(),
+    };
+  }
+
+  Map<String, dynamic> p2pDiagnostics() {
+    final diagnostics = vntApi.p2PDiagnostics();
+    return {
+      'state': diagnostics.state,
+      'reason': diagnostics.reason,
+      'connectedServer': diagnostics.connectedServer,
+      'natState': diagnostics.natState,
+      'natType': diagnostics.natType,
+      'publicIps': diagnostics.publicIps,
+      'onlinePeerCount': diagnostics.onlinePeerCount,
+      'directPeerCount': diagnostics.directPeerCount,
+      'relayPeerCount': diagnostics.relayPeerCount,
+      'routePeerCount': diagnostics.routePeerCount,
     };
   }
 
@@ -275,9 +292,60 @@ class VntBox {
   }
 }
 
+typedef VntBoxFactory = Future<VntBox> Function(
+  NetworkConfig config,
+  SendPort uiCall, {
+  VoidCallback? onConnectionChanged,
+});
+
+@visibleForTesting
+class VntConnectionGate {
+  final Set<String> _creating = <String>{};
+  final Set<String> _cancelled = <String>{};
+
+  bool begin(String key) {
+    if (_creating.contains(key)) {
+      return false;
+    }
+    _creating.add(key);
+    _cancelled.remove(key);
+    return true;
+  }
+
+  void cancel(String key) {
+    if (_creating.contains(key)) {
+      _cancelled.add(key);
+    }
+  }
+
+  bool finish(String key) {
+    _creating.remove(key);
+    return !_cancelled.remove(key);
+  }
+
+  void fail(String key) {
+    _creating.remove(key);
+    _cancelled.remove(key);
+  }
+
+  bool get isCreating => _creating.isNotEmpty;
+
+  @visibleForTesting
+  bool isCreatingKey(String key) {
+    return _creating.contains(key);
+  }
+}
+
 class VntManager {
+  VntManager({VntBoxFactory? boxFactory})
+      : _boxFactory = boxFactory ?? VntBox.create;
+
   HashMap<String, VntBox> map = HashMap();
   bool connecting = false;
+  final VntBoxFactory _boxFactory;
+  final Map<String, Future<VntBox>> _pendingCreates =
+      <String, Future<VntBox>>{};
+  final VntConnectionGate _connectionGate = VntConnectionGate();
   // 记录主动断开连接的配置key，避免显示"服务已停止"提示
   final Set<String> _manualDisconnecting = {};
   final List<VoidCallback> _connectionListeners = <VoidCallback>[];
@@ -324,35 +392,86 @@ class VntManager {
     }
   }
 
-  Future<VntBox> create(NetworkConfig config, SendPort uiCall) async {
+  Future<VntBox> create(NetworkConfig config, SendPort uiCall) {
     var key = config.itemKey;
-    if (map.containsKey(key)) {
-      return map[key]!;
+    final existing = get(key);
+    if (existing != null) {
+      return Future.value(existing);
     }
-    try {
-      connecting = true;
+    final pending = _pendingCreates[key];
+    if (pending != null) {
+      return pending;
+    }
 
-      // macOS 权限检查：如果没有权限，请求重新启动
-      if (Platform.isMacOS) {
-        final needsRestart =
-            await MacOSPrivilegeManager.checkAndRequestPrivilege();
-        if (needsRestart) {
-          // 已经开始重启流程，抛出异常通知 UI
-          throw Exception('需要管理员权限，app 正在重新启动...');
-        }
+    _connectionGate.begin(key);
+    final completer = Completer<VntBox>();
+    _pendingCreates[key] = completer.future;
+    _refreshConnectingState();
+
+    unawaited(
+      _createAndTrack(key, config, uiCall).then<void>(
+        completer.complete,
+        onError: completer.completeError,
+      ),
+    );
+    return completer.future;
+  }
+
+  Future<VntBox> _createAndTrack(
+    String key,
+    NetworkConfig config,
+    SendPort uiCall,
+  ) async {
+    try {
+      final existing = get(key);
+      if (existing != null) {
+        return existing;
       }
 
-      var vntBox = await VntBox.create(
-        config,
-        uiCall,
-        onConnectionChanged: _notifyConnectionsChanged,
-      );
+      final vntBox = await _createBox(config, uiCall);
+      if (!_connectionGate.finish(key)) {
+        await vntBox.close();
+        throw StateError('连接已取消: $key');
+      }
+
+      final active = get(key);
+      if (active != null) {
+        await vntBox.close();
+        return active;
+      }
+
       map[key] = vntBox;
       _notifyConnectionsChanged();
       return vntBox;
+    } catch (_) {
+      _connectionGate.fail(key);
+      rethrow;
     } finally {
-      connecting = false;
+      _pendingCreates.remove(key);
+      _refreshConnectingState();
     }
+  }
+
+  Future<VntBox> _createBox(NetworkConfig config, SendPort uiCall) async {
+    // macOS 权限检查：如果没有权限，请求重新启动
+    if (Platform.isMacOS) {
+      final needsRestart =
+          await MacOSPrivilegeManager.checkAndRequestPrivilege();
+      if (needsRestart) {
+        // 已经开始重启流程，抛出异常通知 UI
+        throw Exception('需要管理员权限，app 正在重新启动...');
+      }
+    }
+
+    return _boxFactory(
+      config,
+      uiCall,
+      onConnectionChanged: _notifyConnectionsChanged,
+    );
+  }
+
+  void _refreshConnectingState() {
+    connecting = _connectionGate.isCreating;
   }
 
   VntBox? get(String key) {
@@ -364,11 +483,17 @@ class VntManager {
   }
 
   Future<void> remove(String key) async {
+    final hadPendingCreate = _pendingCreates.containsKey(key);
+    if (hadPendingCreate) {
+      _connectionGate.cancel(key);
+    }
     var vnt = map.remove(key);
     if (vnt != null) {
       await vnt.close();
     }
-    _notifyConnectionsChanged();
+    if (vnt != null || hadPendingCreate) {
+      _notifyConnectionsChanged();
+    }
     // 更新磁贴和小组件状态
     if (Platform.isAndroid) {
       VntAppCall.updateWidgetAndTile(hasConnection());
@@ -376,6 +501,9 @@ class VntManager {
   }
 
   Future<void> removeAll() async {
+    for (final key in _pendingCreates.keys.toList()) {
+      _connectionGate.cancel(key);
+    }
     for (var element in map.entries) {
       await element.value.close();
     }

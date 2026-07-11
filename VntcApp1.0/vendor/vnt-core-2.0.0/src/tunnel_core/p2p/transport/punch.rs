@@ -8,38 +8,110 @@ use crate::tunnel_core::p2p::route_table::RouteTable;
 use crate::tunnel_core::server::outbound::ServerOutbound;
 use anyhow::bail;
 use log::error;
+use parking_lot::Mutex;
 use rand::seq::SliceRandom;
 use rust_p2p_core::punch::{PunchModel, Puncher};
+use std::collections::{HashMap, HashSet};
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::sync::Arc;
+use std::time::{Duration, Instant};
+use tokio::sync::mpsc;
+
+const BACKGROUND_PUNCH_INTERVAL: Duration = Duration::from_secs(5);
+const BACKGROUND_PUNCH_LIMIT: usize = 5;
+const PRIORITY_PUNCH_QUEUE_CAPACITY: usize = 64;
+const PRIORITY_PUNCH_COOLDOWN: Duration = Duration::from_secs(1);
 
 pub struct PunchTaskContext {
     pub network: SharedNetworkAddr,
     pub server_info: ServerInfoCollection,
     pub punch_backoff: PunchBackoff,
     pub punch_info_getter: PunchInfoGetter,
+    pub priority_queue: PunchRequestQueue,
 }
 
-pub type PunchInfoGetter = std::sync::Arc<dyn Fn() -> Option<PunchInfo> + Send + Sync>;
+pub type PunchInfoGetter = Arc<dyn Fn() -> Option<PunchInfo> + Send + Sync>;
+
+#[derive(Clone)]
+pub struct PunchRequestQueue {
+    sender: mpsc::Sender<Ipv4Addr>,
+    pending: Arc<Mutex<HashSet<Ipv4Addr>>>,
+    last_requested: Arc<Mutex<HashMap<Ipv4Addr, Instant>>>,
+}
+
+impl PunchRequestQueue {
+    pub fn new() -> (Self, mpsc::Receiver<Ipv4Addr>) {
+        let (sender, receiver) = mpsc::channel(PRIORITY_PUNCH_QUEUE_CAPACITY);
+        (
+            Self {
+                sender,
+                pending: Arc::new(Mutex::new(HashSet::new())),
+                last_requested: Arc::new(Mutex::new(HashMap::new())),
+            },
+            receiver,
+        )
+    }
+
+    pub fn request(&self, dest_ip: Ipv4Addr) -> bool {
+        let now = Instant::now();
+        {
+            let mut last_requested = self.last_requested.lock();
+            last_requested.retain(|_, requested_at| {
+                now.duration_since(*requested_at) < PRIORITY_PUNCH_COOLDOWN
+            });
+            if last_requested.contains_key(&dest_ip) {
+                return false;
+            }
+            last_requested.insert(dest_ip, now);
+        }
+
+        let mut pending = self.pending.lock();
+        if !pending.insert(dest_ip) {
+            return false;
+        }
+        if self.sender.try_send(dest_ip).is_ok() {
+            return true;
+        }
+        pending.remove(&dest_ip);
+        self.last_requested.lock().remove(&dest_ip);
+        false
+    }
+
+    pub fn complete(&self, dest_ip: Ipv4Addr) {
+        self.pending.lock().remove(&dest_ip);
+    }
+}
 
 pub async fn punch_task(
     tunnel_to_server: ServerOutbound,
     route_table: RouteTable,
     ctx: PunchTaskContext,
+    mut priority_requests: mpsc::Receiver<Ipv4Addr>,
 ) -> anyhow::Result<()> {
+    let mut background_tick = tokio::time::interval(BACKGROUND_PUNCH_INTERVAL);
+    background_tick.tick().await;
     loop {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+        let (destinations, is_priority) = tokio::select! {
+            biased;
+            Some(dest_ip) = priority_requests.recv() => {
+                ctx.priority_queue.complete(dest_ip);
+                (vec![dest_ip], true)
+            }
+            _ = background_tick.tick() => {
+                (background_punch_targets(ctx.server_info.client_online_ips()), false)
+            }
+        };
         let Some(src_ip) = ctx.network.ip() else {
             continue;
         };
         let Some(punch_info) = (ctx.punch_info_getter)() else {
             continue;
         };
-        let mut list = ctx.server_info.client_online_ips();
-        list.shuffle(&mut rand::rng());
-        list.truncate(5);
-        for dest_ip in list {
-            if dest_ip <= src_ip {
+        for dest_ip in destinations {
+            if dest_ip == src_ip || (!is_priority && dest_ip <= src_ip) {
+                continue;
+            }
+            if !ctx.server_info.exists_online_client_ip(&dest_ip) {
                 continue;
             }
             if ctx.server_info.is_any_server_connected(None) && route_table.need_punch(&dest_ip) {
@@ -64,6 +136,12 @@ pub async fn punch_task(
             }
         }
     }
+}
+
+fn background_punch_targets(mut online_ips: Vec<Ipv4Addr>) -> Vec<Ipv4Addr> {
+    online_ips.shuffle(&mut rand::rng());
+    online_ips.truncate(BACKGROUND_PUNCH_LIMIT);
+    online_ips
 }
 #[derive(Clone)]
 pub struct NatPuncher {
@@ -145,4 +223,23 @@ async fn punch_now(
     let punch_info = rust_p2p_core::punch::PunchInfo::new(PunchModel::all(), nat_info.nat_info);
     puncher.punch_now(Some(buf), buf, punch_info).await?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::PunchRequestQueue;
+    use std::net::Ipv4Addr;
+
+    #[test]
+    fn priority_queue_deduplicates_and_cools_down_target_requests() {
+        let (queue, mut receiver) = PunchRequestQueue::new();
+        let target = Ipv4Addr::new(10, 0, 0, 2);
+
+        assert!(queue.request(target));
+        assert!(!queue.request(target));
+        assert_eq!(receiver.try_recv().unwrap(), target);
+
+        queue.complete(target);
+        assert!(!queue.request(target));
+    }
 }

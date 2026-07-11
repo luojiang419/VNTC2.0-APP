@@ -50,7 +50,7 @@ void main() {
     expect(runtime, isNotNull);
     expect(runtime!.managedInstall, isTrue);
     expect(runtime.appBundlePath, path.normalize(runtimeApp));
-    expect(runtime.executablePath, runtimeExecutable);
+    expect(runtime.executablePath, path.normalize(runtimeExecutable));
     expect(runtime.version, '2.0.0');
   });
 

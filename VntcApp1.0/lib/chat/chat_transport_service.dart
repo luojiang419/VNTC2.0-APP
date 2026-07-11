@@ -12,6 +12,15 @@ typedef ChatPacketHandler = Future<void> Function(
 );
 
 class ChatTransportService {
+  ChatTransportService({
+    int? maxPacketBytes,
+    Duration? readTimeout,
+  })  : _maxPacketBytes =
+            maxPacketBytes ?? ChatConstants.maxTransportPacketBytes,
+        _readTimeout = readTimeout ?? ChatConstants.transportReadTimeout;
+
+  final int _maxPacketBytes;
+  final Duration _readTimeout;
   ServerSocket? _server;
   ChatPacketHandler? _handler;
 
@@ -67,10 +76,45 @@ class ChatTransportService {
   }
 
   void _handleClient(Socket socket) {
+    final remoteAddress = socket.remoteAddress;
+    final remoteEndpoint = '${remoteAddress.address}:${socket.remotePort}';
     final bytes = <int>[];
-    socket.listen(
-      bytes.addAll,
+    Timer? readTimer;
+    StreamSubscription<List<int>>? subscription;
+    var closedByGuard = false;
+
+    void closeByGuard(String reason) {
+      if (closedByGuard) {
+        return;
+      }
+      closedByGuard = true;
+      readTimer?.cancel();
+      unawaited(subscription?.cancel());
+      socket.destroy();
+      unawaited(
+        ChatLog.write(
+          '聊天连接已关闭 remote=$remoteEndpoint reason=$reason bytes=${bytes.length}',
+        ),
+      );
+    }
+
+    readTimer = Timer(
+      _readTimeout,
+      () => closeByGuard('read_timeout'),
+    );
+    subscription = socket.listen(
+      (chunk) {
+        if (bytes.length + chunk.length > _maxPacketBytes) {
+          closeByGuard('packet_too_large');
+          return;
+        }
+        bytes.addAll(chunk);
+      },
       onDone: () async {
+        readTimer?.cancel();
+        if (closedByGuard) {
+          return;
+        }
         try {
           final payload = utf8.decode(bytes, allowMalformed: true).trim();
           if (payload.isEmpty) {
@@ -84,19 +128,20 @@ class ChatTransportService {
           final handler = _handler;
           if (handler != null) {
             await ChatLog.write(
-              '收到聊天报文 type=${packet.type} remote=${socket.remoteAddress.address}:${socket.remotePort}',
+              '收到聊天报文 type=${packet.type} remote=$remoteEndpoint',
             );
-            await handler(packet, socket.remoteAddress);
+            await handler(packet, remoteAddress);
           }
         } catch (error) {
           await ChatLog.write(
-            '聊天报文解码失败 remote=${socket.remoteAddress.address}:${socket.remotePort} error=$error bytes=${bytes.length}',
+            '聊天报文解码失败 remote=$remoteEndpoint error=$error bytes=${bytes.length}',
           );
         }
       },
       onError: (error) async {
+        readTimer?.cancel();
         await ChatLog.write(
-          '聊天连接读取失败 remote=${socket.remoteAddress.address}:${socket.remotePort} error=$error',
+          '聊天连接读取失败 remote=$remoteEndpoint error=$error',
         );
       },
       cancelOnError: true,

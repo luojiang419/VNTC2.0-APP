@@ -11,6 +11,7 @@ import 'package:vnt_app/chat/chat_firewall_service.dart';
 import 'package:vnt_app/chat/chat_log.dart';
 import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/chat/chat_presence_service.dart';
+import 'package:vnt_app/chat/chat_security.dart';
 import 'package:vnt_app/chat/chat_storage.dart';
 import 'package:vnt_app/chat/chat_transport_service.dart';
 import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
@@ -149,7 +150,59 @@ class ChatManager extends ChangeNotifier {
         return localHallId;
       }
     }
+    for (final entry in _localNodes.entries) {
+      if (entry.value.legacyHallIds.any(
+        (alias) =>
+            alias == hallId || normalizeChatHallId(alias) == normalizedHallId,
+      )) {
+        return entry.key;
+      }
+    }
     return null;
+  }
+
+  Future<void> _mergeDirectConversationAliases() async {
+    final conversations = await _storage.loadConversationsByType(
+      ChatConversationType.direct,
+    );
+    for (final conversation in conversations) {
+      final localHallId = _resolveLocalHallId(conversation.hallId);
+      final peerVirtualIp =
+          normalizeChatVirtualIp(conversation.peerVirtualIp ?? '');
+      if (localHallId == null || peerVirtualIp.isEmpty) {
+        continue;
+      }
+      final localNode = _localNodes[localHallId]!;
+      final canonicalId = buildDirectConversationId(
+        hallId: localHallId,
+        firstVirtualIp: localNode.hall.localVirtualIp,
+        secondVirtualIp: peerVirtualIp,
+      );
+      if (conversation.id == canonicalId &&
+          conversation.hallId == localHallId &&
+          conversation.peerVirtualIp == peerVirtualIp) {
+        continue;
+      }
+      await _storage.mergeConversationAlias(
+        sourceConversationId: conversation.id,
+        targetConversation: ChatConversation(
+          id: canonicalId,
+          type: ChatConversationType.direct,
+          hallId: localHallId,
+          title: conversation.title,
+          unreadCount: conversation.unreadCount,
+          lastReadAtEpochMs: conversation.lastReadAtEpochMs,
+          lastMessageAtEpochMs: conversation.lastMessageAtEpochMs,
+          updatedAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+          metadataJson: conversation.metadataJson,
+          peerVirtualIp: peerVirtualIp,
+          peerDisplayName: conversation.peerDisplayName,
+        ),
+      );
+      if (_selectedConversationId == conversation.id) {
+        _selectedConversationId = canonicalId;
+      }
+    }
   }
 
   String? _canonicalRoomId(String? roomId, String localHallId) {
@@ -784,6 +837,17 @@ class ChatManager extends ChangeNotifier {
       );
 
       try {
+        await _mergeDirectConversationAliases();
+      } catch (error, stackTrace) {
+        await _recordRefreshIssue(
+          refreshIssues,
+          '合并重复私聊会话',
+          error,
+          stackTrace,
+        );
+      }
+
+      try {
         await _ensureHallConversations();
       } catch (error, stackTrace) {
         await _recordRefreshIssue(
@@ -1358,6 +1422,15 @@ class ChatManager extends ChangeNotifier {
       '处理聊天报文 type=${packet.type} remote=${remoteAddress.address}',
     );
     if (packet.type == 'message' && packet.message != null) {
+      if (!isChatRemoteAddressConsistent(
+        remoteAddress: remoteAddress.address,
+        declaredVirtualIp: packet.message!.senderVirtualIp,
+      )) {
+        await ChatLog.write(
+          '丢弃身份不匹配的聊天消息 remote=${remoteAddress.address} declared=${packet.message!.senderVirtualIp}',
+        );
+        return;
+      }
       await _handleIncomingMessage(
         packet.message!,
         attachmentBase64: packet.attachmentBase64,
@@ -1365,6 +1438,15 @@ class ChatManager extends ChangeNotifier {
       return;
     }
     if (packet.type == 'sync_request' && packet.syncRequest != null) {
+      if (!isChatRemoteAddressConsistent(
+        remoteAddress: remoteAddress.address,
+        declaredVirtualIp: packet.syncRequest!.requesterVirtualIp,
+      )) {
+        await ChatLog.write(
+          '丢弃身份不匹配的聊天补同步请求 remote=${remoteAddress.address} declared=${packet.syncRequest!.requesterVirtualIp}',
+        );
+        return;
+      }
       await _handleSyncRequest(packet.syncRequest!, remoteAddress.address);
     }
   }

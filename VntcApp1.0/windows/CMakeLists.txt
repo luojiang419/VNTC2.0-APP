@@ -76,8 +76,12 @@ function(APPLY_STANDARD_SETTINGS TARGET)
   target_compile_options(${TARGET} PRIVATE /EHsc)
   target_compile_definitions(${TARGET} PRIVATE "_HAS_EXCEPTIONS=0")
   target_compile_definitions(${TARGET} PRIVATE "$<$<CONFIG:Debug>:_DEBUG>")
-  # Link YY-Thunks to all targets for Windows 7 support
-  target_link_libraries(${TARGET} PRIVATE "${YY_THUNKS_OBJ}")
+  # Static libraries propagate this object into their consumers. Link it only
+  # to final Windows modules so the linker receives it exactly once per module.
+  get_target_property(TARGET_TYPE ${TARGET} TYPE)
+  if(TARGET_TYPE STREQUAL "EXECUTABLE" OR TARGET_TYPE STREQUAL "SHARED_LIBRARY" OR TARGET_TYPE STREQUAL "MODULE_LIBRARY")
+    target_link_libraries(${TARGET} PRIVATE "${YY_THUNKS_OBJ}")
+  endif()
 endfunction()
 
 # Flutter library and tool build rules.

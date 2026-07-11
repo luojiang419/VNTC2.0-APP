@@ -33,14 +33,16 @@ class ConfigCard extends StatelessWidget {
       child: Container(
         padding: ResponsiveUtils.padding(context, all: 16),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+          color: isDark
+              ? AppTheme.darkCardBackground
+              : AppTheme.lightCardBackground,
           borderRadius: BorderRadius.circular(context.radius(16)),
           border: isConnected
               ? Border.all(color: AppTheme.successColor, width: 2)
               : null,
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
               blurRadius: 10,
               offset: const Offset(0, 4),
             ),
@@ -57,12 +59,15 @@ class ConfigCard extends StatelessWidget {
                   width: context.w(12),
                   height: context.w(12),
                   decoration: BoxDecoration(
-                    color: isConnected ? AppTheme.successColor : AppTheme.warningColor,
+                    color: isConnected
+                        ? AppTheme.successColor
+                        : AppTheme.warningColor,
                     shape: BoxShape.circle,
                     boxShadow: isConnected
                         ? [
                             BoxShadow(
-                              color: AppTheme.successColor.withOpacity(0.4),
+                              color:
+                                  AppTheme.successColor.withValues(alpha: 0.4),
                               blurRadius: 8,
                               spreadRadius: 2,
                             ),
@@ -79,7 +84,9 @@ class ConfigCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: context.sp(18),
                       fontWeight: FontWeight.w600,
-                      color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                      color: isDark
+                          ? AppTheme.darkTextPrimary
+                          : AppTheme.lightTextPrimary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -90,12 +97,16 @@ class ConfigCard extends StatelessWidget {
                   icon: Icon(
                     Icons.more_vert,
                     size: context.iconSize(24),
-                    color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
                   ),
                   shape: RoundedRectangleBorder(
                     borderRadius: BorderRadius.circular(context.radius(12)),
                   ),
-                  color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+                  color: isDark
+                      ? AppTheme.darkCardBackground
+                      : AppTheme.lightCardBackground,
                   onSelected: (value) {
                     switch (value) {
                       case 'edit':
@@ -114,13 +125,16 @@ class ConfigCard extends StatelessWidget {
                       value: 'edit',
                       child: Row(
                         children: [
-                          Icon(Icons.edit_outlined, size: context.iconSize(20), color: primaryColor),
+                          Icon(Icons.edit_outlined,
+                              size: context.iconSize(20), color: primaryColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
                             '编辑',
                             style: TextStyle(
                               fontSize: context.sp(14),
-                              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                              color: isDark
+                                  ? AppTheme.darkTextPrimary
+                                  : AppTheme.lightTextPrimary,
                             ),
                           ),
                         ],
@@ -130,13 +144,17 @@ class ConfigCard extends StatelessWidget {
                       value: 'duplicate',
                       child: Row(
                         children: [
-                          Icon(Icons.copy_outlined, size: context.iconSize(20), color: AppTheme.infoColor),
+                          Icon(Icons.copy_outlined,
+                              size: context.iconSize(20),
+                              color: AppTheme.infoColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
                             '复制',
                             style: TextStyle(
                               fontSize: context.sp(14),
-                              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                              color: isDark
+                                  ? AppTheme.darkTextPrimary
+                                  : AppTheme.lightTextPrimary,
                             ),
                           ),
                         ],
@@ -146,7 +164,9 @@ class ConfigCard extends StatelessWidget {
                       value: 'delete',
                       child: Row(
                         children: [
-                          Icon(Icons.delete_outlined, size: context.iconSize(20), color: AppTheme.errorColor),
+                          Icon(Icons.delete_outlined,
+                              size: context.iconSize(20),
+                              color: AppTheme.errorColor),
                           SizedBox(width: context.spacing(12)),
                           Text(
                             '删除',
@@ -213,8 +233,8 @@ class ConfigCard extends StatelessWidget {
                   ),
                   decoration: BoxDecoration(
                     color: isConnected
-                        ? AppTheme.successColor.withOpacity(0.1)
-                        : AppTheme.warningColor.withOpacity(0.1),
+                        ? AppTheme.successColor.withValues(alpha: 0.1)
+                        : AppTheme.warningColor.withValues(alpha: 0.1),
                     borderRadius: BorderRadius.circular(context.radius(20)),
                   ),
                   child: Text(
@@ -222,7 +242,9 @@ class ConfigCard extends StatelessWidget {
                     style: TextStyle(
                       fontSize: context.fontSmall,
                       fontWeight: FontWeight.w500,
-                      color: isConnected ? AppTheme.successColor : AppTheme.warningColor,
+                      color: isConnected
+                          ? AppTheme.successColor
+                          : AppTheme.warningColor,
                     ),
                   ),
                 ),
@@ -232,7 +254,8 @@ class ConfigCard extends StatelessWidget {
                 ElevatedButton(
                   onPressed: onTap,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: isConnected ? AppTheme.successColor : primaryColor,
+                    backgroundColor:
+                        isConnected ? AppTheme.successColor : primaryColor,
                     foregroundColor: Colors.white,
                     padding: EdgeInsets.symmetric(
                       horizontal: context.spacing(20),
@@ -253,20 +276,24 @@ class ConfigCard extends StatelessWidget {
     );
   }
 
-  Widget _buildInfoRow(BuildContext context, bool isDark, IconData icon, String label, String value) {
+  Widget _buildInfoRow(BuildContext context, bool isDark, IconData icon,
+      String label, String value) {
     return Row(
       children: [
         Icon(
           icon,
           size: context.iconSize(16),
-          color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+          color:
+              isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
         ),
         SizedBox(width: context.spacing(8)),
         Text(
           '$label: ',
           style: TextStyle(
             fontSize: context.fontSmall,
-            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+            color: isDark
+                ? AppTheme.darkTextSecondary
+                : AppTheme.lightTextSecondary,
           ),
         ),
         Expanded(
@@ -274,7 +301,8 @@ class ConfigCard extends StatelessWidget {
             value,
             style: TextStyle(
               fontSize: context.fontSmall,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
             overflow: TextOverflow.ellipsis,
           ),

@@ -117,6 +117,123 @@ void main() {
     expect(unreadAfterRead, 0);
   });
 
+  test('重复私聊会话可合并到规范会话并保留消息', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    const legacyId = 'dm:hall:tcp://server:2225|net:10.0.0.1|10.0.0.2';
+    const canonicalId = 'dm:hall:server:2225|net:10.0.0.1|10.0.0.2';
+    const legacyConversation = ChatConversation(
+      id: legacyId,
+      type: ChatConversationType.direct,
+      hallId: 'hall:tcp://server:2225|net',
+      title: '设备 B',
+      unreadCount: 1,
+      lastReadAtEpochMs: 0,
+      lastMessageAtEpochMs: 1717286401000,
+      updatedAtEpochMs: 1717286401000,
+      metadataJson: '{}',
+      peerVirtualIp: '10.0.0.2',
+      peerDisplayName: '设备 B',
+    );
+    await storage.upsertConversation(legacyConversation);
+    await storage.upsertMessage(
+      const ChatMessageRecord(
+        id: 'legacy-msg',
+        conversationId: legacyId,
+        hallId: 'hall:tcp://server:2225|net',
+        conversationType: ChatConversationType.direct,
+        senderVirtualIp: '10.0.0.2',
+        senderName: '设备 B',
+        senderSeq: 1,
+        direction: ChatMessageDirection.incoming,
+        contentType: ChatMessageContentType.text,
+        status: ChatMessageStatus.sent,
+        text: '回复消息',
+        isSyncMessage: false,
+        isRead: false,
+        sentAtEpochMs: 1717286401000,
+        createdAtEpochMs: 1717286401000,
+        metadataJson: '{}',
+        peerVirtualIp: '10.0.0.2',
+      ),
+      incrementUnread: true,
+    );
+
+    await storage.mergeConversationAlias(
+      sourceConversationId: legacyId,
+      targetConversation: const ChatConversation(
+        id: canonicalId,
+        type: ChatConversationType.direct,
+        hallId: 'hall:server:2225|net',
+        title: '设备 B',
+        unreadCount: 0,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 0,
+        updatedAtEpochMs: 1717286402000,
+        metadataJson: '{}',
+        peerVirtualIp: '10.0.0.2',
+        peerDisplayName: '设备 B',
+      ),
+    );
+
+    expect(await storage.getConversation(legacyId), isNull);
+    final merged = await storage.getConversation(canonicalId);
+    expect(merged, isNotNull);
+    expect(merged?.unreadCount, 1);
+    final messages = await storage.loadMessages(canonicalId);
+    expect(messages.map((message) => message.text), contains('回复消息'));
+    expect(messages.single.hallId, 'hall:server:2225|net');
+  });
+
+  test('附件路径必须限制在附件目录内', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    await expectLater(
+      storage.resolveAttachmentPath('../outside.txt'),
+      throwsArgumentError,
+    );
+    await expectLater(
+      storage.resolveAttachmentPath(r'..\outside.txt'),
+      throwsArgumentError,
+    );
+    await expectLater(
+      storage.resolveAttachmentPath(path.join(tempDir.path, 'outside.txt')),
+      throwsArgumentError,
+    );
+    await expectLater(
+      storage.writeAttachmentBytes('../outside.txt', <int>[1, 2, 3]),
+      throwsArgumentError,
+    );
+
+    final outsideFile = File(path.join(tempDir.path, 'outside.txt'));
+    expect(await outsideFile.exists(), isFalse);
+  });
+
+  test('合法附件路径仍可写入并解析到附件目录内', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    await storage.writeAttachmentBytes('nested/sample.txt', <int>[1, 2, 3]);
+
+    final resolved = await storage.resolveAttachmentPath('nested/sample.txt');
+    expect(path.isWithin(attachmentDirPath, resolved), isTrue);
+    expect(await File(resolved).readAsBytes(), <int>[1, 2, 3]);
+  });
+
   group('默认聊天室存储目录', () {
     test('macOS 类平台使用应用支持目录，避免写入根目录 /config', () {
       final resolved =

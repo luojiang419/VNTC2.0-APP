@@ -27,14 +27,16 @@ import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/config_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 import 'package:vnt_app/chat/chat_manager.dart';
+import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
+import 'package:vnt_app/update/app_updater_page.dart';
+import 'package:vnt_app/update/update_session.dart';
 
 final SystemTray systemTray = SystemTray();
 final AppWindow appWindow = AppWindow();
 
 /// 是否静默启动（通过 --silent 命令行参数触发）
-final bool isSilentStart =
-    Platform.isWindows && Platform.executableArguments.contains('--silent');
+bool isSilentStart = false;
 
 void _writeBootTrace(String message) {
   try {
@@ -106,8 +108,44 @@ String _formatDisplaysForLog(List<Display> displays) {
   }).join(',');
 }
 
-Future<void> main() async {
-  _writeBootTrace('main enter');
+Future<void> _runUpdateSessionApp(AppUpdateSession session) async {
+  _writeBootTrace('update session enter ${session.sessionId}');
+  WidgetsFlutterBinding.ensureInitialized();
+
+  if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+    await windowManager.ensureInitialized();
+    const windowOptions = WindowOptions(
+      size: Size(520, 320),
+      minimumSize: Size(420, 260),
+      center: true,
+      backgroundColor: Colors.transparent,
+      skipTaskbar: false,
+      titleBarStyle: TitleBarStyle.normal,
+    );
+    await windowManager.waitUntilReadyToShow(windowOptions, () async {
+      await windowManager.setTitle('VNTC APP2.0 更新');
+      await windowManager.show();
+      await windowManager.focus();
+    });
+  }
+
+  runApp(AppUpdaterApp(session: session));
+}
+
+Future<void> main(List<String> args) async {
+  final startupArgs = <String>[
+    ...args,
+    for (final arg in Platform.executableArguments)
+      if (arg.startsWith('--')) arg,
+  ];
+  isSilentStart = Platform.isWindows && startupArgs.contains('--silent');
+
+  _writeBootTrace('main enter args=${startupArgs.length}');
+  final updateSession = AppUpdateSession.tryParse(startupArgs);
+  if (updateSession != null) {
+    await _runUpdateSessionApp(updateSession);
+    return;
+  }
 
   // macOS 启动时先检查权限，在Flutter初始化之前
   // 避免显示窗口后再提示输入密码
@@ -382,7 +420,7 @@ class _VntAppState extends State<VntApp> {
         },
         home: PopScope(
           canPop: false,
-          onPopInvoked: (didPop) {
+          onPopInvokedWithResult: (didPop, result) {
             if (didPop) return;
             if (Platform.isAndroid) {
               VntAppCall.moveTaskToBack();
@@ -422,7 +460,8 @@ class _MainAppState extends State<MainApp> with WindowListener {
     if (ChatManager.instance.supported) {
       unawaited(ChatManager.instance.start());
     }
-    if (!Platform.isAndroid) {
+    if (!Platform.isAndroid ||
+        RemoteAssistConstants.androidRemoteAssistEnabled) {
       unawaited(RemoteAssistManager.instance.start());
     }
 

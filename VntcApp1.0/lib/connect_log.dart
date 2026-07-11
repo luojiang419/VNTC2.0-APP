@@ -14,11 +14,12 @@ import 'package:vnt_app/file_saver.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:file_picker/file_picker.dart';
 import 'package:share_plus/share_plus.dart';
-import 'package:cross_file/cross_file.dart';
 
 class LogPage extends StatefulWidget {
+  const LogPage({super.key});
+
   @override
-  _LogPageState createState() => _LogPageState();
+  State<LogPage> createState() => _LogPageState();
 }
 
 class _LogPageState extends State<LogPage> {
@@ -29,10 +30,10 @@ class _LogPageState extends State<LogPage> {
   String? _errorMessage;
   List<String> _availableLogFiles = [];
   String? _currentLogFile;
-  
+
   // 性能优化：限制显示的日志行数
   static const int _maxDisplayLines = 1000; // 最多显示1000行
-  static const int _maxLoadLines = 2000;    // 最多加载2000行（从文件末尾开始）
+  static const int _maxLoadLines = 2000; // 最多加载2000行（从文件末尾开始）
 
   @override
   void initState() {
@@ -81,7 +82,8 @@ class _LogPageState extends State<LogPage> {
       if (logFiles.isEmpty) {
         setState(() {
           _isLoading = false;
-          _errorMessage = '未找到日志文件\n\n日志目录: $logsDir\n\n请确保应用已经运行过并尝试连接一个网络后再查看日志。';
+          _errorMessage =
+              '未找到日志文件\n\n日志目录: $logsDir\n\n请确保应用已经运行过并尝试连接一个网络后再查看日志。';
         });
         return;
       }
@@ -162,7 +164,10 @@ class _LogPageState extends State<LogPage> {
           await raf.close();
 
           final newContent = utf8.decode(newBytes);
-          final newLines = newContent.split('\n').where((line) => line.trim().isNotEmpty).toList();
+          final newLines = newContent
+              .split('\n')
+              .where((line) => line.trim().isNotEmpty)
+              .toList();
 
           if (newLines.isNotEmpty && mounted) {
             setState(() {
@@ -179,7 +184,8 @@ class _LogPageState extends State<LogPage> {
               if (position.pixels >= position.maxScrollExtent - 50) {
                 WidgetsBinding.instance.addPostFrameCallback((_) {
                   if (_scrollController.hasClients) {
-                    _scrollController.jumpTo(_scrollController.position.maxScrollExtent);
+                    _scrollController
+                        .jumpTo(_scrollController.position.maxScrollExtent);
                   }
                 });
               }
@@ -239,18 +245,6 @@ class _LogPageState extends State<LogPage> {
     }
   }
 
-  Future<void> _switchLogFile(String logFilePath) async {
-    setState(() {
-      _currentLogFile = logFilePath;
-      _logLines.clear();
-      _isLoading = true;
-      _errorMessage = null;
-    });
-
-    _logReader = LogReader(File(logFilePath));
-    await _loadMoreLogs();
-  }
-
   @override
   void dispose() {
     _scrollController.dispose();
@@ -274,12 +268,14 @@ class _LogPageState extends State<LogPage> {
     );
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor:
+          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
       appBar: AppBar(
         title: Text(
           '日志',
           style: TextStyle(
-            color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            color:
+                isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -294,8 +290,8 @@ class _LogPageState extends State<LogPage> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                primaryColor.withOpacity(0.15),
-                primaryColor.withOpacity(0.05),
+                primaryColor.withValues(alpha: 0.15),
+                primaryColor.withValues(alpha: 0.05),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -339,10 +335,11 @@ class _LogPageState extends State<LogPage> {
           if (_logLines.isNotEmpty && _fileWatchTimer != null)
             Container(
               padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
-              color: (isDark ? Colors.green.shade900 : Colors.green.shade50).withOpacity(0.5),
+              color: (isDark ? Colors.green.shade900 : Colors.green.shade50)
+                  .withValues(alpha: 0.5),
               child: Row(
                 children: [
-                  Icon(
+                  const Icon(
                     Icons.fiber_manual_record,
                     color: Colors.green,
                     size: 12,
@@ -352,7 +349,9 @@ class _LogPageState extends State<LogPage> {
                     '实时监听中 - 新日志将自动显示',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? Colors.green.shade200 : Colors.green.shade800,
+                      color: isDark
+                          ? Colors.green.shade200
+                          : Colors.green.shade800,
                     ),
                   ),
                   const Spacer(),
@@ -360,7 +359,9 @@ class _LogPageState extends State<LogPage> {
                     '${_logLines.length} 行',
                     style: TextStyle(
                       fontSize: 12,
-                      color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                      color: isDark
+                          ? AppTheme.darkTextSecondary
+                          : AppTheme.lightTextSecondary,
                     ),
                   ),
                 ],
@@ -388,7 +389,9 @@ class _LogPageState extends State<LogPage> {
             Icon(
               Icons.error_outline,
               size: 64,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
             SizedBox(height: context.spacingMedium),
             Padding(
@@ -398,7 +401,9 @@ class _LogPageState extends State<LogPage> {
                 textAlign: TextAlign.center,
                 style: TextStyle(
                   fontSize: context.fontBody,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
                 ),
               ),
             ),
@@ -431,7 +436,9 @@ class _LogPageState extends State<LogPage> {
             Icon(
               Icons.description_outlined,
               size: 64,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
             SizedBox(height: context.spacingMedium),
             Text(
@@ -439,7 +446,9 @@ class _LogPageState extends State<LogPage> {
               style: TextStyle(
                 fontSize: context.fontLarge,
                 fontWeight: FontWeight.w600,
-                color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
               ),
             ),
             SizedBox(height: context.spacingSmall),
@@ -447,7 +456,9 @@ class _LogPageState extends State<LogPage> {
               '日志文件为空或尚未产生日志。',
               style: TextStyle(
                 fontSize: context.fontBody,
-                color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                color: isDark
+                    ? AppTheme.darkTextSecondary
+                    : AppTheme.lightTextSecondary,
               ),
             ),
           ],
@@ -458,7 +469,8 @@ class _LogPageState extends State<LogPage> {
     // 显示日志列表
     return Container(
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         borderRadius: BorderRadius.circular(context.cardRadius),
       ),
       child: SelectionArea(
@@ -471,16 +483,7 @@ class _LogPageState extends State<LogPage> {
           return AdaptiveTextSelectionToolbar.buttonItems(
             anchors: selectableRegionState.contextMenuAnchors,
             buttonItems: [
-              ContextMenuButtonItem(
-                label: '复制选中',
-                onPressed: () {
-                  selectableRegionState.copySelection(SelectionChangedCause.toolbar);
-                  ContextMenuController.removeAny();
-                  if (mounted) {
-                    showTopToast(context, '已复制选中内容', isSuccess: true);
-                  }
-                },
-              ),
+              ...selectableRegionState.contextMenuButtonItems,
               if (Platform.isWindows || Platform.isMacOS || Platform.isLinux)
                 ContextMenuButtonItem(
                   label: '复制全部',
@@ -496,20 +499,22 @@ class _LogPageState extends State<LogPage> {
       ),
     );
   }
-  
+
   // 构建日志列表视图（性能优化版本）
   Widget _buildLogListView(bool isDark) {
     // 计算要显示的日志范围
     final displayLines = _logLines.length > _maxDisplayLines
         ? _logLines.sublist(_logLines.length - _maxDisplayLines)
         : _logLines;
-    
+
     final skippedLines = _logLines.length - displayLines.length;
-    
+
     return ListView.builder(
       controller: _scrollController,
       padding: EdgeInsets.all(context.spacingSmall),
-      itemCount: displayLines.length + (_isLoading ? 1 : 0) + (skippedLines > 0 ? 1 : 0),
+      itemCount: displayLines.length +
+          (_isLoading ? 1 : 0) +
+          (skippedLines > 0 ? 1 : 0),
       itemBuilder: (context, index) {
         // 显示跳过的行数提示
         if (skippedLines > 0 && index == 0) {
@@ -517,26 +522,31 @@ class _LogPageState extends State<LogPage> {
             padding: const EdgeInsets.symmetric(vertical: 8.0),
             child: Center(
               child: Container(
-                padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
                 decoration: BoxDecoration(
-                  color: (isDark ? Colors.orange.shade900 : Colors.orange.shade100).withOpacity(0.5),
+                  color:
+                      (isDark ? Colors.orange.shade900 : Colors.orange.shade100)
+                          .withValues(alpha: 0.5),
                   borderRadius: BorderRadius.circular(12),
                 ),
                 child: Text(
                   '已隐藏前 $skippedLines 行日志（性能优化）',
                   style: TextStyle(
                     fontSize: 11,
-                    color: isDark ? Colors.orange.shade200 : Colors.orange.shade800,
+                    color: isDark
+                        ? Colors.orange.shade200
+                        : Colors.orange.shade800,
                   ),
                 ),
               ),
             ),
           );
         }
-        
+
         // 调整索引
         final adjustedIndex = skippedLines > 0 ? index - 1 : index;
-        
+
         if (adjustedIndex >= displayLines.length) {
           return const Padding(
             padding: EdgeInsets.all(16.0),
@@ -548,16 +558,25 @@ class _LogPageState extends State<LogPage> {
         Color textColor;
 
         // 判断日志级别并设置颜色
-        if (line.contains('ERROR') || line.contains(' E/') || line.contains(' E ')) {
+        if (line.contains('ERROR') ||
+            line.contains(' E/') ||
+            line.contains(' E ')) {
           textColor = Colors.red;
-        } else if (line.contains('WARN') || line.contains(' W/') || line.contains(' W ')) {
+        } else if (line.contains('WARN') ||
+            line.contains(' W/') ||
+            line.contains(' W ')) {
           textColor = Colors.orange;
-        } else if (line.contains('INFO') || line.contains(' I/') || line.contains(' I ')) {
+        } else if (line.contains('INFO') ||
+            line.contains(' I/') ||
+            line.contains(' I ')) {
           textColor = isDark ? Colors.lightBlue : Colors.blue;
-        } else if (line.contains('DEBUG') || line.contains(' D/') || line.contains(' D ')) {
+        } else if (line.contains('DEBUG') ||
+            line.contains(' D/') ||
+            line.contains(' D ')) {
           textColor = isDark ? Colors.grey : Colors.grey.shade600;
         } else {
-          textColor = isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+          textColor =
+              isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
         }
 
         // 移动端：使用SelectableText支持选择
@@ -593,10 +612,6 @@ class _LogPageState extends State<LogPage> {
         }
       },
     );
-  }
-
-  void _exportLogs() {
-    // 实现日志导出功能
   }
 
   // 复制所有日志到剪贴板
@@ -642,7 +657,9 @@ class _LogPageState extends State<LogPage> {
           bool copySuccess = false;
           try {
             final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
-            if (clipboardData != null && clipboardData.text != null && clipboardData.text!.isNotEmpty) {
+            if (clipboardData != null &&
+                clipboardData.text != null &&
+                clipboardData.text!.isNotEmpty) {
               copySuccess = true;
               debugPrint('Flutter 剪贴板 API 复制成功');
             }
@@ -668,7 +685,10 @@ class _LogPageState extends State<LogPage> {
 
           if (mounted) {
             if (copySuccess) {
-              final lineCount = allLogs.split('\n').where((line) => line.trim().isNotEmpty).length;
+              final lineCount = allLogs
+                  .split('\n')
+                  .where((line) => line.trim().isNotEmpty)
+                  .length;
               showTopToast(context, '已复制 $lineCount 行日志到剪贴板', isSuccess: true);
             } else {
               showTopToast(context, '复制失败，建议使用下载功能', isSuccess: false);
@@ -694,30 +714,35 @@ class _LogPageState extends State<LogPage> {
 
         // 验证复制是否成功
         try {
-            final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
-            if (clipboardData != null && clipboardData.text != null) {
-              final copiedLength = clipboardData.text!.length;
-              debugPrint('剪贴板验证成功，长度: $copiedLength 字符');
+          final clipboardData = await Clipboard.getData(Clipboard.kTextPlain);
+          if (clipboardData != null && clipboardData.text != null) {
+            final copiedLength = clipboardData.text!.length;
+            debugPrint('剪贴板验证成功，长度: $copiedLength 字符');
 
-              // 检查复制的内容是否完整
-              if (copiedLength < allLogs.length * 0.9) {
-                // 如果复制的内容少于原始内容的90%，认为复制不完整
-                debugPrint('警告：复制内容不完整，原始长度: ${allLogs.length}, 复制长度: $copiedLength');
-                throw Exception('复制内容不完整');
-              }
-
-              debugPrint('剪贴板前100个字符: ${clipboardData.text!.substring(0, clipboardData.text!.length > 100 ? 100 : clipboardData.text!.length)}');
-            } else {
-              debugPrint('剪贴板验证失败：无法读取剪贴板内容');
-              throw Exception('无法验证剪贴板内容');
+            // 检查复制的内容是否完整
+            if (copiedLength < allLogs.length * 0.9) {
+              // 如果复制的内容少于原始内容的90%，认为复制不完整
+              debugPrint(
+                  '警告：复制内容不完整，原始长度: ${allLogs.length}, 复制长度: $copiedLength');
+              throw Exception('复制内容不完整');
             }
-          } catch (verifyError) {
-            debugPrint('剪贴板验证失败: $verifyError');
-            // 验证失败不影响复制操作，继续显示成功提示
+
+            debugPrint(
+                '剪贴板前100个字符: ${clipboardData.text!.substring(0, clipboardData.text!.length > 100 ? 100 : clipboardData.text!.length)}');
+          } else {
+            debugPrint('剪贴板验证失败：无法读取剪贴板内容');
+            throw Exception('无法验证剪贴板内容');
           }
+        } catch (verifyError) {
+          debugPrint('剪贴板验证失败: $verifyError');
+          // 验证失败不影响复制操作，继续显示成功提示
+        }
 
         if (mounted) {
-          final lineCount = allLogs.split('\n').where((line) => line.trim().isNotEmpty).length;
+          final lineCount = allLogs
+              .split('\n')
+              .where((line) => line.trim().isNotEmpty)
+              .length;
           debugPrint('复制成功，共 $lineCount 行');
           showTopToast(context, '已复制 $lineCount 行日志到剪贴板', isSuccess: true);
         }
@@ -748,7 +773,8 @@ class _LogPageState extends State<LogPage> {
       if (Platform.isAndroid) {
         // Android 平台下载日志
         final directory = await getTemporaryDirectory();
-        final fileName = 'vnt_logs_${DateTime.now().millisecondsSinceEpoch}.txt';
+        final fileName =
+            'vnt_logs_${DateTime.now().millisecondsSinceEpoch}.txt';
         final filePath = '${directory.path}/$fileName';
 
         final file = File(filePath);
@@ -806,12 +832,14 @@ class _LogPageState extends State<LogPage> {
 
         // 使用Share Sheet分享
         try {
+          if (!mounted) return;
           final box = context.findRenderObject() as RenderBox?;
           final result = await Share.shareXFiles(
             [XFile(filePath)],
-            sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+            sharePositionOrigin:
+                box != null ? box.localToGlobal(Offset.zero) & box.size : null,
           );
-          
+
           if (mounted) {
             if (result.status == ShareResultStatus.success) {
               showTopToast(context, '日志已导出', isSuccess: true);
@@ -880,145 +908,6 @@ class _LogPageState extends State<LogPage> {
     }
   }
 
-  // 显示右键菜单（桌面端）
-  void _showDesktopContextMenu(BuildContext context, Offset position, String line) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    
-    showMenu(
-      context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromLTWH(position.dx, position.dy, 0, 0),
-        Rect.fromLTWH(0, 0, overlay.size.width, overlay.size.height),
-      ),
-      items: [
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.copy, size: 18, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              const SizedBox(width: 8),
-              Text('复制选中', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              if (mounted) {
-                showTopToast(context, '请使用 Ctrl+C 复制选中内容', isSuccess: true);
-              }
-            });
-          },
-        ),
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.select_all, size: 18, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              const SizedBox(width: 8),
-              Text('复制全部', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              _copyLogs();
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  void _showContextMenu(BuildContext context, Offset position, String line) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    // 如果 position 是 Offset.zero，说明是从长按触发的，使用屏幕中心
-    if (position == Offset.zero) {
-      _showMobileContextMenu(context, line);
-      return;
-    }
-    
-    final overlay = Overlay.of(context).context.findRenderObject() as RenderBox;
-    
-    showMenu(
-      context: context,
-      position: RelativeRect.fromRect(
-        Rect.fromLTWH(position.dx, position.dy, 0, 0),
-        Rect.fromLTWH(0, 0, overlay.size.width, overlay.size.height),
-      ),
-      items: [
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.copy, size: 18, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              const SizedBox(width: 8),
-              Text('复制此行', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-            ],
-          ),
-          onTap: () {
-            Clipboard.setData(ClipboardData(text: line));
-            Future.delayed(Duration.zero, () {
-              if (mounted) {
-                showTopToast(context, '已复制 1 行', isSuccess: true);
-              }
-            });
-          },
-        ),
-        PopupMenuItem(
-          child: Row(
-            children: [
-              Icon(Icons.select_all, size: 18, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              const SizedBox(width: 8),
-              Text('复制所有日志', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-            ],
-          ),
-          onTap: () {
-            Future.delayed(Duration.zero, () {
-              _copyLogs();
-            });
-          },
-        ),
-      ],
-    );
-  }
-
-  // 显示移动端菜单
-  void _showMobileContextMenu(BuildContext context, String line) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      builder: (context) => SafeArea(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            ListTile(
-              leading: Icon(Icons.copy, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              title: Text('复制此行', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-              onTap: () {
-                Navigator.pop(context);
-                Clipboard.setData(ClipboardData(text: line));
-                if (mounted) {
-                  showTopToast(context, '已复制 1 行', isSuccess: true);
-                }
-              },
-            ),
-            ListTile(
-              leading: Icon(Icons.select_all, color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
-              title: Text('复制所有日志', style: TextStyle(color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary)),
-              onTap: () {
-                Navigator.pop(context);
-                _copyLogs();
-              },
-            ),
-            const SizedBox(height: 8),
-          ],
-        ),
-      ),
-    );
-  }
-
   // 清空日志
   Future<void> _clearLogs() async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -1026,18 +915,23 @@ class _LogPageState extends State<LogPage> {
     final confirmed = await showDialog<bool>(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(context.cardRadius)),
+        backgroundColor:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(context.cardRadius)),
         title: Text(
           '清空日志',
           style: TextStyle(
-            color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            color:
+                isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
           ),
         ),
         content: Text(
           '确定要清空所有日志文件吗？\n\n注意：日志文件内容将被清空，但文件会保留在logs目录。',
           style: TextStyle(
-            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+            color: isDark
+                ? AppTheme.darkTextSecondary
+                : AppTheme.lightTextSecondary,
           ),
         ),
         actions: [
@@ -1138,8 +1032,8 @@ class LogReader {
       final allLines = content.split('\n');
 
       // 只保留最后N行（性能优化）
-      final startIndex = allLines.length > _maxLinesToRead 
-          ? allLines.length - _maxLinesToRead 
+      final startIndex = allLines.length > _maxLinesToRead
+          ? allLines.length - _maxLinesToRead
           : 0;
 
       // 返回最后的非空行
@@ -1151,9 +1045,10 @@ class LogReader {
       }
 
       _hasReadAll = true;
-      
+
       if (startIndex > 0) {
-        debugPrint('读取日志文件: ${logFile.path}, 跳过前 $startIndex 行，加载最后 ${lines.length} 行');
+        debugPrint(
+            '读取日志文件: ${logFile.path}, 跳过前 $startIndex 行，加载最后 ${lines.length} 行');
       } else {
         debugPrint('读取日志文件: ${logFile.path}, 共 ${lines.length} 行');
       }

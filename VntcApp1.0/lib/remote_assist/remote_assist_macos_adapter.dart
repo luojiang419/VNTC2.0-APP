@@ -1,7 +1,9 @@
 import 'dart:io';
 
 import 'package:path/path.dart' as path;
+import 'package:vnt_app/remote_assist/remote_assist_command_security.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
+import 'package:vnt_app/remote_assist/remote_assist_health_service.dart';
 import 'package:vnt_app/remote_assist/remote_assist_log.dart';
 import 'package:vnt_app/remote_assist/remote_assist_macos_runtime.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
@@ -56,7 +58,12 @@ class RemoteAssistMacosAdapter extends RemoteAssistPlatformAdapter {
     final portListening = runtime == null
         ? false
         : await _isPortListening(RemoteAssistConstants.directAccessPort);
-    final runtimeReady = serverRunning || portListening;
+    final runtimeReady = isRemoteAssistRuntimeReady(
+      serviceRunning: serverRunning,
+      hasServiceProcess: false,
+      hasServerProcess: serverRunning,
+      portListening: portListening,
+    );
     final issues = <String>[];
 
     if (!vntConnected) {
@@ -114,28 +121,46 @@ class RemoteAssistMacosAdapter extends RemoteAssistPlatformAdapter {
     final runtime = await _requireRuntime();
     final targetAddress =
         '$virtualIp:${RemoteAssistConstants.directAccessPort}';
-    final arguments = <String>[
-      '--connect',
-      targetAddress,
-      if (password != null && password.isNotEmpty) ...['--password', password],
-    ];
-    await RemoteAssistLog.write('macOS 发起远程协助连接: $targetAddress');
-    await Process.start(
-      runtime.executablePath,
-      arguments,
-      workingDirectory: path.dirname(runtime.executablePath),
-      mode: ProcessStartMode.detached,
+    final secretFile =
+        await RemoteAssistCommandSecurity.createSecretFile(password);
+    final arguments = RemoteAssistCommandSecurity.connectArguments(
+      targetAddress: targetAddress,
+      passwordFilePath: secretFile?.path,
     );
+    await RemoteAssistLog.write('macOS 发起远程协助连接: $targetAddress');
+    try {
+      await Process.start(
+        runtime.executablePath,
+        arguments,
+        workingDirectory: path.dirname(runtime.executablePath),
+        mode: ProcessStartMode.detached,
+      );
+      secretFile?.scheduleDelete();
+    } catch (_) {
+      await secretFile?.delete();
+      rethrow;
+    }
   }
 
   @override
   Future<void> configureAccessPassword(String password) async {
     final runtime = await _requireRuntime();
-    final result = await Process.run(
-      runtime.executablePath,
-      ['--configure-access-password', password],
-      workingDirectory: path.dirname(runtime.executablePath),
+    final secretFile =
+        await RemoteAssistCommandSecurity.createSecretFile(password);
+    final arguments = RemoteAssistCommandSecurity.configurePasswordArguments(
+      password: password,
+      passwordFilePath: secretFile?.path,
     );
+    final ProcessResult result;
+    try {
+      result = await Process.run(
+        runtime.executablePath,
+        arguments,
+        workingDirectory: path.dirname(runtime.executablePath),
+      );
+    } finally {
+      await secretFile?.delete();
+    }
     if (result.exitCode == 0) {
       await RemoteAssistLog.write('macOS 远程协助访问密码配置完成');
       return;
@@ -144,7 +169,15 @@ class RemoteAssistMacosAdapter extends RemoteAssistPlatformAdapter {
     final message = [
       result.stdout.toString().trim(),
       result.stderr.toString().trim(),
-    ].where((item) => item.isNotEmpty).join(' | ');
+    ]
+        .where((item) => item.isNotEmpty)
+        .map(
+          (item) => RemoteAssistCommandSecurity.redactText(
+            item,
+            secret: password,
+          ),
+        )
+        .join(' | ');
     throw StateError(
       message.isEmpty ? 'macOS 远程密码配置失败' : 'macOS 远程密码配置失败：$message',
     );

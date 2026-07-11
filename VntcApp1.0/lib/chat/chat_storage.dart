@@ -231,6 +231,122 @@ CREATE TABLE sync_checkpoints (
     return ChatConversation.fromDbMap(rows.first);
   }
 
+  Future<void> mergeConversationAlias({
+    required String sourceConversationId,
+    required ChatConversation targetConversation,
+  }) async {
+    if (sourceConversationId == targetConversation.id) {
+      return;
+    }
+    final db = await _ensureDatabase();
+    await db.transaction((txn) async {
+      final sourceRows = await txn.query(
+        'conversations',
+        where: 'id = ?',
+        whereArgs: [sourceConversationId],
+        limit: 1,
+      );
+      if (sourceRows.isEmpty) {
+        return;
+      }
+      final source = ChatConversation.fromDbMap(sourceRows.first);
+      final targetRows = await txn.query(
+        'conversations',
+        where: 'id = ?',
+        whereArgs: [targetConversation.id],
+        limit: 1,
+      );
+      final existingTarget = targetRows.isEmpty
+          ? null
+          : ChatConversation.fromDbMap(targetRows.first);
+
+      final sourceMessages = await txn.query(
+        'messages',
+        where: 'conversation_id = ?',
+        whereArgs: [sourceConversationId],
+      );
+      for (final row in sourceMessages) {
+        final messageId = (row['id'] ?? '').toString();
+        final updated = await txn.update(
+          'messages',
+          {
+            'conversation_id': targetConversation.id,
+            'hall_id': targetConversation.hallId,
+          },
+          where: 'id = ?',
+          whereArgs: [messageId],
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+        if (updated == 0) {
+          await txn.delete(
+            'messages',
+            where: 'id = ?',
+            whereArgs: [messageId],
+          );
+          await txn.delete(
+            'attachments',
+            where: 'message_id = ?',
+            whereArgs: [messageId],
+          );
+        }
+      }
+      await txn.delete(
+        'messages',
+        where: 'conversation_id = ?',
+        whereArgs: [sourceConversationId],
+      );
+
+      final unreadRows = await txn.rawQuery('''
+SELECT COUNT(*) AS total
+FROM messages
+WHERE conversation_id = ? AND direction = ? AND is_read = 0
+''', [
+        targetConversation.id,
+        chatEnumName(ChatMessageDirection.incoming),
+      ]);
+      final unreadCount = unreadRows.isEmpty
+          ? 0
+          : int.tryParse('${unreadRows.first['total']}') ?? 0;
+      final preferred = existingTarget ?? source;
+      await txn.insert(
+        'conversations',
+        ChatConversation(
+          id: targetConversation.id,
+          type: targetConversation.type,
+          hallId: targetConversation.hallId,
+          title: preferred.title.isEmpty
+              ? targetConversation.title
+              : preferred.title,
+          unreadCount: unreadCount,
+          lastReadAtEpochMs: [
+            source.lastReadAtEpochMs,
+            existingTarget?.lastReadAtEpochMs ?? 0,
+          ].reduce((left, right) => left > right ? left : right),
+          lastMessageAtEpochMs: [
+            source.lastMessageAtEpochMs,
+            existingTarget?.lastMessageAtEpochMs ?? 0,
+          ].reduce((left, right) => left > right ? left : right),
+          updatedAtEpochMs: [
+            source.updatedAtEpochMs,
+            existingTarget?.updatedAtEpochMs ?? 0,
+            targetConversation.updatedAtEpochMs,
+          ].reduce((left, right) => left > right ? left : right),
+          metadataJson: preferred.metadataJson,
+          peerVirtualIp: targetConversation.peerVirtualIp,
+          peerDisplayName:
+              targetConversation.peerDisplayName ?? preferred.peerDisplayName,
+          roomId: targetConversation.roomId ?? preferred.roomId,
+        ).toDbMap(),
+        conflictAlgorithm: ConflictAlgorithm.replace,
+      );
+      await txn.delete(
+        'conversations',
+        where: 'id = ?',
+        whereArgs: [sourceConversationId],
+      );
+    });
+  }
+
   Future<List<ChatRoomDescriptor>> loadRoomDescriptors({
     String? hallId,
   }) async {
@@ -292,8 +408,7 @@ CREATE TABLE sync_checkpoints (
     final db = await _ensureDatabase();
     final rows = await db.query(
       'attachments',
-      where:
-          'id IN (${List<String>.filled(ids.length, '?').join(', ')})',
+      where: 'id IN (${List<String>.filled(ids.length, '?').join(', ')})',
       whereArgs: ids,
     );
     final result = <String, ChatAttachmentRecord>{};
@@ -344,8 +459,7 @@ CREATE TABLE sync_checkpoints (
             type: message.conversationType,
             hallId: message.hallId,
             title: message.conversationId,
-            unreadCount:
-                incrementUnread && existingMessage.isEmpty ? 1 : 0,
+            unreadCount: incrementUnread && existingMessage.isEmpty ? 1 : 0,
             lastReadAtEpochMs: 0,
             lastMessageAtEpochMs: message.sentAtEpochMs,
             updatedAtEpochMs: message.createdAtEpochMs,
@@ -395,7 +509,10 @@ CREATE TABLE sync_checkpoints (
         'messages',
         {'is_read': 1},
         where: 'conversation_id = ? AND direction = ?',
-        whereArgs: [conversationId, chatEnumName(ChatMessageDirection.incoming)],
+        whereArgs: [
+          conversationId,
+          chatEnumName(ChatMessageDirection.incoming)
+        ],
       );
     });
   }
@@ -423,7 +540,8 @@ SELECT MAX(sender_seq) AS max_seq
 FROM messages
 WHERE conversation_id = ? AND sender_virtual_ip = ?
 ''', [conversationId, senderVirtualIp]);
-    final current = rows.isEmpty ? 0 : int.tryParse('${rows.first['max_seq']}') ?? 0;
+    final current =
+        rows.isEmpty ? 0 : int.tryParse('${rows.first['max_seq']}') ?? 0;
     return current + 1;
   }
 
@@ -462,7 +580,8 @@ GROUP BY sender_virtual_ip
     );
     for (final row in rows) {
       final roomId = (row['room_id'] ?? '').toString();
-      final locallyJoined = (int.tryParse('${row['locally_joined']}') ?? 0) == 1;
+      final locallyJoined =
+          (int.tryParse('${row['locally_joined']}') ?? 0) == 1;
       final shouldBeActive = activeRoomIds.contains(roomId);
       await db.update(
         'room_membership_cache',
@@ -522,7 +641,10 @@ GROUP BY sender_virtual_ip
 
   Future<String> resolveAttachmentPath(String relativePath) async {
     final attachmentsDir = await ensureAttachmentsDirectory();
-    return path.join(attachmentsDir, relativePath);
+    return _resolveAttachmentPathInsideDirectory(
+      attachmentsDir: attachmentsDir,
+      relativePath: relativePath,
+    );
   }
 
   Future<void> writeAttachmentBytes(
@@ -535,6 +657,62 @@ GROUP BY sender_virtual_ip
       await parent.create(recursive: true);
     }
     await target.writeAsBytes(bytes, flush: true);
+  }
+
+  String _resolveAttachmentPathInsideDirectory({
+    required String attachmentsDir,
+    required String relativePath,
+  }) {
+    final segments = _validateAttachmentRelativePath(relativePath);
+    final rootPath = path.canonicalize(path.absolute(attachmentsDir));
+    final targetPath = path.normalize(path.joinAll(<String>[
+      rootPath,
+      ...segments,
+    ]));
+    final relativeToRoot = path.relative(targetPath, from: rootPath);
+    if (relativeToRoot == '.' ||
+        relativeToRoot.startsWith('..${path.separator}') ||
+        relativeToRoot == '..' ||
+        path.isAbsolute(relativeToRoot)) {
+      throw ArgumentError.value(
+        relativePath,
+        'relativePath',
+        '附件路径必须位于聊天附件目录内',
+      );
+    }
+    return targetPath;
+  }
+
+  List<String> _validateAttachmentRelativePath(String relativePath) {
+    final value = relativePath.trim();
+    if (value.isEmpty ||
+        value.contains('\u0000') ||
+        path.isAbsolute(value) ||
+        path.windows.isAbsolute(value) ||
+        path.posix.isAbsolute(value)) {
+      throw ArgumentError.value(
+        relativePath,
+        'relativePath',
+        '附件路径必须是非空相对路径',
+      );
+    }
+
+    final normalizedSeparators = value.replaceAll('\\', '/');
+    final segments = normalizedSeparators.split('/');
+    if (segments.any(
+      (segment) =>
+          segment.isEmpty ||
+          segment == '.' ||
+          segment == '..' ||
+          segment.contains(':'),
+    )) {
+      throw ArgumentError.value(
+        relativePath,
+        'relativePath',
+        '附件路径包含非法片段',
+      );
+    }
+    return segments;
   }
 
   Future<void> recordSyncCheckpoint({

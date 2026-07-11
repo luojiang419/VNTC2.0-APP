@@ -14,7 +14,8 @@ class ResponsiveUtils {
     final isPortrait = height > width;
 
     // 判断是否为桌面平台（Windows、Linux、macOS）
-    final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
     if (isDesktop) {
       // 桌面平台：基于宽度的缩放
@@ -31,8 +32,6 @@ class ResponsiveUtils {
       }
     } else {
       // 移动平台（Android、iOS）：基于屏幕密度和尺寸的缩放
-      final shortestSide = width < height ? width : height;
-
       if (isPortrait) {
         // 竖屏模式：基于宽度
         if (width >= 600) {
@@ -66,7 +65,8 @@ class ResponsiveUtils {
   /// 获取字体缩放比例（比整体缩放稍微保守一些，确保可读性）
   static double getFontScaleFactor(BuildContext context) {
     final scaleFactor = getScaleFactor(context);
-    final isDesktop = Platform.isWindows || Platform.isLinux || Platform.isMacOS;
+    final isDesktop =
+        Platform.isWindows || Platform.isLinux || Platform.isMacOS;
 
     if (isDesktop) {
       return scaleFactor; // 桌面端字体跟随整体缩放
@@ -102,7 +102,8 @@ class ResponsiveUtils {
   }
 
   /// 响应式内边距
-  static EdgeInsets padding(BuildContext context, {
+  static EdgeInsets padding(
+    BuildContext context, {
     double? all,
     double? horizontal,
     double? vertical,
@@ -149,7 +150,8 @@ class ResponsiveUtils {
   }
 
   /// 获取环状图大小（专门为PieChart优化）
-  static double getPieChartSize(BuildContext context, {
+  static double getPieChartSize(
+    BuildContext context, {
     double baseSize = 100.0,
     double minSize = 50.0,
     double maxSize = 120.0,
@@ -160,19 +162,22 @@ class ResponsiveUtils {
   }
 
   /// 获取环状图中心空白半径
-  static double getPieChartCenterRadius(BuildContext context, {double baseRadius = 30.0}) {
+  static double getPieChartCenterRadius(BuildContext context,
+      {double baseRadius = 30.0}) {
     final scale = getScaleFactor(context);
     return baseRadius * scale;
   }
 
   /// 获取环状图扇形半径
-  static double getPieChartSectionRadius(BuildContext context, {double baseRadius = 20.0}) {
+  static double getPieChartSectionRadius(BuildContext context,
+      {double baseRadius = 20.0}) {
     final scale = getScaleFactor(context);
     return baseRadius * scale;
   }
 
   /// 获取卡片高度
-  static double getCardHeight(BuildContext context, {double baseHeight = 200.0}) {
+  static double getCardHeight(BuildContext context,
+      {double baseHeight = 200.0}) {
     final scale = getScaleFactor(context);
     return baseHeight * scale;
   }
@@ -412,6 +417,7 @@ extension ResponsiveExtension on BuildContext {
   // 列表项
   double get listItemHeight => w(DesignSystem.listItemHeight);
   double get listItemPadding => w(DesignSystem.listItemPadding);
-  double get listItemIconContainerSize => w(DesignSystem.listItemIconContainerSize);
+  double get listItemIconContainerSize =>
+      w(DesignSystem.listItemIconContainerSize);
   double get listItemIconSize => iconSize(DesignSystem.listItemIconSize);
 }

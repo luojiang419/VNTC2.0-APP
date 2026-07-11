@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
 import 'package:vnt_app/network_config.dart';
+import 'package:vnt_app/network_config_input_page.dart';
 import 'package:vnt_app/data_persistence.dart';
 import 'package:vnt_app/pages/dashboard_page.dart';
 import 'package:vnt_app/pages/link_status_page.dart';
@@ -12,8 +13,10 @@ import 'package:vnt_app/pages/settings_page.dart';
 import 'package:vnt_app/pages/about_page.dart';
 import 'package:vnt_app/pages/remote_assist_page.dart';
 import 'package:vnt_app/pages/chat_page.dart';
+import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
+import 'package:vnt_app/utils/responsive_utils.dart';
 import 'dart:isolate';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/widgets/custom_title_bar.dart';
@@ -40,7 +43,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   VoidCallback? _refreshSettings;
 
   bool get _showChatPage => !Platform.isAndroid;
-  bool get _showRemoteAssistPage => !Platform.isAndroid;
+  bool get _showRemoteAssistPage =>
+      !Platform.isAndroid || RemoteAssistConstants.androidRemoteAssistEnabled;
 
   List<_NavItem> get _navItems => [
         const _NavItem(
@@ -156,6 +160,69 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     if (mounted) {
       _connectToConfigDirectly(config);
     }
+  }
+
+  Future<void> _editDefaultConfigFromDashboard() async {
+    final dataPersistence = DataPersistence();
+    final defaultKey = await dataPersistence.loadDefaultKey();
+    final configs = await dataPersistence.loadData();
+    final configIndex = configs.indexWhere(
+      (config) => config.itemKey == defaultKey,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (configIndex < 0) {
+      setState(() => _selectedIndex = _configIndex);
+      showTopToast(context, '默认配置不存在，请在配置页面重新选择', isSuccess: false);
+      return;
+    }
+    final config = configs[configIndex];
+    if (vntManager.hasConnectionItem(config.itemKey)) {
+      showTopToast(context, '连接中的配置不能修改，请先断开连接', isSuccess: false);
+      return;
+    }
+
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final result = await showDialog<NetworkConfig>(
+      context: context,
+      barrierDismissible: false,
+      builder: (dialogContext) => Dialog(
+        backgroundColor: Colors.transparent,
+        insetPadding: EdgeInsets.all(context.spacingMedium),
+        child: Container(
+          constraints: BoxConstraints(
+            maxWidth: context.w(600),
+            maxHeight: context.w(800),
+          ),
+          decoration: BoxDecoration(
+            color: isDark
+                ? AppTheme.darkCardBackground
+                : AppTheme.lightCardBackground,
+            borderRadius: BorderRadius.circular(context.dialogRadius),
+          ),
+          clipBehavior: Clip.antiAlias,
+          child: NetworkConfigInputPage(config: config),
+        ),
+      ),
+    );
+    if (result == null || !mounted) {
+      return;
+    }
+
+    configs[configIndex] = result;
+    await dataPersistence.saveData(configs);
+    if (!mounted) {
+      return;
+    }
+    _refreshConfigList?.call();
+    _refreshSettings?.call();
+    VntAppCall.updateWidgetAndTile(false);
+    await SystemTrayManager().updateMenu();
+    if (!mounted) {
+      return;
+    }
+    showTopToast(context, '配置“${result.configName}”已更新', isSuccess: true);
   }
 
   /// 直接连接到指定配置（不跳转页面）
@@ -539,7 +606,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(2, 0),
           ),
@@ -569,7 +636,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                             gradient: LinearGradient(
                               colors: [
                                 primaryColor,
-                                primaryColor.withOpacity(0.7)
+                                primaryColor.withValues(alpha: 0.7)
                               ],
                               begin: Alignment.topLeft,
                               end: Alignment.bottomRight,
@@ -624,12 +691,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? primaryColor.withOpacity(0.1)
+                                ? primaryColor.withValues(alpha: 0.1)
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(12),
                             border: isSelected
                                 ? Border.all(
-                                    color: primaryColor.withOpacity(0.3))
+                                    color: primaryColor.withValues(alpha: 0.3))
                                 : null,
                           ),
                           child: Column(
@@ -692,8 +759,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                     ),
                     decoration: BoxDecoration(
                       color: isDark
-                          ? Colors.white.withOpacity(0.05)
-                          : Colors.black.withOpacity(0.03),
+                          ? Colors.white.withValues(alpha: 0.05)
+                          : Colors.black.withValues(alpha: 0.03),
                       borderRadius: BorderRadius.circular(12),
                     ),
                     child: Column(
@@ -757,17 +824,17 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           padding: EdgeInsets.all(isCompact ? 6.0 : 8.0),
           decoration: BoxDecoration(
             color: isDark
-                ? AppTheme.darkCardBackground.withOpacity(0.94)
-                : AppTheme.lightCardBackground.withOpacity(0.96),
+                ? AppTheme.darkCardBackground.withValues(alpha: 0.94)
+                : AppTheme.lightCardBackground.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(dockRadius),
             border: Border.all(
               color: isDark
-                  ? Colors.white.withOpacity(0.06)
-                  : Colors.black.withOpacity(0.06),
+                  ? Colors.white.withValues(alpha: 0.06)
+                  : Colors.black.withValues(alpha: 0.06),
             ),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withOpacity(isDark ? 0.30 : 0.10),
+                color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.10),
                 blurRadius: 18,
                 offset: const Offset(0, 8),
               ),
@@ -800,7 +867,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                               ? LinearGradient(
                                   colors: [
                                     primaryColor,
-                                    primaryColor.withOpacity(0.82),
+                                    primaryColor.withValues(alpha: 0.82),
                                   ],
                                   begin: Alignment.topCenter,
                                   end: Alignment.bottomCenter,
@@ -811,7 +878,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                           boxShadow: isSelected
                               ? [
                                   BoxShadow(
-                                    color: primaryColor.withOpacity(0.24),
+                                    color: primaryColor.withValues(alpha: 0.24),
                                     blurRadius: 12,
                                     offset: const Offset(0, 4),
                                   ),
@@ -867,7 +934,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       children: [
         // 0: 仪表盘
         DashboardPage(
-          onNavigateToConfig: () => setState(() => _selectedIndex = _configIndex),
+          onNavigateToConfig: () =>
+              setState(() => _selectedIndex = _configIndex),
+          onEditDefaultConfig: _editDefaultConfigFromDashboard,
           onNavigateToSettings: () =>
               setState(() => _selectedIndex = _settingsIndex),
           onDisconnect: () async {
