@@ -12,6 +12,7 @@ pub const SERVICE_NAME: &str = "vntcrustdesk";
 pub const DIRECT_ACCESS_PORT: i32 = 49999;
 pub const DIRECT_ONLY_ERROR: &str =
     "Only VNT virtual IPv4 direct connections are supported. Use <IPv4> or <IPv4:49999>.";
+pub const ACCESS_PASSWORD_CONFIG_SUCCESS_PREFIX: &str = "VNTC_ACCESS_PASSWORD_CONFIGURED:";
 
 fn insert_setting(map: &mut HashMap<String, String>, key: &str, value: &str) {
     map.insert(key.to_owned(), value.to_owned());
@@ -42,6 +43,16 @@ pub fn apply_profile() {
     {
         let mut defaults = config::DEFAULT_SETTINGS.write().unwrap();
         insert_setting(&mut defaults, keys::OPTION_APPROVE_MODE, "click");
+    }
+
+    if !config::Config::get_permanent_password().is_empty()
+        && config::Config::get_option(keys::OPTION_APPROVE_MODE) == "click"
+    {
+        config::Config::set_option(
+            keys::OPTION_VERIFICATION_METHOD.to_owned(),
+            "use-permanent-password".to_owned(),
+        );
+        config::Config::set_option(keys::OPTION_APPROVE_MODE.to_owned(), "password".to_owned());
     }
 
     {

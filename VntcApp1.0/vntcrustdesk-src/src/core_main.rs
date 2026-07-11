@@ -22,6 +22,63 @@ macro_rules! my_println{
     };
 }
 
+#[cfg(feature = "flutter")]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn configure_access_password(password: String) -> hbb_common::ResultType<&'static str> {
+    use hbb_common::{bail, config::keys};
+
+    let mode = if password.is_empty() {
+        "click"
+    } else {
+        "password"
+    };
+    crate::ipc::set_permanent_password(password.clone())?;
+
+    let mut options = crate::ipc::get_options_from_service()?;
+    if password.is_empty() {
+        options.remove(keys::OPTION_VERIFICATION_METHOD);
+    } else {
+        options.insert(
+            keys::OPTION_VERIFICATION_METHOD.to_owned(),
+            "use-permanent-password".to_owned(),
+        );
+    }
+    options.insert(keys::OPTION_APPROVE_MODE.to_owned(), mode.to_owned());
+    crate::ipc::set_options_on_service(options)?;
+
+    let saved_password = match crate::ipc::get_config("permanent-password")? {
+        Some(value) => value,
+        None => bail!("remote service did not return password state"),
+    };
+    let saved_options = crate::ipc::get_options_from_service()?;
+    let saved_mode = saved_options
+        .get(keys::OPTION_APPROVE_MODE)
+        .map(String::as_str)
+        .unwrap_or_default();
+    let saved_verification = saved_options
+        .get(keys::OPTION_VERIFICATION_METHOD)
+        .map(String::as_str)
+        .unwrap_or_default();
+    let expected_verification = if password.is_empty() {
+        ""
+    } else {
+        "use-permanent-password"
+    };
+
+    if saved_password != password
+        || saved_mode != mode
+        || saved_verification != expected_verification
+    {
+        bail!(
+            "remote service configuration verification failed: password_matches={}, approve_mode={}, verification_method={}",
+            saved_password == password,
+            saved_mode,
+            saved_verification
+        );
+    }
+    Ok(mode)
+}
+
 /// shared by flutter and sciter main function
 ///
 /// [Note]
@@ -78,6 +135,51 @@ pub fn core_main() -> Option<Vec<String>> {
             }
         }
         i += 1;
+    }
+    #[cfg(feature = "flutter")]
+    {
+        let password_result = if let Some(index) = args
+            .iter()
+            .position(|arg| arg == "--configure-access-password-file")
+        {
+            Some(
+                args.get(index + 1)
+                    .ok_or_else(|| "missing password file path".to_owned())
+                    .and_then(|path| {
+                        std::fs::read_to_string(path)
+                            .map_err(|error| format!("failed to read password file: {error}"))
+                    })
+                    .map(configure_access_password),
+            )
+        } else if let Some(index) = args
+            .iter()
+            .position(|arg| arg == "--configure-access-password")
+        {
+            Some(
+                args.get(index + 1)
+                    .cloned()
+                    .ok_or_else(|| "missing password value".to_owned())
+                    .map(configure_access_password),
+            )
+        } else {
+            None
+        };
+
+        if let Some(result) = password_result {
+            match result {
+                Ok(Ok(mode)) => {
+                    println!(
+                        "{}{}",
+                        crate::vntc::ACCESS_PASSWORD_CONFIG_SUCCESS_PREFIX,
+                        mode
+                    );
+                    std::process::exit(0);
+                }
+                Ok(Err(error)) => eprintln!("configure access password failed: {error}"),
+                Err(error) => eprintln!("configure access password failed: {error}"),
+            }
+            std::process::exit(1);
+        }
     }
     #[cfg(any(target_os = "linux", target_os = "windows"))]
     if args.is_empty() {
