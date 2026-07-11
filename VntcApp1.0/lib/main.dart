@@ -31,6 +31,9 @@ import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'package:vnt_app/update/app_updater_page.dart';
+import 'package:vnt_app/update/startup_update_coordinator.dart';
+import 'package:vnt_app/update/update_dialog.dart';
+import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/update/update_session.dart';
 
 final SystemTray systemTray = SystemTray();
@@ -444,12 +447,22 @@ class MainApp extends StatefulWidget {
 }
 
 class _MainAppState extends State<MainApp> with WindowListener {
+  static const Duration _startupUpdateCheckDelay = Duration(seconds: 2);
+
   bool rememberChoice = false;
   late final Future<bool> _systemTrayInitialization;
+  late final AppUpdateService _startupUpdateService;
+  late final StartupUpdateCoordinator _startupUpdateCoordinator;
+  bool _startupUpdatePromptInProgress = false;
 
   @override
   void initState() {
     super.initState();
+
+    _startupUpdateService = AppUpdateService();
+    _startupUpdateCoordinator = StartupUpdateCoordinator(
+      checkLatest: _startupUpdateService.checkLatest,
+    );
 
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
       _systemTrayInitialization = _initializeSystemTrayForStartup();
@@ -571,6 +584,71 @@ class _MainAppState extends State<MainApp> with WindowListener {
         VntAppCall.updateWidgetAndTile(vntManager.hasConnection());
       }
     });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_checkForStartupUpdate());
+    });
+  }
+
+  Future<void> _checkForStartupUpdate() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+
+    await Future<void>.delayed(_startupUpdateCheckDelay);
+    if (!mounted) {
+      return;
+    }
+
+    try {
+      final update = await _startupUpdateCoordinator.checkOnce();
+      if (update == null) {
+        _writeBootTrace('startup update check: already latest');
+        return;
+      }
+      _writeBootTrace(
+        'startup update check: ${update.currentVersion} -> ${update.latestVersion}',
+      );
+      await _showPendingStartupUpdateIfReady();
+    } catch (error) {
+      _writeBootTrace('startup update check failed: $error');
+      debugPrint('启动自动检查更新失败: $error');
+    }
+  }
+
+  Future<void> _showPendingStartupUpdateIfReady() async {
+    if (!mounted ||
+        !_startupUpdateCoordinator.hasPendingUpdate ||
+        _startupUpdatePromptInProgress) {
+      return;
+    }
+
+    if (isSilentStart && !await windowManager.isVisible()) {
+      _writeBootTrace('startup update prompt deferred while window hidden');
+      return;
+    }
+    if (!mounted) {
+      return;
+    }
+
+    final update = _startupUpdateCoordinator.pendingUpdate;
+    if (update == null) {
+      return;
+    }
+
+    _startupUpdatePromptInProgress = true;
+    try {
+      final shown = await showUpdateAvailableDialog(
+        context: context,
+        info: update,
+        service: _startupUpdateService,
+      );
+      if (shown) {
+        _startupUpdateCoordinator.takePendingUpdate();
+      }
+    } finally {
+      _startupUpdatePromptInProgress = false;
+    }
   }
 
   Future<bool> _initializeSystemTrayForStartup() async {
@@ -609,6 +687,13 @@ class _MainAppState extends State<MainApp> with WindowListener {
   void dispose() {
     windowManager.removeListener(this);
     super.dispose();
+  }
+
+  @override
+  void onWindowFocus() {
+    if (Platform.isWindows) {
+      unawaited(_showPendingStartupUpdateIfReady());
+    }
   }
 
   @override
