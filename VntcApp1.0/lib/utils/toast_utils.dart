@@ -7,7 +7,8 @@ final List<_ToastInfo> _activeToasts = [];
 /// 显示顶部提示消息
 /// [message] 提示内容
 /// [isSuccess] true为成功（绿色），false为错误（红色）
-void showTopToast(BuildContext context, String message, {bool isSuccess = true}) {
+void showTopToast(BuildContext context, String message,
+    {bool isSuccess = true}) {
   final overlay = Overlay.of(context);
   late OverlayEntry overlayEntry;
   late _ToastInfo toastInfo;
@@ -54,7 +55,8 @@ class _TopToast extends StatefulWidget {
   State<_TopToast> createState() => _TopToastState();
 }
 
-class _TopToastState extends State<_TopToast> with SingleTickerProviderStateMixin {
+class _TopToastState extends State<_TopToast>
+    with SingleTickerProviderStateMixin {
   late AnimationController _controller;
   late Animation<Offset> _slideAnimation;
   late Animation<double> _fadeAnimation;
@@ -129,7 +131,8 @@ class _TopToastState extends State<_TopToast> with SingleTickerProviderStateMixi
                   color: Colors.transparent,
                   child: Container(
                     constraints: const BoxConstraints(maxWidth: 500),
-                    padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 14),
+                    padding: const EdgeInsets.symmetric(
+                        horizontal: 20, vertical: 14),
                     decoration: BoxDecoration(
                       color: widget.isSuccess
                           ? const Color(0xFF4CAF50) // 绿色
@@ -137,7 +140,7 @@ class _TopToastState extends State<_TopToast> with SingleTickerProviderStateMixi
                       borderRadius: BorderRadius.circular(12),
                       boxShadow: [
                         BoxShadow(
-                          color: Colors.black.withOpacity(0.2),
+                          color: Colors.black.withValues(alpha: 0.2),
                           blurRadius: 10,
                           offset: const Offset(0, 4),
                         ),

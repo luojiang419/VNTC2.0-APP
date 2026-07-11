@@ -3,6 +3,27 @@
 #include <optional>
 
 #include "flutter/generated_plugin_registrant.h"
+#include "single_instance.h"
+
+namespace {
+
+void ActivatePrimaryWindow(HWND window) {
+  LONG_PTR extended_style = ::GetWindowLongPtrW(window, GWL_EXSTYLE);
+  extended_style &= ~static_cast<LONG_PTR>(WS_EX_TOOLWINDOW);
+  extended_style |= WS_EX_APPWINDOW;
+  ::SetWindowLongPtrW(window, GWL_EXSTYLE, extended_style);
+
+  ::ShowWindow(window, ::IsIconic(window) ? SW_RESTORE : SW_SHOW);
+  constexpr UINT flags = SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW |
+                         SWP_FRAMECHANGED | SWP_NOOWNERZORDER;
+  ::SetWindowPos(window, HWND_TOPMOST, 0, 0, 0, 0, flags);
+  ::SetWindowPos(window, HWND_NOTOPMOST, 0, 0, 0, 0, flags);
+  ::BringWindowToTop(window);
+  ::SetForegroundWindow(window);
+  ::SetFocus(window);
+}
+
+}  // namespace
 
 FlutterWindow::FlutterWindow(const flutter::DartProject& project)
     : project_(project) {}
@@ -51,6 +72,12 @@ LRESULT
 FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
                               WPARAM const wparam,
                               LPARAM const lparam) noexcept {
+  const UINT activate_message = GetVntActivateInstanceMessage();
+  if (activate_message != 0 && message == activate_message) {
+    ActivatePrimaryWindow(hwnd);
+    return 0;
+  }
+
   // Give Flutter, including plugins, an opportunity to handle window messages.
   if (flutter_controller_) {
     std::optional<LRESULT> result =

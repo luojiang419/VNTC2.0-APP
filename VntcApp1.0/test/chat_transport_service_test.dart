@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/chat/chat_models.dart';
+import 'package:vnt_app/chat/chat_security.dart';
 import 'package:vnt_app/chat/chat_transport_service.dart';
 
 void main() {
@@ -21,6 +23,45 @@ void main() {
     );
 
     expect(left, right);
+  });
+
+  test('私聊会话ID会归一化虚拟IP格式差异', () {
+    final left = buildDirectConversationId(
+      hallId: 'hall:test',
+      firstVirtualIp: ' 10.0.0.1 ',
+      secondVirtualIp: '[FD00::2]',
+    );
+    final right = buildDirectConversationId(
+      hallId: 'hall:test',
+      firstVirtualIp: 'fd00::2',
+      secondVirtualIp: '10.0.0.1',
+    );
+
+    expect(left, right);
+  });
+
+  test('聊天身份校验要求远端地址与声明虚拟IP一致', () {
+    expect(
+      isChatRemoteAddressConsistent(
+        remoteAddress: '10.0.0.2',
+        declaredVirtualIp: '10.0.0.2',
+      ),
+      isTrue,
+    );
+    expect(
+      isChatRemoteAddressConsistent(
+        remoteAddress: '10.0.0.3',
+        declaredVirtualIp: '10.0.0.2',
+      ),
+      isFalse,
+    );
+    expect(
+      isChatRemoteAddressConsistent(
+        remoteAddress: '10.0.0.3',
+        declaredVirtualIp: '',
+      ),
+      isFalse,
+    );
   });
 
   test('聊天室大厅ID忽略传输协议差异', () {
@@ -232,6 +273,82 @@ void main() {
       expect(received.message?.attachment?.fileName, 'sample.txt');
       expect(received.attachmentBase64, 'aGVsbG8gd29ybGQ=');
     } finally {
+      await service.stop();
+    }
+  });
+
+  test('聊天TCP传输服务拒绝超过上限的报文', () async {
+    final service = ChatTransportService(maxPacketBytes: 128);
+    var handled = false;
+
+    await service.start(
+      onPacket: (packet, remoteAddress) async {
+        handled = true;
+      },
+      listenPort: 0,
+    );
+    final port = service.listeningPort;
+    expect(port, isNotNull);
+
+    Socket? socket;
+    try {
+      socket = await Socket.connect(InternetAddress.loopbackIPv4, port!);
+      final oversizedPacket = ChatTransportPacket(
+        type: 'message',
+        message: ChatMessageRecord(
+          id: 'msg-oversized',
+          conversationId: 'hall:test',
+          hallId: 'hall:test',
+          conversationType: ChatConversationType.hall,
+          senderVirtualIp: '127.0.0.1',
+          senderName: '本机',
+          senderSeq: 3,
+          direction: ChatMessageDirection.outgoing,
+          contentType: ChatMessageContentType.text,
+          status: ChatMessageStatus.sent,
+          text: List<String>.filled(256, 'x').join(),
+          isSyncMessage: false,
+          isRead: true,
+          sentAtEpochMs: 1717286403000,
+          createdAtEpochMs: 1717286403000,
+          metadataJson: '{}',
+        ),
+      );
+      socket.add(utf8.encode(oversizedPacket.toJsonLine()));
+      await socket.flush();
+      await socket.close();
+      await Future<void>.delayed(const Duration(milliseconds: 100));
+
+      expect(handled, isFalse);
+    } finally {
+      socket?.destroy();
+      await service.stop();
+    }
+  });
+
+  test('聊天TCP传输服务会关闭读取超时的连接', () async {
+    final service = ChatTransportService(
+      readTimeout: const Duration(milliseconds: 100),
+    );
+    var handled = false;
+
+    await service.start(
+      onPacket: (packet, remoteAddress) async {
+        handled = true;
+      },
+      listenPort: 0,
+    );
+    final port = service.listeningPort;
+    expect(port, isNotNull);
+
+    Socket? socket;
+    try {
+      socket = await Socket.connect(InternetAddress.loopbackIPv4, port!);
+      await Future<void>.delayed(const Duration(milliseconds: 250));
+
+      expect(handled, isFalse);
+    } finally {
+      socket?.destroy();
       await service.stop();
     }
   });

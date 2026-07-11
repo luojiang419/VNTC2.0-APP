@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
@@ -5,6 +6,7 @@ import 'package:path/path.dart' as path;
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 
 import 'remote_assist_constants.dart';
+import 'remote_assist_command_security.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
 
@@ -162,12 +164,23 @@ try {
     }
 
     final accessMode = password.isEmpty ? 'click' : 'password';
-    await RemoteAssistLog.write('设置远程协助访问密码: mode=$accessMode');
-    final result = await Process.run(
-      executablePath,
-      ['--configure-access-password', password],
-      workingDirectory: path.dirname(executablePath),
+    final secretFile =
+        await RemoteAssistCommandSecurity.createSecretFile(password);
+    final arguments = RemoteAssistCommandSecurity.configurePasswordArguments(
+      password: password,
+      passwordFilePath: secretFile?.path,
     );
+    await RemoteAssistLog.write('设置远程协助访问密码: mode=$accessMode');
+    final ProcessResult result;
+    try {
+      result = await Process.run(
+        executablePath,
+        arguments,
+        workingDirectory: path.dirname(executablePath),
+      );
+    } finally {
+      await secretFile?.delete();
+    }
     if (result.exitCode == 0) {
       await RemoteAssistLog.write('远程协助访问密码配置完成: mode=$accessMode');
       return;
@@ -176,7 +189,15 @@ try {
     final message = [
       result.stdout.toString().trim(),
       result.stderr.toString().trim(),
-    ].where((item) => item.isNotEmpty).join(' | ');
+    ]
+        .where((item) => item.isNotEmpty)
+        .map(
+          (item) => RemoteAssistCommandSecurity.redactText(
+            item,
+            secret: password,
+          ),
+        )
+        .join(' | ');
     await RemoteAssistLog.write(
       '远程协助访问密码配置失败 exit=${result.exitCode} mode=$accessMode message=$message',
     );
@@ -194,37 +215,23 @@ try {
       throw StateError('未找到 vntcrustdesk 可执行文件');
     }
     await RemoteAssistLog.write('发起远程协助连接: $targetAddress');
-    final arguments = <String>[
-      '--connect',
-      targetAddress,
-      if (password != null && password.isNotEmpty) ...['--password', password],
-    ];
-    await Process.start(
-      executablePath,
-      arguments,
-      workingDirectory: path.dirname(executablePath),
-      mode: ProcessStartMode.detached,
+    final secretFile =
+        await RemoteAssistCommandSecurity.createSecretFile(password);
+    final arguments = RemoteAssistCommandSecurity.connectArguments(
+      targetAddress: targetAddress,
+      passwordFilePath: secretFile?.path,
     );
-  }
-
-  Future<bool> tryStartBackgroundServer() async {
-    final executablePath = await locateExecutablePath();
-    if (executablePath == null) {
-      return false;
-    }
-
     try {
-      await RemoteAssistLog.write('尝试直接拉起 vntcrustdesk 后台监听进程');
       await Process.start(
         executablePath,
-        const ['--server'],
+        arguments,
         workingDirectory: path.dirname(executablePath),
         mode: ProcessStartMode.detached,
       );
-      return true;
-    } catch (error) {
-      await RemoteAssistLog.write('直接拉起 vntcrustdesk 后台监听进程失败: $error');
-      return false;
+      secretFile?.scheduleDelete();
+    } catch (_) {
+      await secretFile?.delete();
+      rethrow;
     }
   }
 

@@ -123,7 +123,8 @@ Future<void> main(List<String> args) async {
 }
 
 Future<bool> _handleAccessPasswordConfiguration(List<String> args) async {
-  if (!args.contains('--configure-access-password')) {
+  if (!args.contains('--configure-access-password') &&
+      !args.contains('--configure-access-password-file')) {
     return false;
   }
 
@@ -132,6 +133,12 @@ Future<bool> _handleAccessPasswordConfiguration(List<String> args) async {
     if (args[i] == '--configure-access-password') {
       if (i + 1 < args.length) {
         password = args[i + 1];
+      }
+      break;
+    }
+    if (args[i] == '--configure-access-password-file') {
+      if (i + 1 < args.length) {
+        password = await File(args[i + 1]).readAsString();
       }
       break;
     }

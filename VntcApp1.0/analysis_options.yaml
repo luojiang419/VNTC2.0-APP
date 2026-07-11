@@ -12,8 +12,12 @@ include: package:flutter_lints/flutter.yaml
 analyzer:
   exclude:
     - backup/**
+    - build/**
+    - dist/**
+    - output/**
     - packages/**
     - rust_builder/**
+    - temp/**
     - vntcrustdesk-src/**
     - third_party/**
 

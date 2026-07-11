@@ -219,6 +219,9 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
   RustNatInfo dco_decode_rust_nat_info(dynamic raw);
 
   @protected
+  RustP2pDiagnostics dco_decode_rust_p_2_p_diagnostics(dynamic raw);
+
+  @protected
   RustPeerClientInfo dco_decode_rust_peer_client_info(dynamic raw);
 
   @protected
@@ -414,6 +417,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   RustNatInfo sse_decode_rust_nat_info(SseDeserializer deserializer);
+
+  @protected
+  RustP2pDiagnostics sse_decode_rust_p_2_p_diagnostics(
+      SseDeserializer deserializer);
 
   @protected
   RustPeerClientInfo sse_decode_rust_peer_client_info(
@@ -657,6 +664,10 @@ abstract class RustLibApiImplPlatform extends BaseApiImpl<RustLibWire> {
 
   @protected
   void sse_encode_rust_nat_info(RustNatInfo self, SseSerializer serializer);
+
+  @protected
+  void sse_encode_rust_p_2_p_diagnostics(
+      RustP2pDiagnostics self, SseSerializer serializer);
 
   @protected
   void sse_encode_rust_peer_client_info(

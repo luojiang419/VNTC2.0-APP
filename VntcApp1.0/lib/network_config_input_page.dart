@@ -9,12 +9,20 @@ import 'utils/toast_utils.dart';
 import 'utils/responsive_utils.dart';
 import 'theme/app_theme.dart';
 
+String allowWgToRadioValue(bool allowWg) {
+  return allowWg ? 'TRUE' : 'FALSE';
+}
+
+bool allowWgFromRadioValue(String value) {
+  return value == 'TRUE';
+}
+
 class NetworkConfigInputPage extends StatefulWidget {
   final NetworkConfig? config;
 
   const NetworkConfigInputPage({super.key, this.config});
   @override
-  _NetworkConfigInputPageState createState() => _NetworkConfigInputPageState();
+  State<NetworkConfigInputPage> createState() => _NetworkConfigInputPageState();
 }
 
 class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
@@ -59,8 +67,6 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
 
   String _compressionMethod = 'none'; // 默认不压缩
   int _compressionLevel = 3; // 默认压缩级别
-
-  _NetworkConfigInputPageState() {}
 
   @override
   void initState() {
@@ -155,7 +161,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
         _compressionLevel = int.tryParse(arr[1]) ?? 3;
       }
     }
-    _allowWg = config.allowWg ? 'FALSE' : 'TRUE';
+    _allowWg = allowWgToRadioValue(config.allowWg);
     _localDevController.text = config.localDev;
     _disableRelay = config.disableRelay;
     setState(() {
@@ -239,7 +245,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
             : (_p2pSelected ? 'p2p' : 'relay'),
         compressor:
             '$_compressionMethod${_compressionMethod == 'zstd' ? ',$_compressionLevel' : ''}',
-        allowWg: _allowWg == 'FALSE' ? false : true,
+        allowWg: allowWgFromRadioValue(_allowWg),
         localDev: _localDevController.text,
         disableRelay: _disableRelay,
       );
@@ -301,8 +307,8 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [
-                primaryColor.withOpacity(0.15),
-                primaryColor.withOpacity(0.05),
+                primaryColor.withValues(alpha: 0.15),
+                primaryColor.withValues(alpha: 0.05),
               ],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
@@ -775,7 +781,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
                           }
                           return null;
                         },
-                        TextInputType.numberWithOptions(decimal: true),
+                        const TextInputType.numberWithOptions(decimal: true),
                       ),
                       const SizedBox(height: 16),
                       _buildTextFormField(
@@ -862,81 +868,83 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
 
     // 竖屏或窄屏设备使用Column布局，宽屏设备使用Row布局
     if (isNarrowScreen) {
-      return Padding(
-        padding: const EdgeInsets.only(top: 12.0, bottom: 12.0),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            Padding(
-              padding: const EdgeInsets.only(bottom: 8.0),
-              child: Text(
-                title,
-                style: TextStyle(fontWeight: FontWeight.w500),
-                textAlign: TextAlign.left,
+      return RadioGroup<String>(
+        groupValue: groupValue,
+        onChanged: onChanged,
+        child: Padding(
+          padding: const EdgeInsets.only(top: 12.0, bottom: 12.0),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8.0),
+                child: Text(
+                  title,
+                  style: const TextStyle(fontWeight: FontWeight.w500),
+                  textAlign: TextAlign.left,
+                ),
               ),
-            ),
-            Align(
-              alignment: Alignment.centerLeft,
-              child: Wrap(
-                alignment: WrapAlignment.start,
-                crossAxisAlignment: WrapCrossAlignment.start,
-                spacing: 4,
-                runSpacing: 4,
-                children: list.map(((String, String) x) {
-                  return Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Radio<String>(
-                        value: x.$2,
-                        groupValue: groupValue,
-                        onChanged: onChanged,
-                        visualDensity: VisualDensity.compact,
-                      ),
-                      Flexible(
-                        child: Text(
-                          x.$1,
-                          style: TextStyle(fontSize: context.fontSmall),
-                          overflow: TextOverflow.ellipsis,
+              Align(
+                alignment: Alignment.centerLeft,
+                child: Wrap(
+                  alignment: WrapAlignment.start,
+                  crossAxisAlignment: WrapCrossAlignment.start,
+                  spacing: 4,
+                  runSpacing: 4,
+                  children: list.map(((String, String) x) {
+                    return Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Radio<String>(
+                          value: x.$2,
+                          visualDensity: VisualDensity.compact,
                         ),
-                      ),
-                    ],
-                  );
-                }).toList(),
+                        Flexible(
+                          child: Text(
+                            x.$1,
+                            style: TextStyle(fontSize: context.fontSmall),
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
+                    );
+                  }).toList(),
+                ),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       );
     }
 
     // 宽屏设备使用原有的Row布局
-    return Row(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Padding(
-          padding: const EdgeInsets.only(top: 12.0),
-          child: Text(title),
-        ),
-        Expanded(
-          child: Wrap(
-            spacing: 4,
-            runSpacing: 0,
-            children: list.map(((String, String) x) {
-              return Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Radio<String>(
-                    value: x.$2,
-                    groupValue: groupValue,
-                    onChanged: onChanged,
-                  ),
-                  Text(x.$1),
-                ],
-              );
-            }).toList(),
+    return RadioGroup<String>(
+      groupValue: groupValue,
+      onChanged: onChanged,
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(top: 12.0),
+            child: Text(title),
           ),
-        ),
-      ],
+          Expanded(
+            child: Wrap(
+              spacing: 4,
+              runSpacing: 0,
+              children: list.map(((String, String) x) {
+                return Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Radio<String>(value: x.$2),
+                    Text(x.$1),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -952,7 +960,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
       children: [
         ...controllers.asMap().entries.map((entry) {
           int index = entry.key;
-          TextEditingController controller = entry.value;
+          final controller = entry.value;
           return Row(
             children: [
               Expanded(
@@ -971,7 +979,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
               ),
             ],
           );
-        }).toList(),
+        }),
         Row(
           children: [
             Expanded(child: Container()),
@@ -996,7 +1004,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
       children: [
         ...controllers.asMap().entries.map((entry) {
           int index = entry.key;
-          TextEditingController controller = entry.value;
+          final controller = entry.value;
           return Row(
             children: [
               Expanded(
@@ -1024,7 +1032,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
               ),
             ],
           );
-        }).toList(),
+        }),
         Row(
           children: [
             Expanded(child: Container()),
@@ -1045,7 +1053,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
     ValueChanged<String?> onChanged,
   ) {
     return DropdownButtonFormField(
-      value: value,
+      initialValue: value,
       decoration: InputDecoration(labelText: labelText),
       isExpanded: true, // 让下拉框内容自适应宽度，防止超出窗口
       items: items.map((String item) {
@@ -1085,7 +1093,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
               if (isNarrowScreen) ...[
                 Text(
                   title,
-                  style: TextStyle(fontWeight: FontWeight.w500),
+                  style: const TextStyle(fontWeight: FontWeight.w500),
                   textAlign: TextAlign.left,
                 ),
                 const SizedBox(height: 8),

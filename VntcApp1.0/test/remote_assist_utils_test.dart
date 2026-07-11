@@ -1,6 +1,9 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
+import 'package:vnt_app/remote_assist/remote_assist_presence_service.dart';
 import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
 
 void main() {
@@ -119,5 +122,86 @@ void main() {
     expect(decoded.platform, RemoteAssistPlatform.macos);
     expect(decoded.supportedRoles, announcement.supportedRoles);
     expect(decoded.capabilities, announcement.capabilities);
+  });
+
+  test('presence announcement rejects forged source address', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(100000);
+    const announcement = RemoteAssistPresenceAnnouncement(
+      displayName: 'Peer',
+      virtualIp: '10.0.0.8',
+      networkName: '默认网络',
+      version: '1.0.0',
+      platform: RemoteAssistPlatform.windows,
+      supportedRoles: <String>[RemoteAssistConstants.capabilityController],
+      capabilities: <String>[RemoteAssistConstants.capabilityWindows],
+      sentAtEpochMs: 100000,
+    );
+
+    expect(
+      shouldAcceptRemoteAssistPresenceAnnouncement(
+        announcement: announcement,
+        remoteAddress: InternetAddress('10.0.0.9'),
+        contexts: const <RemoteAssistPresenceContext>[],
+        now: now,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldAcceptRemoteAssistPresenceAnnouncement(
+        announcement: announcement,
+        remoteAddress: InternetAddress('10.0.0.8'),
+        contexts: const <RemoteAssistPresenceContext>[],
+        now: now,
+      ),
+      isTrue,
+    );
+  });
+
+  test('presence announcement rejects stale or far future timestamps', () {
+    final now = DateTime.fromMillisecondsSinceEpoch(100000);
+
+    RemoteAssistPresenceAnnouncement buildAnnouncement(int sentAtEpochMs) {
+      return RemoteAssistPresenceAnnouncement(
+        displayName: 'Peer',
+        virtualIp: '10.0.0.8',
+        networkName: '默认网络',
+        version: '1.0.0',
+        platform: RemoteAssistPlatform.windows,
+        supportedRoles: const <String>[
+          RemoteAssistConstants.capabilityController,
+        ],
+        capabilities: const <String>[RemoteAssistConstants.capabilityWindows],
+        sentAtEpochMs: sentAtEpochMs,
+      );
+    }
+
+    expect(
+      shouldAcceptRemoteAssistPresenceAnnouncement(
+        announcement: buildAnnouncement(
+          now
+              .subtract(RemoteAssistConstants.presenceExpiry)
+              .subtract(const Duration(milliseconds: 1))
+              .millisecondsSinceEpoch,
+        ),
+        remoteAddress: InternetAddress('10.0.0.8'),
+        contexts: const <RemoteAssistPresenceContext>[],
+        now: now,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldAcceptRemoteAssistPresenceAnnouncement(
+        announcement: buildAnnouncement(
+          now
+              .add(RemoteAssistConstants.presenceMaxFutureSkew)
+              .add(const Duration(milliseconds: 1))
+              .millisecondsSinceEpoch,
+        ),
+        remoteAddress: InternetAddress('10.0.0.8'),
+        contexts: const <RemoteAssistPresenceContext>[],
+        now: now,
+      ),
+      isFalse,
+    );
   });
 }

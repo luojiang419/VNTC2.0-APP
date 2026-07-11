@@ -77,7 +77,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
     final primaryColor = Theme.of(context).primaryColor;
 
     return Scaffold(
-      backgroundColor: isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor:
+          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: _loadConfigs,
@@ -87,7 +88,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
               // 页面头部
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.all(isWideScreen ? context.spacingXLarge : context.spacingMedium),
+                  padding: EdgeInsets.all(isWideScreen
+                      ? context.spacingXLarge
+                      : context.spacingMedium),
                   child: _buildHeader(isDark, isWideScreen),
                 ),
               ),
@@ -95,12 +98,16 @@ class _ConfigListPageState extends State<ConfigListPage> {
               // 操作按钮行
               SliverToBoxAdapter(
                 child: Padding(
-                  padding: EdgeInsets.symmetric(horizontal: isWideScreen ? context.spacingXLarge : context.spacingMedium),
+                  padding: EdgeInsets.symmetric(
+                      horizontal: isWideScreen
+                          ? context.spacingXLarge
+                          : context.spacingMedium),
                   child: _buildActionRow(isDark),
                 ),
               ),
 
-              SliverToBoxAdapter(child: SizedBox(height: context.spacingMedium)),
+              SliverToBoxAdapter(
+                  child: SizedBox(height: context.spacingMedium)),
 
               // 配置列表
               _isLoading
@@ -117,7 +124,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
                         )
                       : SliverPadding(
                           padding: EdgeInsets.symmetric(
-                            horizontal: isWideScreen ? context.spacingXLarge : context.spacingMedium,
+                            horizontal: isWideScreen
+                                ? context.spacingXLarge
+                                : context.spacingMedium,
                           ),
                           sliver: SliverReorderableList(
                             itemBuilder: (context, index) {
@@ -126,8 +135,10 @@ class _ConfigListPageState extends State<ConfigListPage> {
                                 key: ValueKey(config.itemKey),
                                 index: index,
                                 child: Padding(
-                                  padding: EdgeInsets.only(bottom: context.cardSpacing),
-                                  child: _buildConfigCard(config, index, isDark),
+                                  padding: EdgeInsets.only(
+                                      bottom: context.cardSpacing),
+                                  child:
+                                      _buildConfigCard(config, index, isDark),
                                 ),
                               );
                             },
@@ -150,15 +161,19 @@ class _ConfigListPageState extends State<ConfigListPage> {
                               return AnimatedBuilder(
                                 animation: animation,
                                 builder: (BuildContext context, Widget? child) {
-                                  final double animValue = Curves.easeInOut.transform(animation.value);
-                                  final double elevation = lerpDouble(0, 8, animValue)!;
-                                  final double scale = lerpDouble(1, 1.05, animValue)!;
+                                  final double animValue = Curves.easeInOut
+                                      .transform(animation.value);
+                                  final double elevation =
+                                      lerpDouble(0, 8, animValue)!;
+                                  final double scale =
+                                      lerpDouble(1, 1.05, animValue)!;
                                   return Transform.scale(
                                     scale: scale,
                                     child: Material(
                                       elevation: elevation,
                                       color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(context.cardRadius),
+                                      borderRadius: BorderRadius.circular(
+                                          context.cardRadius),
                                       child: Opacity(
                                         opacity: 0.9,
                                         child: child,
@@ -187,7 +202,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
           height: context.iconXLarge,
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withOpacity(0.7)],
+              colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -209,14 +224,18 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 style: TextStyle(
                   fontSize: context.fontXLarge,
                   fontWeight: FontWeight.bold,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
               Text(
                 '${_configs.length} 个配置',
                 style: TextStyle(
                   fontSize: context.fontBody,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
                 ),
               ),
             ],
@@ -266,11 +285,13 @@ class _ConfigListPageState extends State<ConfigListPage> {
           horizontal: context.spacingMedium,
         ),
         decoration: BoxDecoration(
-          color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+          color: isDark
+              ? AppTheme.darkCardBackground
+              : AppTheme.lightCardBackground,
           borderRadius: BorderRadius.circular(context.cardRadius),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
               blurRadius: 8,
               offset: const Offset(0, 2),
             ),
@@ -286,7 +307,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
               style: TextStyle(
                 fontSize: context.fontBody,
                 fontWeight: FontWeight.w500,
-                color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
               ),
             ),
           ],
@@ -305,7 +328,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
             width: context.w(80),
             height: context.w(80),
             decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.1),
+              color: primaryColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(context.cardRadius),
             ),
             child: Icon(
@@ -320,7 +343,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
             style: TextStyle(
               fontSize: context.fontLarge,
               fontWeight: FontWeight.w600,
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
           SizedBox(height: context.spacingXSmall),
@@ -328,7 +352,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
             '点击上方按钮新建或导入一个组网配置',
             style: TextStyle(
               fontSize: context.fontBody,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
         ],
@@ -344,13 +370,17 @@ class _ConfigListPageState extends State<ConfigListPage> {
       decoration: BoxDecoration(
         color: isConnected
             ? (isDark
-                ? ColorUtils.backgroundForDarkMode(primaryColor) // 暗黑模式：使用主题色生成的暗色背景
-                : ColorUtils.backgroundForLightMode(primaryColor)) // 日间模式：使用主题色生成的浅色背景
-            : (isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground),
+                ? ColorUtils.backgroundForDarkMode(
+                    primaryColor) // 暗黑模式：使用主题色生成的暗色背景
+                : ColorUtils.backgroundForLightMode(
+                    primaryColor)) // 日间模式：使用主题色生成的浅色背景
+            : (isDark
+                ? AppTheme.darkCardBackground
+                : AppTheme.lightCardBackground),
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -369,9 +399,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                   width: context.w(12),
                   height: context.w(12),
                   decoration: BoxDecoration(
-                    color: isConnected
-                        ? primaryColor
-                        : Colors.grey,
+                    color: isConnected ? primaryColor : Colors.grey,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -385,7 +413,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
                       fontWeight: FontWeight.bold,
                       color: (isConnected && isDark)
                           ? Colors.white // 暗黑模式下已连接配置使用白色文字
-                          : (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary),
+                          : (isDark
+                              ? AppTheme.darkTextPrimary
+                              : AppTheme.lightTextPrimary),
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -449,17 +479,22 @@ class _ConfigListPageState extends State<ConfigListPage> {
                     onPressed: () => _toggleConnection(config),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isConnected
-                          ? Colors.white.withOpacity(0.9)
+                          ? Colors.white.withValues(alpha: 0.9)
                           : (isDark
-                              ? HSLColor.fromColor(primaryColor).withLightness(0.25).toColor()
-                              : HSLColor.fromColor(primaryColor).withLightness(0.35).toColor()),
-                      foregroundColor: isConnected
-                          ? const Color(0xFFE53E3E)
-                          : Colors.white,
+                              ? HSLColor.fromColor(primaryColor)
+                                  .withLightness(0.25)
+                                  .toColor()
+                              : HSLColor.fromColor(primaryColor)
+                                  .withLightness(0.35)
+                                  .toColor()),
+                      foregroundColor:
+                          isConnected ? const Color(0xFFE53E3E) : Colors.white,
                       elevation: 0,
-                      padding: EdgeInsets.symmetric(vertical: context.spacingSmall),
+                      padding:
+                          EdgeInsets.symmetric(vertical: context.spacingSmall),
                       shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(context.spacingXSmall),
+                        borderRadius:
+                            BorderRadius.circular(context.spacingXSmall),
                       ),
                     ),
                     icon: Icon(
@@ -521,7 +556,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
   ) {
     // 暗黑模式下已连接配置使用更亮的颜色
     final textColor = (isConnected && isDark)
-        ? Colors.white.withOpacity(0.7) // 暗黑模式已连接：半透明白色
+        ? Colors.white.withValues(alpha: 0.7) // 暗黑模式已连接：半透明白色
         : (isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary);
 
     final valueColor = (isConnected && isDark)
@@ -558,78 +593,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
     );
   }
 
-  Widget _buildInfoChip(bool isDark, IconData icon, String text) {
-    return Expanded(
-      child: Container(
-        padding: EdgeInsets.symmetric(
-          horizontal: context.spacingSmall,
-          vertical: context.spacingXSmall,
-        ),
-        decoration: BoxDecoration(
-          color: isDark
-              ? Colors.white.withOpacity(0.05)
-              : Colors.black.withOpacity(0.03),
-          borderRadius: BorderRadius.circular(context.spacingXSmall),
-        ),
-        child: Row(
-          children: [
-            Icon(
-              icon,
-              size: context.iconXSmall,
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
-            ),
-            SizedBox(width: context.spacingXSmall),
-            Expanded(
-              child: Text(
-                text,
-                style: TextStyle(
-                  fontSize: context.fontSmall,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
-                ),
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildActionButton(
-    bool isDark,
-    String label,
-    IconData icon,
-    Color color,
-    VoidCallback onTap,
-  ) {
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(context.radius(10)),
-      child: Container(
-        padding: EdgeInsets.symmetric(vertical: context.spacing(10)),
-        decoration: BoxDecoration(
-          color: color.withOpacity(0.1),
-          borderRadius: BorderRadius.circular(context.radius(10)),
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(icon, size: context.iconSmall, color: color),
-            SizedBox(width: context.spacingXSmall),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: context.fontBody,
-                fontWeight: FontWeight.w500,
-                color: color,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
   Widget _buildIconButton(
     bool isDark,
     bool isConnected,
@@ -640,10 +603,10 @@ class _ConfigListPageState extends State<ConfigListPage> {
     final primaryColor = Theme.of(context).primaryColor;
     final buttonColor = color ?? primaryColor;
     final bgColor = isConnected
-        ? Colors.white.withOpacity(0.9)
+        ? Colors.white.withValues(alpha: 0.9)
         : (isDark
-            ? Colors.white.withOpacity(0.05)
-            : Colors.black.withOpacity(0.03));
+            ? Colors.white.withValues(alpha: 0.05)
+            : Colors.black.withValues(alpha: 0.03));
 
     return InkWell(
       onTap: onTap,
@@ -688,7 +651,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
               maxHeight: maxHeight,
             ),
             decoration: BoxDecoration(
-              color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+              color: isDark
+                  ? AppTheme.darkCardBackground
+                  : AppTheme.lightCardBackground,
               borderRadius: BorderRadius.circular(dialogRadius),
             ),
             clipBehavior: Clip.antiAlias,
@@ -736,7 +701,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
       await _connectViaIOSVPN(config);
       return;
     }
-    
+
     // 其他平台使用Rust直接连接
     // 检查是否已有连接
     if (vntManager.hasConnection()) {
@@ -793,7 +758,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
         }
       } else if (msg is RustErrorInfo) {
         // Disconnect 和 Warn 类型不销毁连接，Rust 层会自动重连
-        if (msg.code == RustErrorType.disconnect || msg.code == RustErrorType.warn) {
+        if (msg.code == RustErrorType.disconnect ||
+            msg.code == RustErrorType.warn) {
           if (onece) {
             onece = false;
             Navigator.of(context).popUntil((route) => route.isFirst);
@@ -801,7 +767,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
           _handleConnectionError(msg, configName, itemKey);
           return;
         }
-        
+
         // 其他致命错误才销毁连接
         if (onece) {
           onece = false;
@@ -855,8 +821,11 @@ class _ConfigListPageState extends State<ConfigListPage> {
       barrierDismissible: false,
       builder: (BuildContext context) {
         return Dialog(
-          backgroundColor: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark
+              ? AppTheme.darkCardBackground
+              : AppTheme.lightCardBackground,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           child: Padding(
             padding: const EdgeInsets.all(24),
             child: Column(
@@ -868,7 +837,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
                   '正在连接...',
                   style: TextStyle(
                     fontSize: context.fontMedium,
-                    color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
                   ),
                 ),
                 const SizedBox(height: 20),
@@ -899,18 +870,24 @@ class _ConfigListPageState extends State<ConfigListPage> {
       context: context,
       builder: (BuildContext context) {
         return AlertDialog(
-          backgroundColor: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          backgroundColor: isDark
+              ? AppTheme.darkCardBackground
+              : AppTheme.lightCardBackground,
+          shape:
+              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
           title: Text(
             '连接配置项[${lastConnectedConfig?.configName}]',
             style: TextStyle(
-              color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
           content: Text(
             '已经建立了连接',
             style: TextStyle(
-              color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              color: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
           ),
           actions: [
@@ -927,9 +904,11 @@ class _ConfigListPageState extends State<ConfigListPage> {
     );
   }
 
-  void _handleConnectionError(RustErrorInfo msg, String configName, String itemKey) {
+  void _handleConnectionError(
+      RustErrorInfo msg, String configName, String itemKey) {
     // Warn 类型不断开连接，只显示警告
-    if (msg.code != RustErrorType.warn && msg.code != RustErrorType.disconnect) {
+    if (msg.code != RustErrorType.warn &&
+        msg.code != RustErrorType.disconnect) {
       vntManager.remove(itemKey);
       setState(() {});
     }
@@ -973,39 +952,42 @@ class _ConfigListPageState extends State<ConfigListPage> {
   Future<void> _connectViaIOSVPN(NetworkConfig config) async {
     try {
       debugPrint('[iOS VPN] Starting VPN connection for: ${config.configName}');
-      
+
       // 保存配置到App Group
       await IOSVPNService.saveConfig(
         serverAddress: config.serverAddress,
         token: config.token,
       );
-      
+
       // 启动VPN
       final success = await IOSVPNService.startVPN(
         serverAddress: config.serverAddress,
         token: config.token,
         deviceName: config.deviceName,
       );
-      
+
       if (success) {
         // iOS VPN连接成功
         if (mounted) {
-          showTopToast(context, '[${config.configName}] VPN连接成功', isSuccess: true);
+          showTopToast(context, '[${config.configName}] VPN连接成功',
+              isSuccess: true);
           // 调用回调，连接成功后返回主界面默认落点
           widget.onConfigSelected?.call(config);
         }
-        
+
         debugPrint('[iOS VPN] Connection successful');
       } else {
         if (mounted) {
-          showTopToast(context, '[${config.configName}] VPN连接失败，请确认已添加VPN权限', isSuccess: false);
+          showTopToast(context, '[${config.configName}] VPN连接失败，请确认已添加VPN权限',
+              isSuccess: false);
         }
         debugPrint('[iOS VPN] Connection failed');
       }
     } catch (e) {
       debugPrint('[iOS VPN] Connection error: $e');
       if (mounted) {
-        showTopToast(context, '[${config.configName}] VPN连接异常: $e', isSuccess: false);
+        showTopToast(context, '[${config.configName}] VPN连接异常: $e',
+            isSuccess: false);
       }
     }
   }
@@ -1015,7 +997,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
     try {
       if (Platform.isAndroid) {
         final directory = await getTemporaryDirectory();
-        final fileName = '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json';
+        final fileName =
+            '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json';
         final filePath = '${directory.path}/$fileName';
 
         await _dataPersistence.exportSingleConfig(filePath, config);
@@ -1047,7 +1030,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
       } else if (Platform.isIOS) {
         // iOS使用Share Sheet分享文件
         final tempDir = await getTemporaryDirectory();
-        final fileName = '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json';
+        final fileName =
+            '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json';
         final filePath = '${tempDir.path}/$fileName';
 
         await _dataPersistence.exportSingleConfig(filePath, config);
@@ -1060,12 +1044,14 @@ class _ConfigListPageState extends State<ConfigListPage> {
 
         // 使用Share Sheet分享文件
         try {
+          if (!mounted) return;
           final box = context.findRenderObject() as RenderBox?;
           final result = await Share.shareXFiles(
             [XFile(filePath)],
-            sharePositionOrigin: box != null ? box.localToGlobal(Offset.zero) & box.size : null,
+            sharePositionOrigin:
+                box != null ? box.localToGlobal(Offset.zero) & box.size : null,
           );
-          
+
           if (mounted) {
             if (result.status == ShareResultStatus.success) {
               showTopToast(context, '配置已导出', isSuccess: true);
@@ -1090,7 +1076,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
         // Windows/macOS/Linux
         String? path = await FilePicker.platform.saveFile(
           dialogTitle: '选择保存位置',
-          fileName: '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json',
+          fileName:
+              '${config.configName}_${DateTime.now().millisecondsSinceEpoch}.json',
           type: FileType.custom,
           allowedExtensions: ['json'],
         );
@@ -1126,7 +1113,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
         // 检查是否是全局备份文件
         if (jsonData.containsKey('configs')) {
           if (mounted) {
-            showTopToast(context, '这是全局备份文件，请在设置页面的"恢复备份数据"中导入', isSuccess: false);
+            showTopToast(context, '这是全局备份文件，请在设置页面的"恢复备份数据"中导入',
+                isSuccess: false);
           }
           return;
         }
@@ -1157,30 +1145,34 @@ class _ConfigListPageState extends State<ConfigListPage> {
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = Theme.of(context).primaryColor;
-
     showDialog(
       context: context,
       builder: (context) => AlertDialog(
-        backgroundColor: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        backgroundColor:
+            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
         title: Text(
           '删除配置',
           style: TextStyle(
-            color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            color:
+                isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
           ),
         ),
         content: Text(
           '确定要删除 "${config.configName}" 吗？此操作不可恢复。',
           style: TextStyle(
-            color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+            color: isDark
+                ? AppTheme.darkTextSecondary
+                : AppTheme.lightTextSecondary,
           ),
         ),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context),
             style: TextButton.styleFrom(
-              foregroundColor: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+              foregroundColor: isDark
+                  ? AppTheme.darkTextSecondary
+                  : AppTheme.lightTextSecondary,
             ),
             child: const Text('取消'),
           ),
@@ -1212,8 +1204,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
   // 显示断开连接确认对话框
   void _showDisconnectDialog(NetworkConfig config) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = Theme.of(context).primaryColor;
-
     showDialog(
       context: context,
       builder: (context) => Dialog(
@@ -1222,7 +1212,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
           constraints: const BoxConstraints(maxWidth: 360),
           padding: const EdgeInsets.all(24),
           decoration: BoxDecoration(
-            color: isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+            color: isDark
+                ? AppTheme.darkCardBackground
+                : AppTheme.lightCardBackground,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -1233,7 +1225,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 width: 64,
                 height: 64,
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(32),
                 ),
                 child: const Icon(
@@ -1250,7 +1242,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 style: TextStyle(
                   fontSize: context.fontLarge,
                   fontWeight: FontWeight.w600,
-                  color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
                 ),
               ),
               const SizedBox(height: 12),
@@ -1260,7 +1254,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 '是否断开与 \'${config.configName}\' 的组网连接?',
                 style: TextStyle(
                   fontSize: context.fontBody,
-                  color: isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
                 ),
                 textAlign: TextAlign.center,
               ),
@@ -1273,9 +1269,13 @@ class _ConfigListPageState extends State<ConfigListPage> {
                     child: OutlinedButton(
                       onPressed: () => Navigator.pop(context),
                       style: OutlinedButton.styleFrom(
-                        foregroundColor: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                        foregroundColor: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
                         side: BorderSide(
-                          color: isDark ? Colors.white.withOpacity(0.2) : Colors.black.withOpacity(0.2),
+                          color: isDark
+                              ? Colors.white.withValues(alpha: 0.2)
+                              : Colors.black.withValues(alpha: 0.2),
                         ),
                         padding: const EdgeInsets.symmetric(vertical: 14),
                         shape: RoundedRectangleBorder(
@@ -1301,7 +1301,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
 
                         // 更新 Android 磁贴和小组件
                         if (Platform.isAndroid) {
-                          VntAppCall.updateWidgetAndTile(vntManager.hasConnection());
+                          VntAppCall.updateWidgetAndTile(
+                              vntManager.hasConnection());
                         }
 
                         // 更新系统托盘

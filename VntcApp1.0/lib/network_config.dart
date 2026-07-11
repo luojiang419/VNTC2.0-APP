@@ -106,14 +106,14 @@ class NetworkConfig {
     if (this.serverList.isEmpty && serverAddress.isNotEmpty) {
       this.serverList = [serverAddress];
     }
-    if (this.serverAddress.isEmpty && this.serverList.isNotEmpty) {
-      this.serverAddress = this.serverList.first;
+    if (serverAddress.isEmpty && this.serverList.isNotEmpty) {
+      serverAddress = this.serverList.first;
     }
     if (this.udpStun.isEmpty && this.stunServers.isNotEmpty) {
       this.udpStun = List<String>.from(this.stunServers);
     }
-    if (this.compress == false && compressor == 'lz4') {
-      this.compress = true;
+    if (compress == false && compressor == 'lz4') {
+      compress = true;
     }
   }
 
@@ -166,16 +166,16 @@ class NetworkConfig {
 
   String get bridgeCipherModelPayload {
     return '__vnt_bridge_json__=${jsonEncode({
-      'cert_mode': effectiveCertMode,
-      'cipher_model': encryptionAlgorithm,
-      'rtx': rtx,
-      'fec': fec,
-      'no_tun': noTun,
-      'allow_mapping': allowMapping,
-      'udp_stun': effectiveUdpStun,
-      'tcp_stun': effectiveTcpStun,
-      if (tunnelPort > 0) 'tunnel_port': tunnelPort,
-    })}';
+          'cert_mode': effectiveCertMode,
+          'cipher_model': encryptionAlgorithm,
+          'rtx': rtx,
+          'fec': fec,
+          'no_tun': noTun,
+          'allow_mapping': allowMapping,
+          'udp_stun': effectiveUdpStun,
+          'tcp_stun': effectiveTcpStun,
+          if (tunnelPort > 0) 'tunnel_port': tunnelPort,
+        })}';
   }
 
   String? get bridgeLocalIpv4 {
@@ -243,7 +243,7 @@ class NetworkConfig {
     if (tcpStun.isNotEmpty) {
       return List<String>.from(tcpStun);
     }
-    return List<String>.from(effectiveUdpStun);
+    return const [];
   }
 
   Map<String, dynamic> toJson() {
@@ -327,7 +327,8 @@ class NetworkConfig {
       if (dataFingerprintVerification) 'finger': dataFingerprintVerification,
       if (encryptionAlgorithm.isNotEmpty) 'cipher_model': encryptionAlgorithm,
       if (deviceID.isNotEmpty) 'device_id': deviceID,
-      if (virtualNetworkCardName.isNotEmpty) 'device_name': virtualNetworkCardName,
+      if (virtualNetworkCardName.isNotEmpty)
+        'device_name': virtualNetworkCardName,
       if (virtualNetworkCardName.isNotEmpty) 'tun_name': virtualNetworkCardName,
       if (certMode.isNotEmpty) 'cert_mode': certMode,
       'ctrl_port': ctrlPort,

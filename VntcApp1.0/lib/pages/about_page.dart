@@ -76,7 +76,7 @@ class _AboutPageState extends State<AboutPage> {
           height: context.w(48),
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withOpacity(0.7)],
+              colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -131,7 +131,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -189,7 +189,7 @@ class _AboutPageState extends State<AboutPage> {
                 vertical: context.spacingXSmall,
               ),
               decoration: BoxDecoration(
-                color: primaryColor.withOpacity(0.15),
+                color: primaryColor.withValues(alpha: 0.15),
                 borderRadius: BorderRadius.circular(context.cardRadius),
               ),
               child: Text(
@@ -231,7 +231,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -241,7 +241,7 @@ class _AboutPageState extends State<AboutPage> {
         isDark,
         icon: Icons.system_update_alt_rounded,
         title: '软件更新',
-        subtitle: '通过 GitHub Releases 检查并下载最新版本',
+        subtitle: '通过 GitHub Releases 检查并静默升级',
         trailing: Icon(
           Icons.chevron_right_rounded,
           color: primaryColor,
@@ -264,7 +264,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -314,13 +314,13 @@ class _AboutPageState extends State<AboutPage> {
               ),
               decoration: BoxDecoration(
                 color: isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.black.withOpacity(0.03),
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(context.spacingXSmall),
                 border: Border.all(
                   color: isDark
-                      ? Colors.white.withOpacity(0.1)
-                      : Colors.black.withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.black.withValues(alpha: 0.1),
                 ),
               ),
               child: Row(
@@ -367,7 +367,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -401,7 +401,7 @@ class _AboutPageState extends State<AboutPage> {
             isDark,
             icon: Icons.wifi_rounded,
             iconColor: primaryColor,
-            iconBgColor: primaryColor.withOpacity(0.15),
+            iconBgColor: primaryColor.withValues(alpha: 0.15),
             title: '虚拟组网',
             subtitle: '轻松创建安全的虚拟局域网',
           ),
@@ -410,7 +410,7 @@ class _AboutPageState extends State<AboutPage> {
             isDark,
             icon: Icons.speed_rounded,
             iconColor: primaryColor,
-            iconBgColor: primaryColor.withOpacity(0.15),
+            iconBgColor: primaryColor.withValues(alpha: 0.15),
             title: '高性能',
             subtitle: '基于 Rust 构建，性能卓越',
           ),
@@ -419,7 +419,7 @@ class _AboutPageState extends State<AboutPage> {
             isDark,
             icon: Icons.devices_rounded,
             iconColor: primaryColor,
-            iconBgColor: primaryColor.withOpacity(0.15),
+            iconBgColor: primaryColor.withValues(alpha: 0.15),
             title: '跨平台',
             subtitle: '支持 Windows、macOS、Linux、ios',
           ),
@@ -428,7 +428,7 @@ class _AboutPageState extends State<AboutPage> {
             isDark,
             icon: Icons.lock_rounded,
             iconColor: primaryColor,
-            iconBgColor: primaryColor.withOpacity(0.15),
+            iconBgColor: primaryColor.withValues(alpha: 0.15),
             title: '安全加密',
             subtitle: '端到端加密，保护数据安全',
           ),
@@ -505,7 +505,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -590,7 +590,7 @@ class _AboutPageState extends State<AboutPage> {
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -651,8 +651,8 @@ class _AboutPageState extends State<AboutPage> {
         padding: ResponsiveUtils.padding(context, all: 12),
         decoration: BoxDecoration(
           color: isDark
-              ? Colors.white.withOpacity(0.03)
-              : Colors.black.withOpacity(0.02),
+              ? Colors.white.withValues(alpha: 0.03)
+              : Colors.black.withValues(alpha: 0.02),
           borderRadius: BorderRadius.circular(context.cardRadius),
         ),
         child: Row(
@@ -661,7 +661,7 @@ class _AboutPageState extends State<AboutPage> {
               width: context.w(40),
               height: context.w(40),
               decoration: BoxDecoration(
-                color: primaryColor.withOpacity(0.1),
+                color: primaryColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(context.radius(10)),
               ),
               child: Icon(

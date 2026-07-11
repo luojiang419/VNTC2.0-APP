@@ -6,9 +6,9 @@ class ColorUtils {
   /// 将 Color 转换为 HSL 颜色空间
   /// 返回 [hue, saturation, lightness]，范围分别为 [0-360, 0-1, 0-1]
   static List<double> _colorToHSL(Color color) {
-    final r = color.red / 255.0;
-    final g = color.green / 255.0;
-    final b = color.blue / 255.0;
+    final r = color.r;
+    final g = color.g;
+    final b = color.b;
 
     final max = math.max(r, math.max(g, b));
     final min = math.min(r, math.min(g, b));
@@ -20,9 +20,8 @@ class ColorUtils {
     // 计算饱和度
     double saturation = 0.0;
     if (delta != 0.0) {
-      saturation = lightness > 0.5
-          ? delta / (2.0 - max - min)
-          : delta / (max + min);
+      saturation =
+          lightness > 0.5 ? delta / (2.0 - max - min) : delta / (max + min);
     }
 
     // 计算色相
@@ -82,7 +81,7 @@ class ColorUtils {
   static Color lighten(Color color, [double amount = 0.2]) {
     final hsl = _colorToHSL(color);
     final newLightness = (hsl[2] + amount).clamp(0.0, 1.0);
-    return _hslToColor(hsl[0], hsl[1], newLightness, color.opacity);
+    return _hslToColor(hsl[0], hsl[1], newLightness, color.a);
   }
 
   /// 生成深色版本（用于梯度色、状态指示器等）
@@ -90,7 +89,7 @@ class ColorUtils {
   static Color darken(Color color, [double amount = 0.1]) {
     final hsl = _colorToHSL(color);
     final newLightness = (hsl[2] - amount).clamp(0.0, 1.0);
-    return _hslToColor(hsl[0], hsl[1], newLightness, color.opacity);
+    return _hslToColor(hsl[0], hsl[1], newLightness, color.a);
   }
 
   /// 为日间模式生成背景色（已连接配置背景）
@@ -99,7 +98,7 @@ class ColorUtils {
     final hsl = _colorToHSL(color);
     // 保持色相，降低饱和度，提高亮度
     final newSaturation = (hsl[1] * 0.4).clamp(0.3, 0.5);
-    final newLightness = 0.88;
+    const newLightness = 0.88;
     return _hslToColor(hsl[0], newSaturation, newLightness);
   }
 
@@ -109,7 +108,7 @@ class ColorUtils {
     final hsl = _colorToHSL(color);
     // 保持色相，适度降低饱和度，大幅降低亮度
     final newSaturation = (hsl[1] * 0.5).clamp(0.3, 0.5);
-    final newLightness = 0.12; // 确保暗黑模式下不会太亮
+    const newLightness = 0.12; // 确保暗黑模式下不会太亮
     return _hslToColor(hsl[0], newSaturation, newLightness);
   }
 

@@ -146,24 +146,6 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
     }
   }
 
-  Future<void> _modifyTaskSettings() async {
-    String psScript =
-        r'$task = Get-ScheduledTask -TaskName "VNTAppStartup"; $task.Settings.DisallowStartIfOnBatteries = $false; Set-ScheduledTask -InputObject $task';
-
-    try {
-      var result = await Process.run('powershell', ['-Command', psScript],
-          runInShell: true);
-
-      if (result.exitCode == 0) {
-        debugPrint('Task settings modified successfully');
-      } else {
-        debugPrint('Error modifying task settings: ${result.stderr}');
-      }
-    } on ProcessException catch (e) {
-      debugPrint('Failed to run PowerShell script: $e');
-    }
-  }
-
   void _openTaskScheduler() async {
     try {
       await Process.run('taskschd.msc', [], runInShell: true);
@@ -264,6 +246,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
 
         // 使用Share Sheet分享文件
         try {
+          if (!mounted) return;
           final box = context.findRenderObject() as RenderBox?;
           final result = await Share.shareXFiles(
             [XFile(filePath)],
@@ -427,7 +410,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
           height: context.iconXLarge,
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withOpacity(0.7)],
+              colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -497,7 +480,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -526,7 +509,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 width: context.listItemIconContainerSize,
                 height: context.listItemIconContainerSize,
                 decoration: BoxDecoration(
-                  color: primaryColor.withOpacity(0.1),
+                  color: primaryColor.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(context.cardRadius),
                 ),
                 child: Icon(
@@ -610,13 +593,13 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
           padding: EdgeInsets.symmetric(vertical: context.spacingSmall),
           decoration: BoxDecoration(
             color: isSelected
-                ? primaryColor.withOpacity(0.1)
+                ? primaryColor.withValues(alpha: 0.1)
                 : (isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.black.withOpacity(0.03)),
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.03)),
             borderRadius: BorderRadius.circular(context.cardRadius),
             border: isSelected
-                ? Border.all(color: primaryColor.withOpacity(0.5))
+                ? Border.all(color: primaryColor.withValues(alpha: 0.5))
                 : null,
           ),
           child: Column(
@@ -658,7 +641,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -691,7 +674,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                               _autoStart = value;
                             });
                           },
-                          activeColor: Theme.of(context).primaryColor,
+                          activeThumbColor: Theme.of(context).primaryColor,
                         ),
                         IconButton(
                           icon: Icon(
@@ -724,7 +707,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                           );
                         }
                       },
-                      activeColor: Theme.of(context).primaryColor,
+                      activeThumbColor: Theme.of(context).primaryColor,
                     ),
             ),
             _buildDivider(isDark),
@@ -750,7 +733,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                       }
                     }
                   },
-                  activeColor: Theme.of(context).primaryColor,
+                  activeThumbColor: Theme.of(context).primaryColor,
                 ),
               ),
               _buildDivider(isDark),
@@ -769,7 +752,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                   _autoConnect = value;
                 });
               },
-              activeColor: Theme.of(context).primaryColor,
+              activeThumbColor: Theme.of(context).primaryColor,
             ),
           ),
           _buildDivider(isDark),
@@ -777,7 +760,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             isDark,
             icon: Icons.system_update_alt,
             title: '软件更新',
-            subtitle: '通过 GitHub Releases 检查并下载最新版本',
+            subtitle: '通过 GitHub Releases 检查并静默升级',
             onTap: () => showUpdateCheckDialog(context),
           ),
           _buildDivider(isDark),
@@ -801,7 +784,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             width: context.listItemIconContainerSize,
             height: context.listItemIconContainerSize,
             decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.1),
+              color: primaryColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(context.cardRadius),
             ),
             child: Icon(
@@ -842,8 +825,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               padding: EdgeInsets.symmetric(horizontal: context.spacingSmall),
               decoration: BoxDecoration(
                 color: isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.black.withOpacity(0.03),
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(context.cardRadius),
               ),
               child: DropdownButton<String>(
@@ -916,7 +899,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             width: context.listItemIconContainerSize,
             height: context.listItemIconContainerSize,
             decoration: BoxDecoration(
-              color: primaryColor.withOpacity(0.1),
+              color: primaryColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(context.cardRadius),
             ),
             child: Icon(
@@ -956,8 +939,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
             padding: EdgeInsets.symmetric(horizontal: context.spacingSmall),
             decoration: BoxDecoration(
               color: isDark
-                  ? Colors.white.withOpacity(0.05)
-                  : Colors.black.withOpacity(0.03),
+                  ? Colors.white.withValues(alpha: 0.05)
+                  : Colors.black.withValues(alpha: 0.03),
               borderRadius: BorderRadius.circular(context.cardRadius),
             ),
             child: DropdownButton<WindowCloseBehavior>(
@@ -1012,7 +995,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1057,7 +1040,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 10,
             offset: const Offset(0, 4),
           ),
@@ -1074,7 +1057,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               Navigator.push(
                 context,
                 MaterialPageRoute(
-                  builder: (context) => LogPage(),
+                  builder: (context) => const LogPage(),
                 ),
               );
             },
@@ -1104,7 +1087,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               width: context.listItemIconContainerSize,
               height: context.listItemIconContainerSize,
               decoration: BoxDecoration(
-                color: (iconColor ?? primaryColor).withOpacity(0.1),
+                color: (iconColor ?? primaryColor).withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(context.cardRadius),
               ),
               child: Icon(
@@ -1160,8 +1143,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
       height: 1,
       indent: 72,
       color: isDark
-          ? Colors.white.withOpacity(0.1)
-          : Colors.black.withOpacity(0.05),
+          ? Colors.white.withValues(alpha: 0.1)
+          : Colors.black.withValues(alpha: 0.05),
     );
   }
 
@@ -1176,7 +1159,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
               width: context.listItemIconContainerSize,
               height: context.listItemIconContainerSize,
               decoration: BoxDecoration(
-                color: currentColor.withOpacity(0.1),
+                color: currentColor.withValues(alpha: 0.1),
                 borderRadius: BorderRadius.circular(context.cardRadius),
               ),
               child: Icon(
@@ -1220,8 +1203,8 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
                 borderRadius: BorderRadius.circular(context.spacingXSmall),
                 border: Border.all(
                   color: isDark
-                      ? Colors.white.withOpacity(0.2)
-                      : Colors.black.withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.2)
+                      : Colors.black.withValues(alpha: 0.1),
                   width: 2,
                 ),
               ),
@@ -1258,11 +1241,9 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
 
   void _showClearDataDialog() {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final primaryColor = Theme.of(context).primaryColor;
-
     showDialog(
       context: context,
-      builder: (context) => AlertDialog(
+      builder: (dialogContext) => AlertDialog(
         backgroundColor:
             isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
         shape: RoundedRectangleBorder(
@@ -1284,7 +1265,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
         ),
         actions: [
           TextButton(
-            onPressed: () => Navigator.pop(context),
+            onPressed: () => Navigator.pop(dialogContext),
             style: TextButton.styleFrom(
               foregroundColor: isDark
                   ? AppTheme.darkTextSecondary
@@ -1294,7 +1275,7 @@ Register-ScheduledTask -TaskName '$taskName' -Action \$action -Trigger \$trigger
           ),
           ElevatedButton(
             onPressed: () async {
-              Navigator.pop(context);
+              Navigator.pop(dialogContext);
               await _dataPersistence.clear();
               await _setStartupWithAdmin(false);
               if (mounted) {
@@ -1375,7 +1356,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
     final hsv = HSVColor.fromColor(selectedColor);
     hue = hsv.hue;
     saturation = hsv.saturation;
-    opacity = selectedColor.opacity;
+    opacity = selectedColor.a;
   }
 
   void _updateColorFromHSV() {
@@ -1413,8 +1394,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
               decoration: BoxDecoration(
                 gradient: LinearGradient(
                   colors: [
-                    selectedColor.withOpacity(0.15),
-                    selectedColor.withOpacity(0.05),
+                    selectedColor.withValues(alpha: 0.15),
+                    selectedColor.withValues(alpha: 0.05),
                   ],
                   begin: Alignment.topLeft,
                   end: Alignment.bottomRight,
@@ -1429,7 +1410,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                   Container(
                     padding: EdgeInsets.all(context.spacingSmall),
                     decoration: BoxDecoration(
-                      color: selectedColor.withOpacity(0.15),
+                      color: selectedColor.withValues(alpha: 0.15),
                       borderRadius: BorderRadius.circular(context.cardRadius),
                     ),
                     child: Icon(
@@ -1455,7 +1436,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                         ),
                         SizedBox(height: context.spacingXSmall / 2),
                         Text(
-                          '#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}',
+                          '#${selectedColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
                           style: TextStyle(
                             fontSize: context.fontSmall,
                             fontFamily: 'monospace',
@@ -1490,8 +1471,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                     : AppTheme.lightTextSecondary,
                 indicatorColor: selectedColor,
                 dividerColor: widget.isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.black.withOpacity(0.05),
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.05),
                 tabs: const [
                   Tab(text: '预设颜色'),
                   Tab(text: '自定义'),
@@ -1523,8 +1504,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                             : AppTheme.lightTextSecondary,
                         side: BorderSide(
                           color: widget.isDark
-                              ? Colors.white.withOpacity(0.2)
-                              : Colors.black.withOpacity(0.2),
+                              ? Colors.white.withValues(alpha: 0.2)
+                              : Colors.black.withValues(alpha: 0.2),
                         ),
                         padding: EdgeInsets.symmetric(
                             vertical: context.spacingSmall),
@@ -1577,7 +1558,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
           children: presetColors.map((preset) {
             final color = preset['color'] as Color;
             final name = preset['name'] as String;
-            final isSelected = selectedColor.value == color.value;
+            final isSelected = selectedColor.toARGB32() == color.toARGB32();
             return GestureDetector(
               onTap: () {
                 setState(() {
@@ -1597,7 +1578,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                       : null,
                   boxShadow: [
                     BoxShadow(
-                      color: Colors.black.withOpacity(0.1),
+                      color: Colors.black.withValues(alpha: 0.1),
                       blurRadius: 4,
                       offset: const Offset(0, 2),
                     ),
@@ -1619,7 +1600,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                           fontWeight: FontWeight.w500,
                           shadows: [
                             Shadow(
-                              color: Colors.black.withOpacity(0.5),
+                              color: Colors.black.withValues(alpha: 0.5),
                               blurRadius: 2,
                             ),
                           ],
@@ -1637,7 +1618,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                           size: context.iconSmall,
                           shadows: [
                             Shadow(
-                              color: Colors.black.withOpacity(0.5),
+                              color: Colors.black.withValues(alpha: 0.5),
                               blurRadius: 2,
                             ),
                           ],
@@ -1654,9 +1635,9 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
   }
 
   Widget _buildCustomTab() {
-    final red = selectedColor.red;
-    final green = selectedColor.green;
-    final blue = selectedColor.blue;
+    final red = (selectedColor.r * 255.0).round().clamp(0, 255);
+    final green = (selectedColor.g * 255.0).round().clamp(0, 255);
+    final blue = (selectedColor.b * 255.0).round().clamp(0, 255);
 
     return SingleChildScrollView(
       child: Padding(
@@ -1676,8 +1657,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                 borderRadius: BorderRadius.circular(context.cardRadius),
                 border: Border.all(
                   color: widget.isDark
-                      ? Colors.white.withOpacity(0.2)
-                      : Colors.black.withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.2)
+                      : Colors.black.withValues(alpha: 0.1),
                   width: 2,
                 ),
               ),
@@ -1690,7 +1671,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                     color: Colors.white,
                     shadows: [
                       Shadow(
-                        color: Colors.black.withOpacity(0.3),
+                        color: Colors.black.withValues(alpha: 0.3),
                         blurRadius: 4,
                       ),
                     ],
@@ -1761,8 +1742,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
               },
               gradient: LinearGradient(
                 colors: [
-                  selectedColor.withOpacity(0),
-                  selectedColor.withOpacity(1),
+                  selectedColor.withValues(alpha: 0),
+                  selectedColor.withValues(alpha: 1),
                 ],
               ),
             ),
@@ -1773,8 +1754,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
               padding: EdgeInsets.all(context.spacingSmall),
               decoration: BoxDecoration(
                 color: widget.isDark
-                    ? Colors.white.withOpacity(0.05)
-                    : Colors.black.withOpacity(0.03),
+                    ? Colors.white.withValues(alpha: 0.05)
+                    : Colors.black.withValues(alpha: 0.03),
                 borderRadius: BorderRadius.circular(context.buttonRadius),
               ),
               child: Column(
@@ -1792,7 +1773,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                         ),
                       ),
                       Text(
-                        '#${selectedColor.value.toRadixString(16).substring(2).toUpperCase()}',
+                        '#${selectedColor.toARGB32().toRadixString(16).substring(2).toUpperCase()}',
                         style: TextStyle(
                           fontSize: context.fontSmall,
                           fontWeight: FontWeight.w600,
@@ -1886,8 +1867,8 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                 borderRadius: BorderRadius.circular(context.cardRadius),
                 border: Border.all(
                   color: widget.isDark
-                      ? Colors.white.withOpacity(0.1)
-                      : Colors.black.withOpacity(0.1),
+                      ? Colors.white.withValues(alpha: 0.1)
+                      : Colors.black.withValues(alpha: 0.1),
                 ),
               ),
             ),
@@ -1903,7 +1884,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
                   activeTrackColor: Colors.transparent,
                   inactiveTrackColor: Colors.transparent,
                   thumbColor: Colors.white,
-                  overlayColor: Colors.white.withOpacity(0.2),
+                  overlayColor: Colors.white.withValues(alpha: 0.2),
                 ),
                 child: Slider(
                   value: value,

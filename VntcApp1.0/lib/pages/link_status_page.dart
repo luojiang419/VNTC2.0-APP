@@ -33,6 +33,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
   final RemoteAssistManager _remoteAssistManager = RemoteAssistManager.instance;
   Timer? _timer;
   List<RustPeerClientInfo> _devices = [];
+  Map<String, dynamic>? _p2pDiagnostics;
   late TabController _tabController;
 
   // 延迟历史数据 - 用于绘制延迟趋势图
@@ -75,16 +76,35 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     return status.trim().toLowerCase() == 'online';
   }
 
+  String _p2pDiagnosticLabel() {
+    switch (_p2pDiagnostics?['state']) {
+      case 'nat_discovering':
+        return 'NAT 探测中';
+      case 'waiting_for_peer':
+        return '等待在线节点';
+      case 'p2p_ready':
+        return 'P2P 已建立（${_p2pDiagnostics?['directPeerCount'] ?? 0}）';
+      case 'relay_ready':
+        return '中继可用，等待 P2P';
+      case 'server_disconnected':
+        return '服务器连接不可用';
+      default:
+        return '';
+    }
+  }
+
   void _updateDevices() {
     if (!mounted) return;
 
     final allVnts = vntManager.map;
     List<RustPeerClientInfo> devices = [];
+    Map<String, dynamic>? p2pDiagnostics;
 
     for (var entry in allVnts.entries) {
       final vntBox = entry.value;
       if (!vntBox.isClosed()) {
         devices.addAll(vntBox.peerDeviceList());
+        p2pDiagnostics ??= vntBox.p2pDiagnostics();
 
         // 更新延迟历史数据
         for (var device in devices) {
@@ -109,6 +129,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
 
     setState(() {
       _devices = devices;
+      _p2pDiagnostics = p2pDiagnostics;
     });
   }
 
@@ -180,8 +201,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       ? AppTheme.darkTextSecondary
                       : AppTheme.lightTextSecondary,
                   dividerColor: isDark
-                      ? Colors.white.withOpacity(0.05)
-                      : Colors.black.withOpacity(0.05),
+                      ? Colors.white.withValues(alpha: 0.05)
+                      : Colors.black.withValues(alpha: 0.05),
                   labelStyle: TextStyle(
                     fontSize: context.buttonFontSize,
                     fontWeight: FontWeight.w600,
@@ -241,7 +262,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
           height: context.iconXLarge,
           decoration: BoxDecoration(
             gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withOpacity(0.7)],
+              colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
@@ -279,6 +300,18 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       : AppTheme.lightTextSecondary,
                 ),
               ),
+              if (hasConnection && _p2pDiagnosticLabel().isNotEmpty)
+                Text(
+                  _p2pDiagnosticLabel(),
+                  style: TextStyle(
+                    fontSize: context.fontSmall,
+                    color: _p2pDiagnostics?['state'] == 'p2p_ready'
+                        ? Colors.green
+                        : (isDark
+                            ? AppTheme.darkTextSecondary
+                            : AppTheme.lightTextSecondary),
+                  ),
+                ),
             ],
           ),
         ),
@@ -350,7 +383,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.18 : 0.06),
+            color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
             blurRadius: 12,
             offset: const Offset(0, 4),
           ),
@@ -373,7 +406,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                     width: context.iconLarge,
                     height: context.iconLarge,
                     decoration: BoxDecoration(
-                      color: statusColor.withOpacity(0.14),
+                      color: statusColor.withValues(alpha: 0.14),
                       borderRadius: BorderRadius.circular(context.cardRadius),
                     ),
                     child: Icon(
@@ -477,7 +510,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       width: double.infinity,
                       padding: EdgeInsets.all(context.spacingMedium),
                       decoration: BoxDecoration(
-                        color: Colors.orange.withOpacity(0.12),
+                        color: Colors.orange.withValues(alpha: 0.12),
                         borderRadius: BorderRadius.circular(context.cardRadius),
                       ),
                       child: Column(
@@ -751,8 +784,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
       ),
       decoration: BoxDecoration(
         color: isActive
-            ? Colors.green.withOpacity(0.15)
-            : Colors.grey.withOpacity(isDark ? 0.20 : 0.14),
+            ? Colors.green.withValues(alpha: 0.15)
+            : Colors.grey.withValues(alpha: isDark ? 0.20 : 0.14),
         borderRadius: BorderRadius.circular(context.cardRadius),
       ),
       child: Text(
@@ -917,7 +950,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                     vertical: context.spacingXXSmall,
                   ),
                   decoration: BoxDecoration(
-                    color: primaryColor.withOpacity(0.2),
+                    color: primaryColor.withValues(alpha: 0.2),
                     borderRadius: BorderRadius.circular(context.cardRadius),
                   ),
                   child: Text(
@@ -1085,7 +1118,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
         borderRadius: BorderRadius.circular(context.cardRadius),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1110,8 +1143,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       height: context.listItemIconContainerSize,
                       decoration: BoxDecoration(
                         color: isOnline
-                            ? primaryColor.withOpacity(0.1)
-                            : Colors.grey.withOpacity(0.1),
+                            ? primaryColor.withValues(alpha: 0.1)
+                            : Colors.grey.withValues(alpha: 0.1),
                         borderRadius: BorderRadius.circular(context.cardRadius),
                       ),
                       child: Icon(
@@ -1180,8 +1213,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                         ),
                         decoration: BoxDecoration(
                           color: p2pRelay == 'P2P'
-                              ? Colors.green.withOpacity(0.15)
-                              : Colors.orange.withOpacity(0.15),
+                              ? Colors.green.withValues(alpha: 0.15)
+                              : Colors.orange.withValues(alpha: 0.15),
                           borderRadius:
                               BorderRadius.circular(context.spacingXSmall),
                         ),
@@ -1206,7 +1239,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   Container(
                     height: context.w(60),
                     decoration: BoxDecoration(
-                      color: primaryColor.withOpacity(0.05),
+                      color: primaryColor.withValues(alpha: 0.05),
                       borderRadius:
                           BorderRadius.circular(context.spacingXSmall),
                     ),
@@ -1229,7 +1262,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                           vertical: context.spacingXXSmall,
                         ),
                         decoration: BoxDecoration(
-                          color: _getLatencyColor(rt).withOpacity(0.1),
+                          color: _getLatencyColor(rt).withValues(alpha: 0.1),
                           borderRadius:
                               BorderRadius.circular(context.spacingXSmall / 2),
                         ),
@@ -1285,8 +1318,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                             horizontal: 6, vertical: 4),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.black.withOpacity(0.05),
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
@@ -1324,8 +1357,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                             horizontal: 6, vertical: 4),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? Colors.white.withOpacity(0.05)
-                              : Colors.black.withOpacity(0.05),
+                              ? Colors.white.withValues(alpha: 0.05)
+                              : Colors.black.withValues(alpha: 0.05),
                           borderRadius: BorderRadius.circular(6),
                         ),
                         child: Row(
@@ -1375,7 +1408,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
         borderRadius: BorderRadius.circular(12),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.05),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
             blurRadius: 8,
             offset: const Offset(0, 2),
           ),
@@ -1409,8 +1442,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                 padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
                 decoration: BoxDecoration(
                   color: isP2P
-                      ? Colors.green.withOpacity(0.15)
-                      : Colors.orange.withOpacity(0.15),
+                      ? Colors.green.withValues(alpha: 0.15)
+                      : Colors.orange.withValues(alpha: 0.15),
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
@@ -1436,7 +1469,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: primaryColor.withOpacity(0.15),
+                    color: primaryColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Column(
@@ -1473,7 +1506,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   padding:
                       const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
                   decoration: BoxDecoration(
-                    color: primaryColor.withOpacity(0.15),
+                    color: primaryColor.withValues(alpha: 0.15),
                     borderRadius: BorderRadius.circular(8),
                   ),
                   child: Column(
@@ -1578,10 +1611,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
             width: 80,
             height: 80,
             decoration: BoxDecoration(
-              color: AppTheme.warningColor.withOpacity(0.1),
+              color: AppTheme.warningColor.withValues(alpha: 0.1),
               borderRadius: BorderRadius.circular(20),
             ),
-            child: Icon(
+            child: const Icon(
               Icons.link_off,
               size: 40,
               color: AppTheme.warningColor,
@@ -1749,8 +1782,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
                       colors: [
-                        primaryColor.withOpacity(0.15),
-                        primaryColor.withOpacity(0.05),
+                        primaryColor.withValues(alpha: 0.15),
+                        primaryColor.withValues(alpha: 0.05),
                       ],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
@@ -1764,7 +1797,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                         width: iconSize,
                         height: iconSize,
                         decoration: BoxDecoration(
-                          color: primaryColor.withOpacity(0.15),
+                          color: primaryColor.withValues(alpha: 0.15),
                           borderRadius:
                               BorderRadius.circular(isLandscape ? 10 : 14),
                         ),
@@ -1878,8 +1911,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                                 : (isMobile ? 3 : 4),
                                           ),
                                           decoration: BoxDecoration(
-                                            color:
-                                                primaryColor.withOpacity(0.2),
+                                            color: primaryColor.withValues(
+                                                alpha: 0.2),
                                             borderRadius:
                                                 BorderRadius.circular(6),
                                           ),
@@ -2002,8 +2035,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                               isLandscape ? 10 : (isMobile ? 12 : 16)),
                           decoration: BoxDecoration(
                             color: isDark
-                                ? Colors.white.withOpacity(0.03)
-                                : Colors.black.withOpacity(0.03),
+                                ? Colors.white.withValues(alpha: 0.03)
+                                : Colors.black.withValues(alpha: 0.03),
                             borderRadius:
                                 BorderRadius.circular(isLandscape ? 8 : 12),
                           ),
@@ -2056,8 +2089,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                 isLandscape ? 10 : (isMobile ? 12 : 16)),
                             decoration: BoxDecoration(
                               color: isDark
-                                  ? Colors.white.withOpacity(0.03)
-                                  : Colors.black.withOpacity(0.03),
+                                  ? Colors.white.withValues(alpha: 0.03)
+                                  : Colors.black.withValues(alpha: 0.03),
                               borderRadius:
                                   BorderRadius.circular(isLandscape ? 8 : 12),
                             ),
@@ -2084,8 +2117,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                   isLandscape ? 8 : (isMobile ? 10 : 12)),
                               decoration: BoxDecoration(
                                 color: isP2P
-                                    ? Colors.green.withOpacity(0.1)
-                                    : Colors.orange.withOpacity(0.1),
+                                    ? Colors.green.withValues(alpha: 0.1)
+                                    : Colors.orange.withValues(alpha: 0.1),
                                 borderRadius:
                                     BorderRadius.circular(isLandscape ? 8 : 12),
                               ),
@@ -2106,8 +2139,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                         ),
                                         decoration: BoxDecoration(
                                           color: isP2P
-                                              ? Colors.green.withOpacity(0.2)
-                                              : Colors.orange.withOpacity(0.2),
+                                              ? Colors.green
+                                                  .withValues(alpha: 0.2)
+                                              : Colors.orange
+                                                  .withValues(alpha: 0.2),
                                           borderRadius:
                                               BorderRadius.circular(6),
                                         ),
@@ -2179,7 +2214,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                 ],
                               ),
                             );
-                          }).toList(),
+                          }),
                       ],
                     ),
                   ),
@@ -2317,8 +2352,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      primaryColor.withOpacity(0.15),
-                      primaryColor.withOpacity(0.05),
+                      primaryColor.withValues(alpha: 0.15),
+                      primaryColor.withValues(alpha: 0.05),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -2332,7 +2367,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       width: context.w(48),
                       height: context.w(48),
                       decoration: BoxDecoration(
-                        color: primaryColor.withOpacity(0.15),
+                        color: primaryColor.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(context.radius(12)),
                       ),
                       child: Icon(
@@ -2396,7 +2431,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor.withOpacity(0.15),
+                      backgroundColor: primaryColor.withValues(alpha: 0.15),
                       foregroundColor: primaryColor,
                       elevation: 0,
                       padding: ResponsiveUtils.padding(context, vertical: 14),
@@ -2465,8 +2500,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                 decoration: BoxDecoration(
                   gradient: LinearGradient(
                     colors: [
-                      primaryColor.withOpacity(0.15),
-                      primaryColor.withOpacity(0.05),
+                      primaryColor.withValues(alpha: 0.15),
+                      primaryColor.withValues(alpha: 0.05),
                     ],
                     begin: Alignment.topLeft,
                     end: Alignment.bottomRight,
@@ -2480,7 +2515,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                       width: context.w(48),
                       height: context.w(48),
                       decoration: BoxDecoration(
-                        color: primaryColor.withOpacity(0.15),
+                        color: primaryColor.withValues(alpha: 0.15),
                         borderRadius: BorderRadius.circular(context.radius(12)),
                       ),
                       child: Icon(
@@ -2544,7 +2579,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   child: ElevatedButton(
                     onPressed: () => Navigator.pop(context),
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: primaryColor.withOpacity(0.15),
+                      backgroundColor: primaryColor.withValues(alpha: 0.15),
                       foregroundColor: primaryColor,
                       elevation: 0,
                       padding: ResponsiveUtils.padding(context, vertical: 14),
@@ -2608,7 +2643,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                 width: context.w(64),
                 height: context.w(64),
                 decoration: BoxDecoration(
-                  color: Colors.orange.withOpacity(0.1),
+                  color: Colors.orange.withValues(alpha: 0.1),
                   borderRadius: BorderRadius.circular(context.radius(32)),
                 ),
                 child: Icon(
@@ -2659,8 +2694,8 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                             : AppTheme.lightTextPrimary,
                         side: BorderSide(
                           color: isDark
-                              ? Colors.white.withOpacity(0.2)
-                              : Colors.black.withOpacity(0.2),
+                              ? Colors.white.withValues(alpha: 0.2)
+                              : Colors.black.withValues(alpha: 0.2),
                         ),
                         padding: ResponsiveUtils.padding(context, vertical: 14),
                         shape: RoundedRectangleBorder(
@@ -2747,7 +2782,7 @@ class _LatencyChartPainter extends CustomPainter {
       ..style = PaintingStyle.stroke;
 
     final fillPaint = Paint()
-      ..color = color.withOpacity(0.2)
+      ..color = color.withValues(alpha: 0.2)
       ..style = PaintingStyle.fill;
 
     final path = Path();

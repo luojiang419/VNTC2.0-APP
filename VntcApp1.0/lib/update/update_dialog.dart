@@ -1,3 +1,6 @@
+import 'dart:async';
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
@@ -75,11 +78,13 @@ class _UpdateAvailableDialog extends StatefulWidget {
 class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
   bool _downloading = false;
   double _progress = 0;
+  String _statusText = '准备下载更新包...';
 
-  Future<void> _downloadAndOpen() async {
+  Future<void> _downloadAndInstall() async {
     setState(() {
       _downloading = true;
       _progress = 0;
+      _statusText = '正在下载更新包...';
     });
 
     try {
@@ -94,6 +99,24 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
           });
         },
       );
+      if (Platform.isWindows) {
+        if (mounted) {
+          setState(() {
+            _statusText = '正在启动静默更新器...';
+          });
+        }
+        await widget.service.launchWindowsSilentInstaller(result);
+        if (!mounted) {
+          return;
+        }
+        showTopToast(context, '更新器已启动，应用即将退出', isSuccess: true);
+        Navigator.of(context).pop();
+        Timer(const Duration(milliseconds: 700), () {
+          exit(0);
+        });
+        return;
+      }
+
       await widget.service.openDownloadedInstaller(result);
       if (!mounted) {
         return;
@@ -158,6 +181,8 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
                 value: _progress == 0 ? null : _progress.clamp(0, 1),
                 color: primaryColor,
               ),
+              const SizedBox(height: 8),
+              Text(_statusText),
             ],
           ],
         ),
@@ -175,9 +200,15 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
           onPressed: _downloading
               ? null
               : info.canDownload
-                  ? _downloadAndOpen
+                  ? _downloadAndInstall
                   : _openReleasePage,
-          child: Text(info.canDownload ? '下载并安装' : '打开更新页面'),
+          child: Text(
+            info.canDownload
+                ? Platform.isWindows
+                    ? '静默更新'
+                    : '下载并安装'
+                : '打开更新页面',
+          ),
         ),
       ],
     );

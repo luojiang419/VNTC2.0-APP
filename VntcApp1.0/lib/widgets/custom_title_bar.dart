@@ -99,7 +99,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
         color: backgroundColor,
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(isDark ? 0.2 : 0.08),
+            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
             blurRadius: 4,
             offset: const Offset(0, 2),
           ),
@@ -237,10 +237,10 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
         child: InkWell(
           onTap: onPressed,
           hoverColor: isCloseButton
-              ? Colors.red.withOpacity(0.8)
+              ? Colors.red.withValues(alpha: 0.8)
               : (isDark
-                  ? Colors.white.withOpacity(0.1)
-                  : Colors.black.withOpacity(0.05)),
+                  ? Colors.white.withValues(alpha: 0.1)
+                  : Colors.black.withValues(alpha: 0.05)),
           child: Container(
             width: 46,
             height: 40,

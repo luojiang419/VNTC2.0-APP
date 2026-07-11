@@ -120,6 +120,7 @@ function Get-MsiInstallArguments {
         '/i',
         (Quote-ProcessArgument -Value $MsiPath),
         '/qn',
+        '/norestart',
         '/l*v',
         (Quote-ProcessArgument -Value $installLog)
     )
@@ -132,6 +133,66 @@ function Get-MsiInstallArguments {
     }
 
     return $arguments
+}
+
+function Get-MsiProperty {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$Property
+    )
+
+    $installer = $null
+    $database = $null
+    $view = $null
+    $record = $null
+
+    try {
+        $installer = New-Object -ComObject WindowsInstaller.Installer
+        $database = $installer.GetType().InvokeMember(
+            'OpenDatabase',
+            'InvokeMethod',
+            $null,
+            $installer,
+            @($Path, 0)
+        )
+        $query = "SELECT ``Value`` FROM ``Property`` WHERE ``Property``='$Property'"
+        $view = $database.GetType().InvokeMember(
+            'OpenView',
+            'InvokeMethod',
+            $null,
+            $database,
+            @($query)
+        )
+        $view.GetType().InvokeMember('Execute', 'InvokeMethod', $null, $view, $null) | Out-Null
+        $record = $view.GetType().InvokeMember('Fetch', 'InvokeMethod', $null, $view, $null)
+        if ($null -eq $record) {
+            return ''
+        }
+        return [string]$record.GetType().InvokeMember(
+            'StringData',
+            'GetProperty',
+            $null,
+            $record,
+            1
+        )
+    } catch {
+        return ''
+    } finally {
+        if ($null -ne $view) {
+            try {
+                $view.GetType().InvokeMember('Close', 'InvokeMethod', $null, $view, $null) | Out-Null
+            } catch {
+            }
+        }
+        foreach ($comObject in @($record, $view, $database, $installer)) {
+            if ($null -ne $comObject) {
+                try {
+                    [Runtime.InteropServices.Marshal]::ReleaseComObject($comObject) | Out-Null
+                } catch {
+                }
+            }
+        }
+    }
 }
 
 function Invoke-MsiProcess {
@@ -320,10 +381,24 @@ if ($null -ne $existingEntry -and -not (Test-ManagedRuntimePresent -ExistingEntr
     $existingEntry = $null
 }
 
-$installProcess = Invoke-MsiProcess -Arguments (Get-MsiInstallArguments -ExistingEntry $existingEntry)
+$runtimePresent = $null -ne $existingEntry -and (Test-ManagedRuntimePresent -ExistingEntry $existingEntry)
+$bundledVersion = Get-MsiProperty -Path $MsiPath -Property 'ProductVersion'
+$existingVersion = if ($null -ne $existingEntry) { [string]$existingEntry.DisplayVersion } else { '' }
+$shouldInstallMsi = -not $runtimePresent
+if ($runtimePresent -and
+    -not [string]::IsNullOrWhiteSpace($bundledVersion) -and
+    $existingVersion -ne $bundledVersion) {
+    $shouldInstallMsi = $true
+}
 
-if ($installProcess.ExitCode -notin @(0, 3010)) {
-    throw "vntcrustdesk MSI install failed: $($installProcess.ExitCode)"
+if ($shouldInstallMsi) {
+    $installProcess = Invoke-MsiProcess -Arguments (Get-MsiInstallArguments -ExistingEntry $existingEntry)
+
+    if ($installProcess.ExitCode -notin @(0, 3010)) {
+        throw "vntcrustdesk MSI install failed: $($installProcess.ExitCode)"
+    }
+} else {
+    Write-Host "[OK] vntcrustdesk MSI already present, skip reinstall: $existingVersion"
 }
 
 $uninstallEntry = Get-UninstallEntry

@@ -4,17 +4,107 @@ use rust_p2p_core::tunnel::SocketManager;
 use rust_p2p_core::tunnel::udp::Model;
 use std::collections::HashMap;
 use std::io;
-use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4};
-use std::time::Duration;
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, SocketAddrV4};
+use std::time::{Duration, Instant};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::net::TcpStream;
 
-pub async fn my_nat_info(app_context: AppState, socket_manager: SocketManager) {
-    loop {
-        my_nat_info_impl(&app_context, &socket_manager).await;
-        tokio::time::sleep(Duration::from_secs(60 * 30)).await;
+const NETWORK_CHANGE_POLL_INTERVAL: Duration = Duration::from_secs(5);
+const NAT_INFO_REFRESH_INTERVAL: Duration = Duration::from_secs(60 * 30);
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct LocalInterfaceFingerprint {
+    ipv4: Vec<Ipv4Addr>,
+    ipv6: Vec<Ipv6Addr>,
+}
+
+impl LocalInterfaceFingerprint {
+    fn new(mut ipv4: Vec<Ipv4Addr>, mut ipv6: Vec<Ipv6Addr>) -> Self {
+        ipv4.sort_unstable();
+        ipv4.dedup();
+        ipv6.sort_unstable();
+        ipv6.dedup();
+        Self { ipv4, ipv6 }
     }
 }
+
+pub async fn my_nat_info(app_context: AppState, socket_manager: SocketManager) {
+    let mut last_fingerprint = local_interface_fingerprint(app_context.network.network().as_ref());
+    my_nat_info_impl(&app_context, &socket_manager).await;
+    let mut last_probe = Instant::now();
+
+    loop {
+        tokio::time::sleep(NETWORK_CHANGE_POLL_INTERVAL).await;
+        let next_fingerprint = local_interface_fingerprint(app_context.network.network().as_ref());
+        let network_changed = should_reprobe_for_network_change(
+            last_fingerprint.as_ref(),
+            next_fingerprint.as_ref(),
+        );
+        let periodic_refresh_due = last_probe.elapsed() >= NAT_INFO_REFRESH_INTERVAL;
+        if network_changed || periodic_refresh_due {
+            if network_changed {
+                log::info!(
+                    "local network addresses changed from {:?} to {:?}; re-probing NAT",
+                    last_fingerprint,
+                    next_fingerprint
+                );
+            }
+            my_nat_info_impl(&app_context, &socket_manager).await;
+            last_probe = Instant::now();
+        }
+        if next_fingerprint.is_some() {
+            last_fingerprint = next_fingerprint;
+        }
+    }
+}
+
+fn local_interface_fingerprint(
+    network: Option<&ipnet::Ipv4Net>,
+) -> Option<LocalInterfaceFingerprint> {
+    let mut ipv4 = Vec::new();
+    let mut ipv6 = Vec::new();
+    let addrs = match getifaddrs::getifaddrs() {
+        Ok(addrs) => addrs,
+        Err(error) => {
+            log::warn!("getifaddrs failed while checking network changes: {error}");
+            return None;
+        }
+    };
+    for interface in addrs {
+        let Some(ip) = interface.address.ip_addr() else {
+            continue;
+        };
+        if ip.is_loopback() || ip.is_unspecified() || ip.is_multicast() {
+            continue;
+        }
+        match ip {
+            IpAddr::V4(addr) => {
+                if addr.is_documentation() || addr.is_broadcast() {
+                    continue;
+                }
+                if network.is_some_and(|network| network.contains(&addr)) {
+                    continue;
+                }
+                ipv4.push(addr);
+            }
+            IpAddr::V6(addr) => {
+                if addr.is_unique_local() || addr.is_unicast_link_local() {
+                    continue;
+                }
+                ipv6.push(addr);
+            }
+        }
+    }
+    Some(LocalInterfaceFingerprint::new(ipv4, ipv6))
+}
+
+fn should_reprobe_for_network_change(
+    previous: Option<&LocalInterfaceFingerprint>,
+    current: Option<&LocalInterfaceFingerprint>,
+) -> bool {
+    matches!((previous, current), (Some(previous), Some(current)) if previous != current)
+}
+
 async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager) {
     let network = app_context.network.network();
     let mut local_ipv4s = Vec::new();
@@ -76,7 +166,7 @@ async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager
                 .cloned()
                 .unwrap_or(Ipv4Addr::UNSPECIFIED)
         });
-    local_ipv4s = vec![local_ipv4];
+    local_ipv4s = complete_local_ipv4s(local_ipv4s, local_ipv4);
     let mut ipv6 = rust_p2p_core::extend::addr::local_ipv6().await.ok();
     if let Some(addr) = ipv6 {
         if addr.is_loopback()
@@ -106,7 +196,7 @@ async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager
     let mut public_ports = local_udp_ports.clone();
     public_ports.fill(0);
     let mut nat_info = NatInfo {
-        nat_type: NatType::Cone,
+        nat_type: NatType::Symmetric,
         public_ips: vec![],
         public_udp_ports: public_ports,
         mapping_tcp_addr: vec![],
@@ -123,12 +213,20 @@ async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager
     if stun_server.is_empty() {
         stun_server = default_udp_stun();
     }
-    let (nat_type, public_ips, port_range) = rust_p2p_core::stun::stun_test_nat(stun_server, None)
-        .await
-        .unwrap_or_else(|e| {
-            log::warn!("stun_test_nat {e:?}");
-            (NatType::Cone, vec![], 0)
-        });
+    let (nat_type, public_ips, port_range) = match rust_p2p_core::stun::stun_test_nat(
+        stun_server,
+        None,
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(e) => {
+            log::warn!(
+                "stun_test_nat failed; use conservative symmetric NAT strategy until next probe: {e:?}"
+            );
+            (NatType::Symmetric, vec![], 0)
+        }
+    };
     log::info!("nat_type:{nat_type:?},public_ips:{public_ips:?},port_range={port_range}");
     nat_info.nat_type = nat_type;
     nat_info.public_ips = public_ips;
@@ -145,6 +243,13 @@ async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager
     {
         log::error!("switch_model error: {e:?}");
     }
+}
+
+fn complete_local_ipv4s(mut candidates: Vec<Ipv4Addr>, preferred: Ipv4Addr) -> Vec<Ipv4Addr> {
+    if !preferred.is_unspecified() && !candidates.contains(&preferred) {
+        candidates.insert(0, preferred);
+    }
+    candidates
 }
 
 pub async fn query_udp_public_addr_loop(app_context: AppState, socket_manager: SocketManager) {
@@ -384,4 +489,53 @@ fn default_tcp_stun() -> Vec<String> {
         "stun.sipnet.net:3478".to_string(),
         "stun.nextcloud.com:443".to_string(),
     ]
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        LocalInterfaceFingerprint, NAT_INFO_REFRESH_INTERVAL, complete_local_ipv4s,
+        should_reprobe_for_network_change,
+    };
+    use std::net::{Ipv4Addr, Ipv6Addr};
+    use std::time::Duration;
+
+    #[test]
+    fn complete_local_ipv4s_preserves_all_interfaces_and_adds_preferred() {
+        let wifi = Ipv4Addr::new(192, 168, 1, 20);
+        let ethernet = Ipv4Addr::new(10, 0, 0, 20);
+        let result = complete_local_ipv4s(vec![wifi], ethernet);
+
+        assert_eq!(result, vec![ethernet, wifi]);
+    }
+
+    #[test]
+    fn complete_local_ipv4s_does_not_duplicate_preferred_address() {
+        let wifi = Ipv4Addr::new(192, 168, 1, 20);
+        let result = complete_local_ipv4s(vec![wifi], wifi);
+
+        assert_eq!(result, vec![wifi]);
+    }
+
+    #[test]
+    fn interface_fingerprint_is_order_independent_and_deduplicated() {
+        let wifi = Ipv4Addr::new(192, 168, 1, 20);
+        let ethernet = Ipv4Addr::new(10, 0, 0, 20);
+        let ipv6 = Ipv6Addr::LOCALHOST;
+        let first = LocalInterfaceFingerprint::new(vec![wifi, ethernet, wifi], vec![ipv6]);
+        let second = LocalInterfaceFingerprint::new(vec![ethernet, wifi], vec![ipv6, ipv6]);
+
+        assert_eq!(first, second);
+        assert!(!should_reprobe_for_network_change(Some(&first), Some(&second)));
+    }
+
+    #[test]
+    fn interface_address_change_requests_nat_reprobe() {
+        let previous = LocalInterfaceFingerprint::new(vec![Ipv4Addr::new(192, 168, 1, 20)], vec![]);
+        let current = LocalInterfaceFingerprint::new(vec![Ipv4Addr::new(10, 0, 0, 20)], vec![]);
+
+        assert!(should_reprobe_for_network_change(Some(&previous), Some(&current)));
+        assert!(!should_reprobe_for_network_change(Some(&previous), None));
+        assert_eq!(NAT_INFO_REFRESH_INTERVAL, Duration::from_secs(60 * 30));
+    }
 }

@@ -7,6 +7,38 @@ import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
 import 'remote_assist_utils.dart';
 
+bool shouldAcceptRemoteAssistPresenceAnnouncement({
+  required RemoteAssistPresenceAnnouncement announcement,
+  required InternetAddress remoteAddress,
+  required List<RemoteAssistPresenceContext> contexts,
+  required DateTime now,
+}) {
+  if (!isValidIpv4(announcement.virtualIp) ||
+      announcement.networkName.trim().isEmpty) {
+    return false;
+  }
+  if (remoteAddress.address != announcement.virtualIp) {
+    return false;
+  }
+
+  final sentAt = announcement.sentAtEpochMs;
+  final oldestAccepted =
+      now.subtract(RemoteAssistConstants.presenceExpiry).millisecondsSinceEpoch;
+  final newestAccepted = now
+      .add(RemoteAssistConstants.presenceMaxFutureSkew)
+      .millisecondsSinceEpoch;
+  if (sentAt < oldestAccepted || sentAt > newestAccepted) {
+    return false;
+  }
+
+  final isSelf = contexts.any(
+    (context) =>
+        context.virtualIp == announcement.virtualIp &&
+        context.networkName == announcement.networkName,
+  );
+  return !isSelf;
+}
+
 class RemoteAssistPresenceService {
   RawDatagramSocket? _socket;
   Timer? _broadcastTimer;
@@ -109,17 +141,12 @@ class RemoteAssistPresenceService {
         }
 
         final announcement = RemoteAssistPresenceAnnouncement.fromJson(decoded);
-        if (!isValidIpv4(announcement.virtualIp) ||
-            announcement.networkName.trim().isEmpty) {
-          continue;
-        }
-
-        final isSelf = _contexts.any(
-          (context) =>
-              context.virtualIp == announcement.virtualIp &&
-              context.networkName == announcement.networkName,
-        );
-        if (isSelf) {
+        if (!shouldAcceptRemoteAssistPresenceAnnouncement(
+          announcement: announcement,
+          remoteAddress: datagram.address,
+          contexts: _contexts,
+          now: DateTime.now(),
+        )) {
           continue;
         }
 

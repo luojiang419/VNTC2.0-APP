@@ -55,7 +55,7 @@ void main() {
 
       expect(
         resolved,
-        path.join(
+        path.posix.join(
           '/Applications/vnt_app.app/Contents/Resources',
           'remote_assist',
           'VNTC RustDesk.app',
@@ -72,7 +72,7 @@ void main() {
 
       expect(
         resolved,
-        path.join('/tmp', 'remote_assist', 'VNTC RustDesk.app'),
+        path.posix.join('/tmp', 'remote_assist', 'VNTC RustDesk.app'),
       );
     });
   });

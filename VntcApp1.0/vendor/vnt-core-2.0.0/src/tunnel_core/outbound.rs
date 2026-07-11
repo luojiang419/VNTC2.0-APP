@@ -53,12 +53,30 @@ impl BasicOutbound {
     ) -> anyhow::Result<()> {
         let packet = packet.into_bytes();
         if let Some(p2p) = self.p2p_outbound.as_ref()
-            && let Some(route) = p2p.get_route_by_id(&dest)
+            && let Some(route) = p2p.get_outbound_route_by_id(&dest)
         {
-            p2p.send_raw_to(packet, &route.route_key()).await?;
-        } else {
-            self.server_outbound.send_raw(dest, packet).await?;
+            let fallback_packet = packet.source_buf().clone();
+            match p2p.send_raw_to(packet, &route.route_key()).await {
+                Ok(()) => {
+                    p2p.mark_route_healthy(dest);
+                    return Ok(());
+                }
+                Err(error) => {
+                    p2p.mark_route_failed(dest);
+                    log::warn!(
+                        "P2P route send failed for {dest}, falling back to relay: {error:?}"
+                    );
+                    return self
+                        .server_outbound
+                        .send_raw(dest, NetPacket::new(fallback_packet)?)
+                        .await;
+                }
+            }
         }
+        if let Some(p2p) = self.p2p_outbound.as_ref() {
+            p2p.request_punch(dest);
+        }
+        self.server_outbound.send_raw(dest, packet).await?;
         Ok(())
     }
 
@@ -120,17 +138,37 @@ impl BasicOutbound {
 
         // 发送
         if let Some(p2p) = self.p2p_outbound.as_ref()
-            && let Some(route) = p2p.get_route_by_id(&dest)
+            && let Some(route) = p2p.get_outbound_route_by_id(&dest)
         {
             let bytes = packet.into_buffer().into_bytes().freeze();
-            p2p.send_raw_to(NetPacket::new(bytes)?, &route.route_key())
-                .await?;
-        } else {
-            let bytes = packet.into_buffer().into_bytes().freeze();
-            self.server_outbound
-                .send_raw(dest, NetPacket::new(bytes)?)
-                .await?;
+            let fallback_packet = bytes.clone();
+            match p2p
+                .send_raw_to(NetPacket::new(bytes)?, &route.route_key())
+                .await
+            {
+                Ok(()) => {
+                    p2p.mark_route_healthy(dest);
+                    return Ok(());
+                }
+                Err(error) => {
+                    p2p.mark_route_failed(dest);
+                    log::warn!(
+                        "P2P route send failed for {dest}, falling back to relay: {error:?}"
+                    );
+                    return self
+                        .server_outbound
+                        .send_raw(dest, NetPacket::new(fallback_packet)?)
+                        .await;
+                }
+            }
         }
+        if let Some(p2p) = self.p2p_outbound.as_ref() {
+            p2p.request_punch(dest);
+        }
+        let bytes = packet.into_buffer().into_bytes().freeze();
+        self.server_outbound
+            .send_raw(dest, NetPacket::new(bytes)?)
+            .await?;
         Ok(())
     }
 }

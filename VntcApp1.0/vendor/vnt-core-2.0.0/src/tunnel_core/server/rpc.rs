@@ -122,6 +122,9 @@ impl ServerRPC {
             list: map.into_values().collect(),
         })
     }
+    pub(crate) fn server_id_list(&self) -> Vec<u32> {
+        self.tunnel_to_server.server_id_list().to_vec()
+    }
     pub async fn client_list_target(&self, server_id: u32) -> anyhow::Result<ClientListResponse> {
         let Some(rpc_notifier) = self.rpc_notifier.get(&server_id) else {
             bail!("no RPC notifier");
