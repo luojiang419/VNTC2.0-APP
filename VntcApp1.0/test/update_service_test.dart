@@ -25,6 +25,39 @@ void main() {
   });
 
   group('AppUpdateService asset selection', () {
+    test('parses latest release and assets from public GitHub pages', () {
+      const latestHtml = '''
+<template data-url="/releases/tag/*name"></template>
+<meta name="apple-itunes-app" content="app-argument=https://github.com/luojiang419/VNTC2.0-APP/releases/tag/v4.8.0">
+''';
+      const assetsHtml = '''
+<a href="/luojiang419/VNTC2.0-APP/releases/download/v4.8.0/VNT_App_4.8.0_macOS.dmg">DMG</a>
+<a href="/luojiang419/VNTC2.0-APP/releases/download/v4.8.0/VNT_App_4.8.0_macOS.dmg.sha256">SHA256</a>
+''';
+
+      final repositoryRoot = githubRepositoryRoot(
+        Uri.parse('https://github.com/luojiang419/VNTC2.0-APP/releases/latest'),
+      );
+      final release = buildPublicGitHubRelease(
+        repositoryRoot: repositoryRoot,
+        tagName: parseGitHubLatestTag(latestHtml),
+        assetsHtml: assetsHtml,
+      );
+      final info = parseGitHubRelease(
+        release,
+        currentVersion: '4.7.0',
+        platform: AppUpdatePlatform.macos,
+      );
+
+      expect(info.tagName, 'v4.8.0');
+      expect(info.hasUpdate, isTrue);
+      expect(info.asset?.name, 'VNT_App_4.8.0_macOS.dmg');
+      expect(
+        info.asset?.checksumUrl.toString(),
+        'https://github.com/luojiang419/VNTC2.0-APP/releases/download/v4.8.0/VNT_App_4.8.0_macOS.dmg.sha256',
+      );
+    });
+
     test('selects platform specific installer assets', () {
       final assets = [
         _asset('VNT_App_2.0.1_Windows_Setup.exe'),

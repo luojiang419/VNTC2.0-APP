@@ -133,7 +133,6 @@ class AppUpdateService {
   AppUpdateService({Future<AppUpdateProxy?> Function()? proxyResolver})
       : _proxyResolver = proxyResolver ?? AppUpdateProxyResolver.resolve;
 
-  static const latestReleaseApiUrl = AppUpdateConfig.latestReleaseApiUrl;
   static const releasePageUrl = AppUpdateConfig.releasePageUrl;
 
   final Future<AppUpdateProxy?> Function() _proxyResolver;
@@ -143,10 +142,7 @@ class AppUpdateService {
     AppUpdatePlatform? platform,
   }) async {
     final proxy = await _proxyResolver();
-    final release = await _fetchJson(
-      Uri.parse(latestReleaseApiUrl),
-      proxy: proxy,
-    );
+    final release = await _fetchPublicGitHubRelease(proxy: proxy);
     final resolvedCurrentVersion =
         currentVersion ?? await _resolveCurrentVersion();
     final resolvedPlatform = platform ?? resolveCurrentUpdatePlatform();
@@ -426,20 +422,26 @@ class AppUpdateService {
     return AppUpdateConfig.currentVersion;
   }
 
-  Future<Map<String, dynamic>> _fetchJson(
-    Uri uri, {
+  Future<Map<String, dynamic>> _fetchPublicGitHubRelease({
     required AppUpdateProxy? proxy,
   }) async {
-    final bytes = await _readUri(
-      uri,
-      proxy: proxy,
-      accept: 'application/vnd.github+json',
+    final latestUri = Uri.parse(releasePageUrl);
+    final latestHtml = utf8.decode(
+      await _readUri(latestUri, proxy: proxy, accept: 'text/html'),
     );
-    final decoded = jsonDecode(utf8.decode(bytes));
-    if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('GitHub 返回数据格式不正确');
-    }
-    return decoded;
+    final tagName = parseGitHubLatestTag(latestHtml);
+    final repositoryRoot = githubRepositoryRoot(latestUri);
+    final assetsUri = repositoryRoot.resolve(
+      'releases/expanded_assets/$tagName',
+    );
+    final assetsHtml = utf8.decode(
+      await _readUri(assetsUri, proxy: proxy, accept: 'text/html'),
+    );
+    return buildPublicGitHubRelease(
+      repositoryRoot: repositoryRoot,
+      tagName: tagName,
+      assetsHtml: assetsHtml,
+    );
   }
 
   Future<List<int>> _readUri(
@@ -1707,6 +1709,66 @@ AppUpdateInfo parseGitHubRelease(
     asset: selectBestUpdateAsset(assets, platform, version: latestVersion),
     proxyLabel: proxyLabel,
   );
+}
+
+Uri githubRepositoryRoot(Uri releaseUri) {
+  final segments = releaseUri.pathSegments;
+  if (releaseUri.host != 'github.com' || segments.length < 2) {
+    throw const FormatException('更新地址必须是公开 GitHub 仓库的 Release 地址');
+  }
+  return Uri.https('github.com', '/${segments[0]}/${segments[1]}/');
+}
+
+String parseGitHubLatestTag(String html) {
+  final matches = RegExp(
+    r'''/releases/tag/([^"'/?#<\s]+)''',
+    caseSensitive: false,
+  ).allMatches(html);
+  String? tagName;
+  for (final match in matches) {
+    final candidate = Uri.decodeComponent(match.group(1)!);
+    if (RegExp(r'^v?[0-9]').hasMatch(candidate)) {
+      tagName = candidate;
+      break;
+    }
+  }
+  if (tagName == null || tagName.isEmpty) {
+    throw const FormatException('公开 Release 页面中未找到最新版本号');
+  }
+  return tagName;
+}
+
+Map<String, dynamic> buildPublicGitHubRelease({
+  required Uri repositoryRoot,
+  required String tagName,
+  required String assetsHtml,
+}) {
+  final assetPattern = RegExp(
+    r'''href=["']([^"']*/releases/download/[^"']+)["']''',
+    caseSensitive: false,
+  );
+  final seen = <String>{};
+  final assets = <Map<String, dynamic>>[];
+  for (final match in assetPattern.allMatches(assetsHtml)) {
+    final rawHref = match.group(1)!.replaceAll('&amp;', '&');
+    final downloadUri = repositoryRoot.resolve(rawHref);
+    final name = Uri.decodeComponent(downloadUri.pathSegments.last);
+    if (name.isEmpty || !seen.add(downloadUri.toString())) {
+      continue;
+    }
+    assets.add({
+      'name': name,
+      'browser_download_url': downloadUri.toString(),
+      'size': 0,
+    });
+  }
+  return {
+    'tag_name': tagName,
+    'name': tagName,
+    'body': '',
+    'html_url': repositoryRoot.resolve('releases/tag/$tagName').toString(),
+    'assets': assets,
+  };
 }
 
 AppUpdateAsset? selectBestUpdateAsset(

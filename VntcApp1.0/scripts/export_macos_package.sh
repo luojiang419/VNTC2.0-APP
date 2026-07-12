@@ -85,7 +85,7 @@ if [ ! -d "$RUNTIME_DIST_APP" ]; then
 fi
 
 cd "$PROJECT_DIR"
-flutter build macos --release
+flutter build macos --release --no-pub
 
 if [ ! -d "$MAIN_BUILD_APP" ]; then
   echo "main macOS app missing after build: $MAIN_BUILD_APP" >&2

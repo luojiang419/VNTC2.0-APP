@@ -47,3 +47,10 @@ WindowCloseBehavior windowCloseBehaviorFromPersistedValue(bool? value) {
       ? WindowCloseBehavior.exitApp
       : WindowCloseBehavior.minimizeToTray;
 }
+
+bool requiresExplicitDesktopProcessExit({
+  required bool isMacOS,
+  required bool isLinux,
+}) {
+  return isMacOS || isLinux;
+}
