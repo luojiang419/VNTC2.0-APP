@@ -121,6 +121,29 @@ void main() {
     );
   });
 
+  test('macOS close button sends an explicit Dart close request', () {
+    final main = _readProjectFile('lib/main.dart');
+    final mainWindow = _readProjectFile('macos/Runner/MainFlutterWindow.swift');
+
+    expect(
+      mainWindow,
+      contains('name: "top.wherewego.vnt/window_close"'),
+    );
+    expect(
+      mainWindow,
+      contains('closeButton.action = #selector(handleCloseButton(_:))'),
+    );
+    expect(
+      mainWindow,
+      contains('invokeMethod("onCloseRequested"'),
+    );
+    expect(main, contains("'top.wherewego.vnt/window_close'"));
+    expect(main, contains("call.method == 'onCloseRequested'"));
+    expect(main, contains('await _handleWindowCloseRequest()'));
+    expect(main, contains('await windowManager.setSkipTaskbar(true)'));
+    expect(main, contains('await windowManager.hide()'));
+  });
+
   test('macOS package script emits a filename-matched DMG SHA256 sidecar', () {
     final buildScript = _readProjectFile('scripts/export_macos_package.sh');
 
