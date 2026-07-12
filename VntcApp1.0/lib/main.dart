@@ -741,7 +741,10 @@ class _MainAppState extends State<MainApp> with WindowListener {
         debugPrint('退出应用');
         await _prepareForAppExit();
         windowManager.setPreventClose(false);
-        if (Platform.isLinux) {
+        if (requiresExplicitDesktopProcessExit(
+          isMacOS: Platform.isMacOS,
+          isLinux: Platform.isLinux,
+        )) {
           await windowManager.destroy();
           exit(0);
         } else {

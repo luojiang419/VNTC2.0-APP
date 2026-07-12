@@ -28,5 +28,20 @@ void main() {
       expect(WindowCloseBehavior.minimizeToTray.label, '最小化到托盘');
       expect(WindowCloseBehavior.exitApp.label, '关闭程序');
     });
+
+    test('macOS 和 Linux 关闭窗口后需要显式终止进程', () {
+      expect(
+        requiresExplicitDesktopProcessExit(isMacOS: true, isLinux: false),
+        isTrue,
+      );
+      expect(
+        requiresExplicitDesktopProcessExit(isMacOS: false, isLinux: true),
+        isTrue,
+      );
+      expect(
+        requiresExplicitDesktopProcessExit(isMacOS: false, isLinux: false),
+        isFalse,
+      );
+    });
   });
 }

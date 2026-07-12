@@ -20,6 +20,14 @@ else
   DART="$FLUTTER_ROOT/bin/cache/dart-sdk/bin/dart"
 fi
 
+run_pub_get() {
+  if [[ "$CARGOKIT_PUB_OFFLINE" == "1" ]]; then
+    "$DART" pub get --no-precompile --offline
+  else
+    "$DART" pub get --no-precompile
+  fi
+}
+
 cat << EOF > "pubspec.yaml"
 name: build_tool_runner
 version: 1.0.0
@@ -72,7 +80,7 @@ fi
 
 # Run pub get if needed.
 if [ ! -f "$PACKAGE_HASH_FILE" ]; then
-    "$DART" pub get --no-precompile
+    run_pub_get
     "$DART" compile kernel bin/build_tool_runner.dart
     echo "$PACKAGE_HASH" > "$PACKAGE_HASH_FILE"
 fi
@@ -85,7 +93,7 @@ exit_code=$?
 
 # 253 means invalid snapshot version.
 if [ $exit_code == 253 ]; then
-  "$DART" pub get --no-precompile
+  run_pub_get
   "$DART" compile kernel bin/build_tool_runner.dart
   "$DART" bin/build_tool_runner.dill "$@"
   exit_code=$?

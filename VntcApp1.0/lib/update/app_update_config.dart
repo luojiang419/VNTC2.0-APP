@@ -14,12 +14,6 @@ class AppUpdateConfig {
     defaultValue: '',
   );
 
-  static const latestReleaseApiUrl = String.fromEnvironment(
-    'APP_UPDATE_API_URL',
-    defaultValue:
-        'https://api.github.com/repos/luojiang419/VNTC2.0-APP/releases/latest',
-  );
-
   static const releasePageUrl = String.fromEnvironment(
     'APP_UPDATE_RELEASE_PAGE_URL',
     defaultValue: 'https://github.com/luojiang419/VNTC2.0-APP/releases/latest',
