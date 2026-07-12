@@ -1364,6 +1364,9 @@ class FfiModel with ChangeNotifier {
         _offlineReconnectStartTime = null;
         waitForFirstImage.value = true;
         isRefreshing = false;
+        if (!isCache) {
+          _requestInitialDisplayCapture(sessionId);
+        }
       }
       Map<String, dynamic> features = json.decode(evt['features']);
       _pi.features.privacyMode = features['privacy_mode'] == true;
@@ -1407,6 +1410,28 @@ class FfiModel with ChangeNotifier {
     if (!isCache) {
       tryUseAllMyDisplaysForTheRemoteSession(peerId);
     }
+  }
+
+  void _requestInitialDisplayCapture(SessionID sessionId) {
+    if (!isDesktop || parent.target?.connType != ConnType.defaultConn) {
+      return;
+    }
+
+    final displaysToCapture = _pi.currentDisplay == kAllDisplayValue
+        ? List<int>.generate(_pi.displays.length, (index) => index)
+        : <int>[_pi.currentDisplay];
+    if (displaysToCapture.isEmpty ||
+        displaysToCapture.any(
+          (display) => display < 0 || display >= _pi.displays.length,
+        )) {
+      return;
+    }
+
+    bind.sessionSwitchDisplay(
+      isDesktop: isDesktop,
+      sessionId: sessionId,
+      value: Int32List.fromList(displaysToCapture),
+    );
   }
 
   checkDesktopKeyboardMode() async {

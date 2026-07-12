@@ -15,6 +15,7 @@ class AppUpdateSession {
     required this.oldPid,
     required this.storageRoot,
     required this.launchPath,
+    required this.expectedSha256,
   });
 
   final String sessionId;
@@ -25,6 +26,7 @@ class AppUpdateSession {
   final int oldPid;
   final String storageRoot;
   final String launchPath;
+  final String expectedSha256;
 
   static AppUpdateSession? tryParse(List<String> args) {
     final values = <String, String>{};
@@ -38,8 +40,9 @@ class AppUpdateSession {
         values[withoutPrefix] = '';
         continue;
       }
-      values[withoutPrefix.substring(0, separator)] =
-          withoutPrefix.substring(separator + 1);
+      values[withoutPrefix.substring(0, separator)] = withoutPrefix.substring(
+        separator + 1,
+      );
     }
 
     final sessionId = values[AppUpdateConfig.runUpdateSessionArg];
@@ -49,6 +52,7 @@ class AppUpdateSession {
     final installRoot = values[AppUpdateConfig.updateInstallRootArg];
     final storageRoot = values[AppUpdateConfig.updateStorageRootArg];
     final launchPath = values[AppUpdateConfig.updateLaunchPathArg];
+    final expectedSha256 = values[AppUpdateConfig.updateSha256Arg];
     final oldPid = int.tryParse(values[AppUpdateConfig.updateOldPidArg] ?? '');
 
     if (sessionId == null ||
@@ -65,6 +69,8 @@ class AppUpdateSession {
         storageRoot.isEmpty ||
         launchPath == null ||
         launchPath.isEmpty ||
+        expectedSha256 == null ||
+        expectedSha256.isEmpty ||
         oldPid == null) {
       return null;
     }
@@ -78,6 +84,7 @@ class AppUpdateSession {
       oldPid: oldPid,
       storageRoot: storageRoot,
       launchPath: launchPath,
+      expectedSha256: expectedSha256.toLowerCase(),
     );
     if (!session._isValidForLaunch()) {
       return null;
@@ -91,21 +98,24 @@ class AppUpdateSession {
     required String installRoot,
     required String storageRoot,
     required String launchPath,
+    required String expectedSha256,
   }) {
+    final token = _createToken();
     final now = DateTime.now()
         .toIso8601String()
         .replaceAll(RegExp(r'[^0-9]'), '')
         .padRight(17, '0')
         .substring(0, 17);
     return AppUpdateSession(
-      sessionId: now,
-      token: _createToken(),
+      sessionId: '${now}_${token.substring(0, 8)}',
+      token: token,
       versionTag: versionTag,
       installerPath: installerPath,
       installRoot: installRoot,
       oldPid: pid,
       storageRoot: storageRoot,
       launchPath: launchPath,
+      expectedSha256: expectedSha256.toLowerCase(),
     );
   }
 
@@ -119,6 +129,7 @@ class AppUpdateSession {
       '--${AppUpdateConfig.updateOldPidArg}=$oldPid',
       '--${AppUpdateConfig.updateStorageRootArg}=$storageRoot',
       '--${AppUpdateConfig.updateLaunchPathArg}=$launchPath',
+      '--${AppUpdateConfig.updateSha256Arg}=$expectedSha256',
     ];
   }
 
@@ -135,13 +146,17 @@ class AppUpdateSession {
         'oldPid': oldPid,
         'storageRoot': storageRoot,
         'launchPath': launchPath,
+        'expectedSha256': expectedSha256,
       }),
       flush: true,
     );
   }
 
   bool _isValidForLaunch() {
-    if (!_isSafeId(sessionId) || !_isSafeToken(token) || oldPid < 0) {
+    if (!_isSafeId(sessionId) ||
+        !_isSafeToken(token) ||
+        !_isSafeSha256(expectedSha256) ||
+        oldPid < 0) {
       return false;
     }
     if (!_isAbsolutePath(installerPath) ||
@@ -169,10 +184,13 @@ class AppUpdateSession {
           decoded['token'] == token &&
           decoded['versionTag'] == versionTag &&
           _samePath(
-              decoded['installerPath']?.toString() ?? '', installerPath) &&
+            decoded['installerPath']?.toString() ?? '',
+            installerPath,
+          ) &&
           _samePath(decoded['installRoot']?.toString() ?? '', installRoot) &&
           _samePath(decoded['storageRoot']?.toString() ?? '', storageRoot) &&
           _samePath(decoded['launchPath']?.toString() ?? '', launchPath) &&
+          decoded['expectedSha256'] == expectedSha256 &&
           int.tryParse('${decoded['oldPid']}') == oldPid;
     } catch (_) {
       return false;
@@ -196,6 +214,10 @@ class AppUpdateSession {
 
   static bool _isSafeToken(String value) {
     return RegExp(r'^[A-Fa-f0-9]{32,128}$').hasMatch(value);
+  }
+
+  static bool _isSafeSha256(String value) {
+    return RegExp(r'^[A-Fa-f0-9]{64}$').hasMatch(value);
   }
 
   static bool _isAbsolutePath(String value) {

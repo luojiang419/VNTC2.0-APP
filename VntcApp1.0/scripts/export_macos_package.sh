@@ -11,6 +11,12 @@ REMOTE_ASSIST_RESOURCE_DIR="$DIST_APP/Contents/Resources/remote_assist"
 COCOAPODS_VERSION="${COCOAPODS_VERSION:-1.15.2}"
 CREATE_DMG=0
 REBUILD_RUNTIME=0
+APP_VERSION="$(awk '/^version:[[:space:]]*/ {print $2; exit}' "$PROJECT_DIR/pubspec.yaml" | cut -d+ -f1)"
+
+if ! [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]+)?$ ]]; then
+  echo "Invalid app version in pubspec.yaml: $APP_VERSION" >&2
+  exit 1
+fi
 
 for arg in "$@"; do
   case "$arg" in
@@ -129,7 +135,7 @@ codesign --force --deep --sign - "$DIST_APP"
 codesign --verify --deep --strict --verbose=2 "$DIST_APP"
 
 if [ "$CREATE_DMG" -eq 1 ]; then
-  DMG_PATH="$DIST_DIR/VNT_App_2.0.0_macOS.dmg"
+  DMG_PATH="$DIST_DIR/VNT_App_${APP_VERSION}_macOS.dmg"
   DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vnt_macos_dmg.XXXXXX")"
   trap 'rm -rf "$DMG_STAGE"' EXIT
   ditto "$DIST_APP" "$DMG_STAGE/vnt_app.app"
@@ -140,7 +146,13 @@ if [ "$CREATE_DMG" -eq 1 ]; then
   rm -f "$DMG_PATH"
   hdiutil create -volname "VNT App" -fs HFS+ -srcfolder "$DMG_STAGE" -format UDBZ "$DMG_PATH"
   hdiutil verify "$DMG_PATH"
+  DMG_SHA256_PATH="$DMG_PATH.sha256"
+  (
+    cd "$DIST_DIR"
+    shasum -a 256 "$(basename "$DMG_PATH")" > "$(basename "$DMG_SHA256_PATH")"
+  )
   echo "[OK] DMG: $DMG_PATH"
+  echo "[OK] SHA256: $DMG_SHA256_PATH"
 fi
 
 echo "[OK] dist app: $DIST_APP"

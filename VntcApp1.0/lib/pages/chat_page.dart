@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:file_picker/file_picker.dart';
+import 'package:file_selector/file_selector.dart' as file_selector;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
@@ -1800,11 +1801,15 @@ class _ChatPageState extends State<ChatPage>
 
   Future<void> _pickAndSendAttachment(ChatConversation conversation) async {
     try {
-      final pickedResult = await FilePicker.platform.pickFiles(
-        allowMultiple: false,
-        withData: false,
-      );
-      final filePath = pickedResult?.files.single.path;
+      final filePath = Platform.isMacOS
+          ? (await file_selector.openFile(confirmButtonText: '选择'))?.path
+          : (await FilePicker.platform.pickFiles(
+              allowMultiple: false,
+              withData: false,
+            ))
+              ?.files
+              .single
+              .path;
       if (filePath == null || filePath.trim().isEmpty) {
         return;
       }
@@ -1992,11 +1997,17 @@ class _ChatPageState extends State<ChatPage>
         throw StateError('附件缓存文件不存在');
       }
 
-      final savePath = await FilePicker.platform.saveFile(
-        dialogTitle: '保存附件',
-        fileName: attachment.fileName,
-        lockParentWindow: true,
-      );
+      final savePath = Platform.isMacOS
+          ? (await file_selector.getSaveLocation(
+              suggestedName: attachment.fileName,
+              confirmButtonText: '保存',
+            ))
+              ?.path
+          : await FilePicker.platform.saveFile(
+              dialogTitle: '保存附件',
+              fileName: attachment.fileName,
+              lockParentWindow: true,
+            );
       if (savePath == null || savePath.trim().isEmpty) {
         return;
       }

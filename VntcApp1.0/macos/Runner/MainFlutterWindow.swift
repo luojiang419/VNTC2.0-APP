@@ -8,17 +8,13 @@ class MainFlutterWindow: NSWindow {
     self.contentViewController = flutterViewController
     self.setFrame(windowFrame, display: true)
 
-    // 配置窗口样式
-    // 由于macOS安全限制，以root权限运行时最小化和最大化按钮会失效
-    // 因此只保留关闭按钮，但仍允许调整窗口大小（通过拖拽边框）
+    // 使用标准 macOS 窗口样式，保留关闭、最小化和缩放按钮。
     self.styleMask = [
-      .titled,           // 标题栏
-      .closable,         // 可关闭（红色按钮）
-      .resizable         // 可调整大小（允许拖拽边框调整窗口大小）
+      .titled,
+      .closable,
+      .miniaturizable,
+      .resizable
     ]
-    // 保留窗口可调整大小的功能
-    self.standardWindowButton(.miniaturizeButton)?.isHidden = true
-    self.standardWindowButton(.zoomButton)?.isHidden = true
 
     // 设置最小尺寸
     self.minSize = NSSize(width: 800, height: 600)

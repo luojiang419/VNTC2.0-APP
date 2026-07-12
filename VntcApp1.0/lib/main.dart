@@ -9,6 +9,7 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:system_tray/system_tray.dart';
 import 'package:window_manager/window_manager.dart';
 import 'package:vnt_app/app_navigation.dart';
+import 'package:vnt_app/app_shutdown_service.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/src/rust/frb_generated.dart';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
@@ -259,10 +260,8 @@ Future<void> main(List<String> args) async {
         // 设置窗口标题
         await windowManager.setTitle(AppVersion.windowTitle);
 
-        // macOS: 由于以root权限运行，隐藏最小化和最大化按钮,只保留关闭按钮
-        // 这是因为macOS安全限制导致这些按钮无法正常工作
-        await windowManager.setMinimizable(false);
-        await windowManager.setMaximizable(false);
+        await windowManager.setMinimizable(true);
+        await windowManager.setMaximizable(true);
 
         if (isSilentStart) {
           await windowManager.setSkipTaskbar(true);
@@ -591,7 +590,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   Future<void> _checkForStartupUpdate() async {
-    if (!Platform.isWindows) {
+    if (!Platform.isWindows && !Platform.isMacOS) {
       return;
     }
 
@@ -678,9 +677,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   Future<void> _prepareForAppExit() async {
-    await ChatManager.instance.stop();
-    await RemoteAssistManager.instance.stop();
-    await vntManager.removeAll();
+    await prepareForAppShutdown();
   }
 
   @override
@@ -691,7 +688,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
 
   @override
   void onWindowFocus() {
-    if (Platform.isWindows) {
+    if (Platform.isWindows || Platform.isMacOS) {
       unawaited(_showPendingStartupUpdateIfReady());
     }
   }
@@ -710,21 +707,6 @@ class _MainAppState extends State<MainApp> with WindowListener {
 
   @override
   void onWindowClose() async {
-    // macOS 显示特殊的确认对话框（说明由于安全限制无法最小化）
-    if (Platform.isMacOS) {
-      final shouldClose = await _showMacOSCloseConfirmationDialog();
-      if (shouldClose == true) {
-        // 退出应用：先断开连接再关闭
-        await _prepareForAppExit();
-        windowManager.setPreventClose(false);
-        await windowManager.destroy();
-        exit(0);
-      }
-      // 如果用户点击取消，什么都不做（窗口保持打开）
-      return;
-    }
-
-    // Windows 和 Linux 保持原有的确认逻辑
     var closeBehavior = await DataPersistence().loadWindowCloseBehavior();
     if (closeBehavior == WindowCloseBehavior.ask) {
       final selectedBehavior = await _showCloseConfirmationDialog(
@@ -778,67 +760,6 @@ class _MainAppState extends State<MainApp> with WindowListener {
       case WindowCloseBehavior.exitApp:
         return '当前默认动作：关闭程序。可勾选“记住此操作”直接保存。';
     }
-  }
-
-  /// macOS 专用的关闭确认对话框
-  Future<bool?> _showMacOSCloseConfirmationDialog() async {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    final result = await showDialog<bool>(
-      context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          backgroundColor: isDark
-              ? AppTheme.darkCardBackground
-              : AppTheme.lightCardBackground,
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
-          title: Text(
-            '确认退出',
-            style: TextStyle(
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-            ),
-          ),
-          content: Text(
-            '由于 macOS 安全限制，应用无法最小化。\n\n你确认要退出程序吗？',
-            style: TextStyle(
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
-          ),
-          actions: <Widget>[
-            TextButton(
-              onPressed: () => Navigator.of(context).pop(false),
-              child: Text(
-                '取消',
-                style: TextStyle(
-                  fontSize: context.fontXSmall,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
-                ),
-              ),
-            ),
-            ElevatedButton(
-              onPressed: () => Navigator.of(context).pop(true),
-              style: ElevatedButton.styleFrom(
-                backgroundColor: AppTheme.errorColor,
-                foregroundColor: Colors.white,
-                shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(8),
-                ),
-              ),
-              child:
-                  Text('退出应用', style: TextStyle(fontSize: context.fontXSmall)),
-            ),
-          ],
-        );
-      },
-    );
-
-    return result;
   }
 
   Future<WindowCloseBehavior?> _showCloseConfirmationDialog(

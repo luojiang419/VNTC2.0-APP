@@ -13,10 +13,14 @@ void main() {
       expect(compareVersionStrings('2.0.0', '2.0.0'), 0);
       expect(compareVersionStrings('3.2.0', 'v3.2'), 0);
       expect(compareVersionStrings('2.0.0-test.1', '2.0.0'), lessThan(0));
-      expect(compareVersionStrings('2.0.0-test.2', '2.0.0-test.1'),
-          greaterThan(0));
-      expect(compareVersionStrings('2.0.0-beta.1', '2.0.0-alpha.9'),
-          greaterThan(0));
+      expect(
+        compareVersionStrings('2.0.0-test.2', '2.0.0-test.1'),
+        greaterThan(0),
+      );
+      expect(
+        compareVersionStrings('2.0.0-beta.1', '2.0.0-alpha.9'),
+        greaterThan(0),
+      );
     });
   });
 
@@ -65,6 +69,22 @@ void main() {
       );
     });
 
+    test('prefers exact macOS DMG asset for release version', () {
+      final assets = [
+        _asset('VNT_App_2.0.0_macOS.dmg'),
+        _asset('VNT_App_2.0.1_macOS.dmg'),
+      ];
+
+      expect(
+        selectBestUpdateAsset(
+          assets,
+          AppUpdatePlatform.macos,
+          version: 'v2.0.1',
+        )?.name,
+        'VNT_App_2.0.1_macOS.dmg',
+      );
+    });
+
     test('does not select MSI or ZIP for Windows silent update', () {
       final assets = [
         _asset('VNT_App_2.0.1_Windows_Portable.zip'),
@@ -100,10 +120,7 @@ void main() {
       const hash =
           '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
 
-      expect(
-        normalizeSha256Value('sha256:$hash'),
-        hash,
-      );
+      expect(normalizeSha256Value('sha256:$hash'), hash);
       expect(
         parseSha256ChecksumText(
           '${hash.toUpperCase()} *VNT_App_2.0.1_Windows_Setup.exe',
@@ -249,10 +266,40 @@ void main() {
         )?.curlProxyUrl,
         'http://127.0.0.1:7890',
       );
+      expect(AppUpdateProxyResolver.parseProxyValue('DIRECT', '环境代理'), isNull);
+    });
+  });
+
+  group('AppUpdateService macOS bundle path', () {
+    test('resolves app bundle from executable path', () {
       expect(
-        AppUpdateProxyResolver.parseProxyValue('DIRECT', '环境代理'),
+        resolveMacOSAppBundlePath(
+          '/Applications/vnt_app.app/Contents/MacOS/vnt_app',
+        ),
+        '/Applications/vnt_app.app',
+      );
+      expect(resolveMacOSAppBundlePath('/usr/local/bin/vnt_app'), isNull);
+      expect(
+        resolveMacOSAppBundlePath(
+          '/Applications/vnt.app/Contents/MacOS/nested/tool',
+        ),
         isNull,
       );
+      expect(
+        resolveMacOSAppBundlePath('/Applications/vnt.app/Contents/MacOS/'),
+        isNull,
+      );
+    });
+
+    test('requires an exact semantic bundle version', () {
+      expect(isMatchingMacOSBundleVersion('2.0.1', 'v2.0.1'), isTrue);
+      expect(
+        isMatchingMacOSBundleVersion('2.0.1-test.1', 'v2.0.1-test.1'),
+        isTrue,
+      );
+      expect(isMatchingMacOSBundleVersion('2.0.1-extra', 'v2.0.1'), isFalse);
+      expect(isMatchingMacOSBundleVersion('2.0.1foo', 'v2.0.1'), isFalse);
+      expect(isMatchingMacOSBundleVersion('2.0', 'v2.0.0'), isFalse);
     });
   });
 
@@ -274,11 +321,15 @@ void main() {
       final storageRoot = path.join(tempDir.path, 'updates', 'windows');
       final session = AppUpdateSession.create(
         versionTag: 'v2.0.1',
-        installerPath:
-            path.join(storageRoot, 'VNT_App_2.0.1_Windows_Setup.exe'),
+        installerPath: path.join(
+          storageRoot,
+          'VNT_App_2.0.1_Windows_Setup.exe',
+        ),
         installRoot: installRoot,
         storageRoot: storageRoot,
         launchPath: path.join(installRoot, 'vnt_app.exe'),
+        expectedSha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       );
       await session.writeManifest();
 
@@ -293,13 +344,11 @@ void main() {
       expect(parsed.storageRoot, session.storageRoot);
       expect(parsed.launchPath, session.launchPath);
       expect(parsed.oldPid, session.oldPid);
+      expect(parsed.expectedSha256, session.expectedSha256);
     });
 
     test('rejects incomplete updater arguments', () {
-      expect(
-        AppUpdateSession.tryParse(['--run-update-session=abc']),
-        isNull,
-      );
+      expect(AppUpdateSession.tryParse(['--run-update-session=abc']), isNull);
     });
 
     test('rejects updater arguments without matching manifest token', () {
@@ -307,31 +356,39 @@ void main() {
       final storageRoot = path.join(tempDir.path, 'updates', 'windows');
       final session = AppUpdateSession.create(
         versionTag: 'v2.0.1',
-        installerPath:
-            path.join(storageRoot, 'VNT_App_2.0.1_Windows_Setup.exe'),
+        installerPath: path.join(
+          storageRoot,
+          'VNT_App_2.0.1_Windows_Setup.exe',
+        ),
         installRoot: installRoot,
         storageRoot: storageRoot,
         launchPath: path.join(installRoot, 'vnt_app.exe'),
+        expectedSha256:
+            '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
       );
 
       expect(AppUpdateSession.tryParse(session.toProcessArguments()), isNull);
     });
 
-    test('rejects updater arguments whose installer escapes storage root',
-        () async {
-      final installRoot = path.join(tempDir.path, 'install');
-      final storageRoot = path.join(tempDir.path, 'updates', 'windows');
-      final session = AppUpdateSession.create(
-        versionTag: 'v2.0.1',
-        installerPath: path.join(storageRoot, '..', 'evil.exe'),
-        installRoot: installRoot,
-        storageRoot: storageRoot,
-        launchPath: path.join(installRoot, 'vnt_app.exe'),
-      );
-      await session.writeManifest();
+    test(
+      'rejects updater arguments whose installer escapes storage root',
+      () async {
+        final installRoot = path.join(tempDir.path, 'install');
+        final storageRoot = path.join(tempDir.path, 'updates', 'windows');
+        final session = AppUpdateSession.create(
+          versionTag: 'v2.0.1',
+          installerPath: path.join(storageRoot, '..', 'evil.exe'),
+          installRoot: installRoot,
+          storageRoot: storageRoot,
+          launchPath: path.join(installRoot, 'vnt_app.exe'),
+          expectedSha256:
+              '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef',
+        );
+        await session.writeManifest();
 
-      expect(AppUpdateSession.tryParse(session.toProcessArguments()), isNull);
-    });
+        expect(AppUpdateSession.tryParse(session.toProcessArguments()), isNull);
+      },
+    );
   });
 }
 

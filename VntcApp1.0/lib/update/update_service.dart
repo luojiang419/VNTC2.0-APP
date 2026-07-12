@@ -13,14 +13,7 @@ import 'package:vnt_app/update/app_update_config.dart';
 import 'package:vnt_app/update/update_session.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 
-enum AppUpdatePlatform {
-  android,
-  windows,
-  macos,
-  linux,
-  ios,
-  unsupported,
-}
+enum AppUpdatePlatform { android, windows, macos, linux, ios, unsupported }
 
 class AppUpdateAsset {
   const AppUpdateAsset({
@@ -51,17 +44,12 @@ class AppUpdateAsset {
       downloadUrl: url,
       size: int.tryParse('${json['size'] ?? 0}') ?? 0,
       contentType: json['content_type']?.toString(),
-      sha256: normalizeSha256Value(
-            json['sha256']?.toString(),
-          ) ??
+      sha256: normalizeSha256Value(json['sha256']?.toString()) ??
           normalizeSha256Value(json['digest']?.toString()),
     );
   }
 
-  AppUpdateAsset copyWith({
-    String? sha256,
-    Uri? checksumUrl,
-  }) {
+  AppUpdateAsset copyWith({String? sha256, Uri? checksumUrl}) {
     return AppUpdateAsset(
       name: name,
       downloadUrl: downloadUrl,
@@ -124,10 +112,7 @@ class AppUpdateDownloadResult {
 }
 
 class AppUpdateProxy {
-  const AppUpdateProxy({
-    required this.config,
-    required this.label,
-  });
+  const AppUpdateProxy({required this.config, required this.label});
 
   final String config;
   final String label;
@@ -145,9 +130,8 @@ class AppUpdateProxy {
 typedef AppUpdateProgress = void Function(int received, int total);
 
 class AppUpdateService {
-  AppUpdateService({
-    Future<AppUpdateProxy?> Function()? proxyResolver,
-  }) : _proxyResolver = proxyResolver ?? AppUpdateProxyResolver.resolve;
+  AppUpdateService({Future<AppUpdateProxy?> Function()? proxyResolver})
+      : _proxyResolver = proxyResolver ?? AppUpdateProxyResolver.resolve;
 
   static const latestReleaseApiUrl = AppUpdateConfig.latestReleaseApiUrl;
   static const releasePageUrl = AppUpdateConfig.releasePageUrl;
@@ -191,8 +175,10 @@ class AppUpdateService {
 
     final directory = await _resolveDownloadDirectory();
     await directory.create(recursive: true);
-    final filePath =
-        path.join(directory.path, _safeFileName(verifiedAsset.name));
+    final filePath = path.join(
+      directory.path,
+      _safeFileName(verifiedAsset.name),
+    );
     final target = File(filePath);
     if (await _isCompleteDownload(target, verifiedAsset)) {
       return AppUpdateDownloadResult(
@@ -274,10 +260,7 @@ class AppUpdateService {
     }
     _ensureSupportedWindowsSilentInstaller(result);
     await _verifyDownloadedFile(installer, result.asset);
-    await _verifyWindowsInstallerAuthenticode(
-      installer,
-      sha256Verified: true,
-    );
+    await _verifyWindowsInstallerAuthenticode(installer, sha256Verified: true);
 
     final appDir = path.dirname(Platform.resolvedExecutable);
     final storageRoot = (await _resolveDownloadDirectory()).path;
@@ -289,6 +272,7 @@ class AppUpdateService {
       installRoot: appDir,
       storageRoot: storageRoot,
       launchPath: launchPath,
+      expectedSha256: result.asset.sha256!,
     );
     await session.writeManifest();
 
@@ -302,12 +286,57 @@ class AppUpdateService {
     return session;
   }
 
+  Future<AppUpdateSession> launchMacOSUpdateHelper(
+    AppUpdateDownloadResult result,
+  ) async {
+    if (!Platform.isMacOS) {
+      throw StateError('macOS 自动更新助手仅支持 macOS');
+    }
+
+    final installer = File(result.filePath);
+    if (!await installer.exists()) {
+      throw StateError('安装包不存在：${result.filePath}');
+    }
+    if (path.extension(installer.path).toLowerCase() != '.dmg') {
+      throw StateError('macOS 自动更新仅支持 DMG：${result.asset.name}');
+    }
+    await _verifyDownloadedFile(installer, result.asset);
+
+    final appBundlePath = resolveMacOSAppBundlePath(
+      Platform.resolvedExecutable,
+    );
+    if (appBundlePath == null) {
+      throw StateError('当前程序不在 macOS .app bundle 中，无法自动替换');
+    }
+
+    final storageRoot = (await _resolveDownloadDirectory()).path;
+    final session = AppUpdateSession.create(
+      versionTag:
+          result.versionTag.isEmpty ? result.asset.name : result.versionTag,
+      installerPath: installer.path,
+      installRoot: appBundlePath,
+      storageRoot: storageRoot,
+      launchPath: Platform.resolvedExecutable,
+      expectedSha256: result.asset.sha256!,
+    );
+    await session.writeManifest();
+
+    final stagedExecutable = await _stageMacOSUpdaterRuntime(session);
+    await Process.start(
+      stagedExecutable,
+      session.toProcessArguments(),
+      workingDirectory: path.dirname(stagedExecutable),
+      mode: ProcessStartMode.detached,
+    );
+    return session;
+  }
+
   Future<void> runUpdaterSession(
     AppUpdateSession session, {
     void Function(String message)? onStep,
   }) async {
-    if (!Platform.isWindows) {
-      throw StateError('更新器会话仅支持 Windows');
+    if (!Platform.isWindows && !Platform.isMacOS) {
+      throw StateError('更新器会话仅支持 Windows 和 macOS');
     }
 
     final sessionDir = Directory(
@@ -336,8 +365,27 @@ class AppUpdateService {
       throw StateError('安装包不存在：${session.installerPath}');
     }
 
+    await step('正在校验更新包');
+    await _verifySessionInstaller(installer, session.expectedSha256);
+
     await step('等待旧版本退出');
-    await _waitForProcessExit(session.oldPid, log: log);
+    final oldProcessExited = await _waitForProcessExit(
+      session.oldPid,
+      log: log,
+    );
+    if (Platform.isMacOS && !oldProcessExited) {
+      throw StateError('旧版本仍在运行，已取消 macOS 应用替换');
+    }
+
+    if (Platform.isMacOS) {
+      await _runMacOSUpdateSession(
+        session: session,
+        sessionDir: sessionDir,
+        step: step,
+        log: log,
+      );
+      return;
+    }
 
     await step('正在静默安装');
     final exitCode = await _runWindowsInstaller(
@@ -456,10 +504,7 @@ class AppUpdateService {
       request.headers.set(HttpHeaders.userAgentHeader, _userAgent);
       final response = await request.close();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException(
-          '请求失败：HTTP ${response.statusCode}',
-          uri: uri,
-        );
+        throw HttpException('请求失败：HTTP ${response.statusCode}', uri: uri);
       }
       return consolidateHttpClientResponseBytes(response);
     } finally {
@@ -491,14 +536,8 @@ class AppUpdateService {
       'Accept: $accept',
       '-H',
       'User-Agent: $_userAgent',
-      if (proxy != null) ...[
-        '--proxy',
-        proxy.curlProxyUrl,
-      ],
-      if (forceDirect) ...[
-        '--noproxy',
-        '*',
-      ],
+      if (proxy != null) ...['--proxy', proxy.curlProxyUrl],
+      if (forceDirect) ...['--noproxy', '*'],
       uri.toString(),
     ];
     final result = await Process.run(
@@ -508,9 +547,7 @@ class AppUpdateService {
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 75));
     if (result.exitCode != 0) {
-      throw StateError(
-        'curl 请求失败 exit=${result.exitCode}: ${result.stderr}',
-      );
+      throw StateError('curl 请求失败 exit=${result.exitCode}: ${result.stderr}');
     }
     final stdout = result.stdout;
     if (stdout is List<int>) {
@@ -610,12 +647,7 @@ class AppUpdateService {
       if (await target.exists()) {
         await target.delete();
       }
-      await _downloadFileOnce(
-        uri,
-        target,
-        proxy: null,
-        onProgress: onProgress,
-      );
+      await _downloadFileOnce(uri, target, proxy: null, onProgress: onProgress);
     }
   }
 
@@ -646,14 +678,8 @@ class AppUpdateService {
       'Accept: application/octet-stream',
       '-H',
       'User-Agent: $_userAgent',
-      if (proxy != null) ...[
-        '--proxy',
-        proxy.curlProxyUrl,
-      ],
-      if (forceDirect) ...[
-        '--noproxy',
-        '*',
-      ],
+      if (proxy != null) ...['--proxy', proxy.curlProxyUrl],
+      if (forceDirect) ...['--noproxy', '*'],
       '--output',
       target.path,
       uri.toString(),
@@ -665,9 +691,7 @@ class AppUpdateService {
       stderrEncoding: utf8,
     ).timeout(const Duration(minutes: 35));
     if (result.exitCode != 0) {
-      throw StateError(
-        'curl 下载失败 exit=${result.exitCode}: ${result.stderr}',
-      );
+      throw StateError('curl 下载失败 exit=${result.exitCode}: ${result.stderr}');
     }
     if (expectedSize > 0) {
       onProgress?.call(expectedSize, expectedSize);
@@ -688,10 +712,7 @@ class AppUpdateService {
       request.headers.set(HttpHeaders.userAgentHeader, _userAgent);
       final response = await request.close();
       if (response.statusCode < 200 || response.statusCode >= 300) {
-        throw HttpException(
-          '下载失败：HTTP ${response.statusCode}',
-          uri: uri,
-        );
+        throw HttpException('下载失败：HTTP ${response.statusCode}', uri: uri);
       }
 
       final total = response.contentLength < 0 ? 0 : response.contentLength;
@@ -721,8 +742,11 @@ class AppUpdateService {
   Future<Directory> _resolveDownloadDirectory() async {
     if (Platform.isWindows) {
       return Directory(
-        path.join(RuntimeStoragePaths.resolveRuntimeRootPathSync(), 'updates',
-            'windows'),
+        path.join(
+          RuntimeStoragePaths.resolveRuntimeRootPathSync(),
+          'updates',
+          'windows',
+        ),
       );
     }
     if (Platform.isAndroid || Platform.isIOS) {
@@ -811,15 +835,14 @@ class AppUpdateService {
     return digest.toString().toLowerCase();
   }
 
-  void _ensureSupportedWindowsSilentInstaller(
-    AppUpdateDownloadResult result,
-  ) {
+  void _ensureSupportedWindowsSilentInstaller(AppUpdateDownloadResult result) {
     final assetName = result.asset.name.toLowerCase();
     final fileExtension = path.extension(result.filePath).toLowerCase();
     if (fileExtension != '.exe' ||
         !isWindowsSilentInstallerAssetName(assetName)) {
       throw StateError(
-          'Windows 静默更新仅支持 Inno Setup .exe 安装包：${result.asset.name}');
+        'Windows 静默更新仅支持 Inno Setup .exe 安装包：${result.asset.name}',
+      );
     }
   }
 
@@ -837,11 +860,7 @@ class AppUpdateService {
 ''';
     final result = await Process.run(
       'powershell.exe',
-      [
-        '-NoProfile',
-        '-Command',
-        command,
-      ],
+      ['-NoProfile', '-Command', command],
       stdoutEncoding: utf8,
       stderrEncoding: utf8,
     ).timeout(const Duration(seconds: 10));
@@ -870,8 +889,9 @@ class AppUpdateService {
   }
 
   Future<String> _resolveWindowsLaunchPath(String appDir) async {
-    final configured =
-        File(path.join(appDir, AppUpdateConfig.windowsExecutableName));
+    final configured = File(
+      path.join(appDir, AppUpdateConfig.windowsExecutableName),
+    );
     if (await configured.exists()) {
       return configured.path;
     }
@@ -907,11 +927,7 @@ class AppUpdateService {
   }
 
   Future<void> _copyWindowsRuntime(Directory source, Directory target) async {
-    const ignoredDirectoryNames = {
-      'config',
-      'logs',
-      'updates',
-    };
+    const ignoredDirectoryNames = {'config', 'logs', 'updates'};
 
     await for (final entity in source.list(followLinks: false)) {
       final name = path.basename(entity.path);
@@ -941,32 +957,298 @@ class AppUpdateService {
     }
   }
 
-  Future<void> _waitForProcessExit(
+  Future<String> _stageMacOSUpdaterRuntime(AppUpdateSession session) async {
+    final stagingRoot = Directory(path.join(session.storageRoot, 'staging'));
+    await stagingRoot.create(recursive: true);
+
+    final sourceBundle = Directory(session.installRoot);
+    if (!await sourceBundle.exists()) {
+      throw StateError('当前应用包不存在：${session.installRoot}');
+    }
+
+    final stagedBundle = Directory(
+      path.join(
+        stagingRoot.path,
+        '${session.sessionId}_${AppUpdateConfig.macosUpdaterBundleName}',
+      ),
+    );
+    if (await stagedBundle.exists()) {
+      await stagedBundle.delete(recursive: true);
+    }
+    final copyResult = await Process.run('ditto', [
+      sourceBundle.path,
+      stagedBundle.path,
+    ]);
+    if (copyResult.exitCode != 0) {
+      throw StateError('无法创建 macOS 更新助手：${copyResult.stderr}');
+    }
+
+    final executableRelativePath = path.relative(
+      session.launchPath,
+      from: session.installRoot,
+    );
+    if (executableRelativePath.startsWith('..${path.separator}')) {
+      throw StateError('当前可执行文件不在应用包内：${session.launchPath}');
+    }
+    final stagedExecutable = File(
+      path.join(stagedBundle.path, executableRelativePath),
+    );
+    if (!await stagedExecutable.exists()) {
+      throw StateError('macOS 更新助手缺少可执行文件：${stagedExecutable.path}');
+    }
+    return stagedExecutable.path;
+  }
+
+  Future<void> _runMacOSUpdateSession({
+    required AppUpdateSession session,
+    required Directory sessionDir,
+    required Future<void> Function(String message) step,
+    required Future<void> Function(String message) log,
+  }) async {
+    final mountPoint = Directory(path.join(sessionDir.path, 'mount'));
+    if (await mountPoint.exists()) {
+      await mountPoint.delete(recursive: true);
+    }
+    await mountPoint.create(recursive: true);
+
+    var mounted = false;
+    try {
+      await step('正在挂载 macOS 安装镜像');
+      final attachResult = await Process.run('hdiutil', [
+        'attach',
+        session.installerPath,
+        '-nobrowse',
+        '-readonly',
+        '-mountpoint',
+        mountPoint.path,
+      ]);
+      if (attachResult.exitCode != 0) {
+        throw StateError('挂载 DMG 失败：${attachResult.stderr}');
+      }
+      mounted = true;
+
+      await step('正在验证新版应用');
+      final sourceBundle = await _findMacOSUpdateBundle(
+        mountPoint,
+        expectedVersion: session.versionTag,
+      );
+      await step('正在安装并启动新版程序');
+      await _installMacOSBundle(
+        sourceBundle: sourceBundle,
+        session: session,
+        log: log,
+      );
+      await log('macOS 更新完成');
+    } finally {
+      if (mounted) {
+        final detachResult = await Process.run('hdiutil', [
+          'detach',
+          mountPoint.path,
+          '-force',
+        ]);
+        if (detachResult.exitCode != 0) {
+          await log('卸载 DMG 失败：${detachResult.stderr}');
+        }
+      }
+      if (await mountPoint.exists()) {
+        await mountPoint.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<Directory> _findMacOSUpdateBundle(
+    Directory mountPoint, {
+    required String expectedVersion,
+  }) async {
+    await for (final entity in mountPoint.list(followLinks: false)) {
+      if (entity is! Directory || !entity.path.toLowerCase().endsWith('.app')) {
+        continue;
+      }
+      try {
+        await _verifyMacOSBundle(entity, expectedVersion: expectedVersion);
+        return entity;
+      } catch (_) {
+        // DMG 可能包含其他辅助应用，继续寻找目标 bundle。
+      }
+    }
+    throw StateError(
+      'DMG 中未找到 ${AppUpdateConfig.macosBundleIdentifier} 的有效应用包',
+    );
+  }
+
+  Future<void> _installMacOSBundle({
+    required Directory sourceBundle,
+    required AppUpdateSession session,
+    required Future<void> Function(String message) log,
+  }) async {
+    final targetBundle = Directory(session.installRoot);
+    if (!await targetBundle.exists()) {
+      throw StateError('待更新应用不存在：${targetBundle.path}');
+    }
+    if (!targetBundle.path.toLowerCase().endsWith('.app')) {
+      throw StateError('待更新路径不是 macOS 应用包：${targetBundle.path}');
+    }
+    final targetInfoPlist = File(
+      path.join(targetBundle.path, 'Contents', 'Info.plist'),
+    );
+    final targetBundleIdentifier = await _readPlistValue(
+      targetInfoPlist,
+      'CFBundleIdentifier',
+    );
+    if (targetBundleIdentifier != AppUpdateConfig.macosBundleIdentifier) {
+      throw StateError('待更新应用标识不匹配：$targetBundleIdentifier');
+    }
+
+    final parent = targetBundle.parent;
+    final targetName = path.basename(targetBundle.path);
+    final replacement = Directory(
+      path.join(parent.path, '.$targetName.update.${session.sessionId}'),
+    );
+    final backup = Directory(
+      path.join(parent.path, '.$targetName.backup.${session.sessionId}'),
+    );
+    for (final directory in [replacement, backup]) {
+      if (await directory.exists()) {
+        await directory.delete(recursive: true);
+      }
+    }
+
+    final copyResult = await Process.run('ditto', [
+      sourceBundle.path,
+      replacement.path,
+    ]);
+    if (copyResult.exitCode != 0) {
+      throw StateError('复制新版应用失败：${copyResult.stderr}');
+    }
+    await _verifyMacOSBundle(replacement, expectedVersion: session.versionTag);
+
+    var backupCreated = false;
+    try {
+      await targetBundle.rename(backup.path);
+      backupCreated = true;
+      await replacement.rename(targetBundle.path);
+      await _verifyMacOSBundle(
+        targetBundle,
+        expectedVersion: session.versionTag,
+      );
+      final launchedProcess = await Process.start(
+        session.launchPath,
+        const [],
+        workingDirectory: parent.path,
+        mode: ProcessStartMode.detached,
+      );
+      await Future<void>.delayed(const Duration(seconds: 1));
+      if (!await _isProcessRunning(launchedProcess.pid)) {
+        throw StateError('新版程序启动后立即退出');
+      }
+      await backup.delete(recursive: true);
+      backupCreated = false;
+    } catch (error) {
+      await log('macOS 应用替换失败，准备回滚：$error');
+      if (backupCreated) {
+        if (await targetBundle.exists()) {
+          await targetBundle.delete(recursive: true);
+        }
+        if (await backup.exists()) {
+          await backup.rename(targetBundle.path);
+        }
+      }
+      rethrow;
+    } finally {
+      if (await replacement.exists()) {
+        await replacement.delete(recursive: true);
+      }
+    }
+  }
+
+  Future<void> _verifyMacOSBundle(
+    Directory bundle, {
+    required String expectedVersion,
+  }) async {
+    final infoPlist = File(path.join(bundle.path, 'Contents', 'Info.plist'));
+    if (!await infoPlist.exists()) {
+      throw StateError('macOS 应用缺少 Info.plist：${bundle.path}');
+    }
+
+    final bundleIdentifier = await _readPlistValue(
+      infoPlist,
+      'CFBundleIdentifier',
+    );
+    if (bundleIdentifier != AppUpdateConfig.macosBundleIdentifier) {
+      throw StateError('macOS 应用标识不匹配：$bundleIdentifier');
+    }
+
+    final bundleVersion = await _readPlistValue(
+      infoPlist,
+      'CFBundleShortVersionString',
+    );
+    if (!isMatchingMacOSBundleVersion(bundleVersion, expectedVersion)) {
+      throw StateError(
+        'macOS 应用版本不匹配：期望 ${normalizeVersionString(expectedVersion)}，实际 $bundleVersion',
+      );
+    }
+
+    final codesignResult = await Process.run('codesign', [
+      '--verify',
+      '--deep',
+      '--strict',
+      bundle.path,
+    ]);
+    if (codesignResult.exitCode != 0) {
+      throw StateError('macOS 应用代码签名无效：${codesignResult.stderr}');
+    }
+  }
+
+  Future<String> _readPlistValue(File plist, String key) async {
+    final result = await Process.run('/usr/libexec/PlistBuddy', [
+      '-c',
+      'Print :$key',
+      plist.path,
+    ]);
+    if (result.exitCode != 0) {
+      throw StateError('读取 macOS 应用信息失败：$key');
+    }
+    return result.stdout.toString().trim();
+  }
+
+  Future<void> _verifySessionInstaller(
+    File installer,
+    String expectedSha256,
+  ) async {
+    final actualSha256 = await _sha256ForFile(installer);
+    if (actualSha256 != expectedSha256.toLowerCase()) {
+      throw StateError('更新助手校验失败：期望 $expectedSha256，实际 $actualSha256');
+    }
+  }
+
+  Future<bool> _waitForProcessExit(
     int processId, {
     required Future<void> Function(String message) log,
   }) async {
     if (processId <= 0 || processId == pid) {
-      return;
+      return true;
     }
     final deadline = DateTime.now().add(const Duration(seconds: 60));
     while (DateTime.now().isBefore(deadline)) {
       if (!await _isProcessRunning(processId)) {
-        return;
+        return true;
       }
       await Future<void>.delayed(const Duration(milliseconds: 500));
     }
-    await log('等待旧进程退出超时，继续交给安装器关闭进程：$processId');
+    await log('等待旧进程退出超时：$processId');
+    return false;
   }
 
   Future<bool> _isProcessRunning(int processId) async {
-    final result = await Process.run(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-Command',
-        'if (Get-Process -Id $processId -ErrorAction SilentlyContinue) { exit 0 } exit 1',
-      ],
-    );
+    if (!Platform.isWindows) {
+      final result = await Process.run('kill', ['-0', '$processId']);
+      return result.exitCode == 0;
+    }
+    final result = await Process.run('powershell.exe', [
+      '-NoProfile',
+      '-Command',
+      'if (Get-Process -Id $processId -ErrorAction SilentlyContinue) { exit 0 } exit 1',
+    ]);
     return result.exitCode == 0;
   }
 
@@ -977,7 +1259,11 @@ class AppUpdateService {
   }) async {
     final scriptFile = File(
       path.join(
-          session.storageRoot, 'sessions', session.sessionId, 'install.ps1'),
+        session.storageRoot,
+        'sessions',
+        session.sessionId,
+        'install.ps1',
+      ),
     );
     final script = '''
 \$ErrorActionPreference = 'Stop'
@@ -997,16 +1283,13 @@ class AppUpdateService {
 exit \$process.ExitCode
 ''';
     await _writeUtf8Bom(scriptFile, script);
-    final result = await Process.run(
-      'powershell.exe',
-      [
-        '-NoProfile',
-        '-ExecutionPolicy',
-        'Bypass',
-        '-File',
-        scriptFile.path,
-      ],
-    ).timeout(const Duration(minutes: 30));
+    final result = await Process.run('powershell.exe', [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      scriptFile.path,
+    ]).timeout(const Duration(minutes: 30));
     await updaterLog('installer stdout: ${result.stdout}');
     await updaterLog('installer stderr: ${result.stderr}');
     return result.exitCode;
@@ -1050,11 +1333,7 @@ if (\$info.ProductVersion) {
 ''';
       final result = await Process.run(
         'powershell.exe',
-        [
-          '-NoProfile',
-          '-Command',
-          command,
-        ],
+        ['-NoProfile', '-Command', command],
         stdoutEncoding: utf8,
         stderrEncoding: utf8,
       ).timeout(const Duration(seconds: 5));
@@ -1070,10 +1349,12 @@ if (\$info.ProductVersion) {
 
   Future<void> _writeUtf8Bom(File file, String content) async {
     await file.parent.create(recursive: true);
-    await file.writeAsBytes(
-      [0xEF, 0xBB, 0xBF, ...utf8.encode(content)],
-      flush: true,
-    );
+    await file.writeAsBytes([
+      0xEF,
+      0xBB,
+      0xBF,
+      ...utf8.encode(content),
+    ], flush: true);
   }
 
   static String _psString(String value) {
@@ -1088,8 +1369,9 @@ if (\$info.ProductVersion) {
 }
 
 class AndroidUpdateInstaller {
-  static const MethodChannel _channel =
-      MethodChannel('top.wherewego.vnt/update');
+  static const MethodChannel _channel = MethodChannel(
+    'top.wherewego.vnt/update',
+  );
 
   static Future<void> installApk(String filePath) async {
     await _channel.invokeMethod<bool>('installApk', {'filePath': filePath});
@@ -1290,8 +1572,10 @@ class AppUpdateProxyResolver {
     List<String> arguments,
   ) async {
     try {
-      return await Process.run(executable, arguments)
-          .timeout(const Duration(seconds: 2));
+      return await Process.run(
+        executable,
+        arguments,
+      ).timeout(const Duration(seconds: 2));
     } catch (_) {
       return null;
     }
@@ -1362,6 +1646,32 @@ AppUpdatePlatform resolveCurrentUpdatePlatform() {
   return AppUpdatePlatform.unsupported;
 }
 
+String? resolveMacOSAppBundlePath(String executablePath) {
+  const marker = '.app/Contents/MacOS/';
+  final markerIndex = executablePath.lastIndexOf(marker);
+  if (markerIndex < 0) {
+    return null;
+  }
+  final executableName = executablePath.substring(markerIndex + marker.length);
+  if (executableName.isEmpty || executableName.contains('/')) {
+    return null;
+  }
+  return path.normalize(
+    executablePath.substring(0, markerIndex + '.app'.length),
+  );
+}
+
+bool isMatchingMacOSBundleVersion(String actual, String expected) {
+  final actualVersion = normalizeVersionString(actual);
+  final expectedVersion = normalizeVersionString(expected);
+  final semanticVersion = RegExp(
+    r'^[0-9]+(?:\.[0-9]+){1,3}(?:-[0-9A-Za-z-]+(?:\.[0-9A-Za-z-]+)*)?$',
+  );
+  return semanticVersion.hasMatch(actualVersion) &&
+      semanticVersion.hasMatch(expectedVersion) &&
+      actualVersion == expectedVersion;
+}
+
 AppUpdateInfo parseGitHubRelease(
   Map<String, dynamic> release, {
   required String currentVersion,
@@ -1394,11 +1704,7 @@ AppUpdateInfo parseGitHubRelease(
     releasePageUrl: pageUrl,
     hasUpdate: compareVersionStrings(latestVersion, currentVersion) > 0,
     platform: platform,
-    asset: selectBestUpdateAsset(
-      assets,
-      platform,
-      version: latestVersion,
-    ),
+    asset: selectBestUpdateAsset(assets, platform, version: latestVersion),
     proxyLabel: proxyLabel,
   );
 }
@@ -1421,6 +1727,19 @@ AppUpdateAsset? selectBestUpdateAsset(
     final exactNames = [
       '${AppUpdateConfig.windowsInstallerBaseName}_${normalizedVersion}_Windows_Setup.exe',
       '${AppUpdateConfig.windowsInstallerBaseName}_v${normalizedVersion}_Windows_Setup.exe',
+    ].map((name) => name.toLowerCase()).toSet();
+    for (final asset in installableAssets) {
+      if (exactNames.contains(asset.name.toLowerCase())) {
+        return asset;
+      }
+    }
+  }
+
+  if (platform == AppUpdatePlatform.macos && version != null) {
+    final normalizedVersion = normalizeVersionString(version);
+    final exactNames = [
+      'VNT_App_${normalizedVersion}_macOS.dmg',
+      'VNT_App_v${normalizedVersion}_macOS.dmg',
     ].map((name) => name.toLowerCase()).toSet();
     for (final asset in installableAssets) {
       if (exactNames.contains(asset.name.toLowerCase())) {
@@ -1516,8 +1835,9 @@ String _fileNameWithoutLastExtension(String fileName) {
 }
 
 String? _versionTokenFromFileName(String fileName) {
-  final match = RegExp(r'v?\d+(?:\.\d+)+(?:-[a-z0-9.-]+)?')
-      .firstMatch(fileName.toLowerCase());
+  final match = RegExp(
+    r'v?\d+(?:\.\d+)+(?:-[a-z0-9.-]+)?',
+  ).firstMatch(fileName.toLowerCase());
   return match?.group(0)?.replaceFirst(RegExp(r'^v'), '');
 }
 

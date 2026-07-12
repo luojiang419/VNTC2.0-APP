@@ -7,6 +7,8 @@ class AppUpdateConfig {
   static const userAgent = 'VNTC-APP-Updater/2.0';
   static const windowsExecutableName = 'vnt_app.exe';
   static const windowsInstallerBaseName = 'VNT_App';
+  static const macosBundleIdentifier = 'top.wherewego.vntApp';
+  static const macosUpdaterBundleName = 'VNTC Updater.app';
   static const windowsTrustedPublisherName = String.fromEnvironment(
     'APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER',
     defaultValue: '',
@@ -31,6 +33,7 @@ class AppUpdateConfig {
   static const updateStorageRootArg = 'update-storage-root';
   static const updateLaunchPathArg = 'update-launch-path';
   static const updateTokenArg = 'update-token';
+  static const updateSha256Arg = 'update-sha256';
   static const updateSessionManifestFileName = 'session.json';
 
   static String get currentVersion => AppVersion.currentVersion;

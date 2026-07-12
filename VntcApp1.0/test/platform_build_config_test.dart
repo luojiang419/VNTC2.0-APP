@@ -63,4 +63,72 @@ void main() {
 
     expect(installerScript, contains('Excludes: "config\\*"'));
   });
+
+  test(
+    'macOS remote assist keeps an isolated app identity and package path',
+    () {
+      final appInfo = _readProjectFile(
+        'vntcrustdesk-src/flutter/macos/Runner/Configs/AppInfo.xcconfig',
+      );
+      final infoPlist = _readProjectFile(
+        'vntcrustdesk-src/flutter/macos/Runner/Info.plist',
+      );
+      final buildScript = _readProjectFile(
+        'scripts/build_macos_remote_assist.sh',
+      );
+      final upstreamBuild = _readProjectFile('vntcrustdesk-src/build.py');
+
+      expect(appInfo, contains('PRODUCT_NAME = VNTC RustDesk'));
+      expect(
+        appInfo,
+        contains('PRODUCT_BUNDLE_IDENTIFIER = top.wherewego.vntcRustDesk'),
+      );
+      expect(infoPlist, contains('<string>vntcrustdesk</string>'));
+      expect(buildScript, contains('Release/VNTC RustDesk.app'));
+      expect(
+        upstreamBuild,
+        contains('Release/VNTC RustDesk.app/Contents/MacOS/'),
+      );
+    },
+  );
+
+  test('desktop remote peer info requests initial display capture', () {
+    final model = _readProjectFile(
+      'vntcrustdesk-src/flutter/lib/models/model.dart',
+    );
+
+    expect(model, contains('_requestInitialDisplayCapture(sessionId);'));
+    expect(model, contains('void _requestInitialDisplayCapture'));
+    expect(model, contains('bind.sessionSwitchDisplay('));
+    expect(model, contains('Int32List.fromList(displaysToCapture)'));
+  });
+
+  test('macOS main window keeps native minimize and zoom controls', () {
+    final main = _readProjectFile('lib/main.dart');
+    final mainWindow = _readProjectFile('macos/Runner/MainFlutterWindow.swift');
+
+    expect(main, contains('windowManager.setMinimizable(true)'));
+    expect(main, contains('windowManager.setMaximizable(true)'));
+    expect(main, isNot(contains('由于 macOS 安全限制，应用无法最小化')));
+    expect(mainWindow, contains('.miniaturizable'));
+    expect(
+      mainWindow,
+      isNot(contains('standardWindowButton(.miniaturizeButton)?.isHidden')),
+    );
+    expect(
+      mainWindow,
+      isNot(contains('standardWindowButton(.zoomButton)?.isHidden')),
+    );
+  });
+
+  test('macOS package script emits a filename-matched DMG SHA256 sidecar', () {
+    final buildScript = _readProjectFile('scripts/export_macos_package.sh');
+
+    expect(buildScript, contains('APP_VERSION="\$(awk'));
+    expect(buildScript, contains('VNT_App_\${APP_VERSION}_macOS.dmg'));
+    expect(buildScript, contains('DMG_SHA256_PATH="\$DMG_PATH.sha256"'));
+    expect(buildScript, contains('shasum -a 256'));
+    expect(buildScript, contains('basename "\$DMG_PATH"'));
+    expect(buildScript, contains('basename "\$DMG_SHA256_PATH"'));
+  });
 }

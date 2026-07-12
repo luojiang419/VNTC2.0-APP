@@ -1,7 +1,7 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:vnt_app/app_shutdown_service.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 
@@ -143,14 +143,17 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
           });
         }
         await widget.service.launchWindowsSilentInstaller(result);
-        if (!mounted) {
-          return;
+        await _exitForExternalUpdater();
+        return;
+      }
+      if (Platform.isMacOS) {
+        if (mounted) {
+          setState(() {
+            _statusText = '正在启动 macOS 更新助手...';
+          });
         }
-        showTopToast(context, '更新器已启动，应用即将退出', isSuccess: true);
-        Navigator.of(context).pop();
-        Timer(const Duration(milliseconds: 700), () {
-          exit(0);
-        });
+        await widget.service.launchMacOSUpdateHelper(result);
+        await _exitForExternalUpdater();
         return;
       }
 
@@ -169,6 +172,16 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
         _downloading = false;
       });
     }
+  }
+
+  Future<void> _exitForExternalUpdater() async {
+    if (mounted) {
+      showTopToast(context, '更新助手已启动，应用即将退出', isSuccess: true);
+      Navigator.of(context).pop();
+    }
+    await prepareForAppShutdown();
+    await Future<void>.delayed(const Duration(milliseconds: 300));
+    exit(0);
   }
 
   Future<void> _openReleasePage() async {
@@ -241,8 +254,8 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
                   : _openReleasePage,
           child: Text(
             info.canDownload
-                ? Platform.isWindows
-                    ? '静默更新'
+                ? Platform.isWindows || Platform.isMacOS
+                    ? '自动更新'
                     : '下载并安装'
                 : '打开更新页面',
           ),
