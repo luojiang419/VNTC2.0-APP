@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -20,6 +21,26 @@ void main() {
       expect(
         compareVersionStrings('2.0.0-beta.1', '2.0.0-alpha.9'),
         greaterThan(0),
+      );
+    });
+  });
+
+  group('AppUpdateService timeout', () {
+    test('ends a stalled update check with an actionable timeout', () async {
+      final stalled = Completer<void>();
+
+      await expectLater(
+        withUpdateCheckTimeout(
+          stalled.future,
+          timeout: const Duration(milliseconds: 10),
+        ),
+        throwsA(
+          isA<TimeoutException>().having(
+            (error) => error.message,
+            'message',
+            contains('检查 GitHub 网络连接或代理设置'),
+          ),
+        ),
       );
     });
   });

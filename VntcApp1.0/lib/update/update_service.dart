@@ -134,10 +134,24 @@ class AppUpdateService {
       : _proxyResolver = proxyResolver ?? AppUpdateProxyResolver.resolve;
 
   static const releasePageUrl = AppUpdateConfig.releasePageUrl;
+  static const updateCheckTimeout = Duration(seconds: 30);
+  static const httpRequestTimeout = Duration(seconds: 15);
 
   final Future<AppUpdateProxy?> Function() _proxyResolver;
 
   Future<AppUpdateInfo> checkLatest({
+    String? currentVersion,
+    AppUpdatePlatform? platform,
+  }) {
+    return withUpdateCheckTimeout(
+      _checkLatest(
+        currentVersion: currentVersion,
+        platform: platform,
+      ),
+    );
+  }
+
+  Future<AppUpdateInfo> _checkLatest({
     String? currentVersion,
     AppUpdatePlatform? platform,
   }) async {
@@ -501,14 +515,16 @@ class AppUpdateService {
   }) async {
     final client = _createHttpClient(proxy);
     try {
-      final request = await client.getUrl(uri);
+      final request = await client.getUrl(uri).timeout(httpRequestTimeout);
       request.headers.set(HttpHeaders.acceptHeader, accept);
       request.headers.set(HttpHeaders.userAgentHeader, _userAgent);
-      final response = await request.close();
+      final response = await request.close().timeout(httpRequestTimeout);
       if (response.statusCode < 200 || response.statusCode >= 300) {
         throw HttpException('请求失败：HTTP ${response.statusCode}', uri: uri);
       }
-      return consolidateHttpClientResponseBytes(response);
+      return consolidateHttpClientResponseBytes(
+        response,
+      ).timeout(httpRequestTimeout);
     } finally {
       client.close(force: true);
     }
@@ -1646,6 +1662,19 @@ AppUpdatePlatform resolveCurrentUpdatePlatform() {
     return AppUpdatePlatform.ios;
   }
   return AppUpdatePlatform.unsupported;
+}
+
+Future<T> withUpdateCheckTimeout<T>(
+  Future<T> operation, {
+  Duration timeout = AppUpdateService.updateCheckTimeout,
+}) {
+  return operation.timeout(
+    timeout,
+    onTimeout: () => throw TimeoutException(
+      '检查更新超时，请检查 GitHub 网络连接或代理设置后重试',
+      timeout,
+    ),
+  );
 }
 
 String? resolveMacOSAppBundlePath(String executablePath) {
