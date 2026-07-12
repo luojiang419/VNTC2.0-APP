@@ -33,6 +33,22 @@ void main() {
     );
   });
 
+  test('Linux device names are marked as unsupported Linux peers', () {
+    expect(
+      inferRemoteAssistPlatformFromDeviceName('vntc2-linux'),
+      RemoteAssistPlatform.linux,
+    );
+    expect(
+      inferRemoteAssistPlatformFromDeviceName('Ubuntu-NAS'),
+      RemoteAssistPlatform.linux,
+    );
+    expect(
+      inferRemoteAssistPlatformFromDeviceName('Company-PC'),
+      RemoteAssistPlatform.unsupported,
+    );
+    expect(RemoteAssistPlatform.fromToken('linux'), RemoteAssistPlatform.linux);
+  });
+
   test('presence announcement round trip preserves fields', () {
     const announcement = RemoteAssistPresenceAnnouncement(
       displayName: 'Alice-PC',

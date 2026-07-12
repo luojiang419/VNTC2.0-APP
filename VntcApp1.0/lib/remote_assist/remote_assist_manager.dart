@@ -285,7 +285,8 @@ class RemoteAssistManager extends ChangeNotifier {
         networkName: peer.networkName,
         status: peer.status,
         isOnline: peer.isOnline,
-        platform: presence?.platform ?? RemoteAssistPlatform.unsupported,
+        platform: presence?.platform ??
+            inferRemoteAssistPlatformFromDeviceName(displayName),
         supportedRoles: presence?.supportedRoles ?? const <String>[],
         capabilities: presence?.capabilities ?? const <String>[],
         version: presence?.version ?? '',
