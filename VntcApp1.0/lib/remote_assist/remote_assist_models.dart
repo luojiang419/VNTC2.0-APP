@@ -4,6 +4,7 @@ enum RemoteAssistPlatform {
   windows('windows'),
   android('android'),
   macos('macos'),
+  linux('linux'),
   unsupported('unsupported');
 
   const RemoteAssistPlatform(this.token);
@@ -20,6 +21,8 @@ enum RemoteAssistPlatform {
       case 'mac':
       case 'darwin':
         return RemoteAssistPlatform.macos;
+      case 'linux':
+        return RemoteAssistPlatform.linux;
       default:
         return RemoteAssistPlatform.unsupported;
     }
@@ -175,6 +178,8 @@ class RemoteAssistPeer {
 
   bool get canBeControlled =>
       supportedRoles.contains(RemoteAssistConstants.capabilityControlled);
+
+  bool get isLinux => platform == RemoteAssistPlatform.linux;
 }
 
 class RemoteAssistHealthStatus {

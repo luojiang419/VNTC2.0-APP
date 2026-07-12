@@ -65,6 +65,108 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     }
   }
 
+  Future<void> _launchRemoteAssistForPeer(
+    RemoteAssistPeer peer,
+    String accessPassword,
+  ) async {
+    try {
+      await _manager.launchController(
+        peer.virtualIp,
+        password: accessPassword.isEmpty ? null : accessPassword,
+      );
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        accessPassword.isEmpty
+            ? '已发起对 ${peer.displayName} 的远程协助，等待对方确认'
+            : '正在使用访问密码连接 ${peer.displayName}',
+        isSuccess: true,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      showTopToast(context, '远程协助启动失败: $error', isSuccess: false);
+    }
+  }
+
+  Future<void> _showPeerConnectDialog(RemoteAssistPeer peer) async {
+    if (peer.isLinux) {
+      return;
+    }
+
+    final controller = TextEditingController();
+    var obscurePassword = true;
+    try {
+      final password = await showDialog<String?>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text('连接 ${peer.displayName}'),
+            content: ConstrainedBox(
+              constraints: BoxConstraints(maxWidth: context.dialogMaxWidth),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    peer.virtualIp,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  SizedBox(height: context.spacingMedium),
+                  TextField(
+                    controller: controller,
+                    autofocus: true,
+                    obscureText: obscurePassword,
+                    onSubmitted: (value) =>
+                        Navigator.of(dialogContext).pop(value),
+                    decoration: InputDecoration(
+                      labelText: '访问密码',
+                      hintText: '未设置密码时可留空',
+                      prefixIcon: const Icon(Icons.lock_outline),
+                      suffixIcon: IconButton(
+                        tooltip: obscurePassword ? '显示密码' : '隐藏密码',
+                        onPressed: () => setDialogState(
+                          () => obscurePassword = !obscurePassword,
+                        ),
+                        icon: Icon(
+                          obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.of(dialogContext).pop(),
+                child: const Text('取消'),
+              ),
+              FilledButton.icon(
+                onPressed: () =>
+                    Navigator.of(dialogContext).pop(controller.text),
+                icon: const Icon(Icons.link),
+                label: const Text('连接'),
+              ),
+            ],
+          ),
+        ),
+      );
+      if (password != null && mounted) {
+        await _launchRemoteAssistForPeer(peer, password);
+      }
+    } finally {
+      controller.dispose();
+    }
+  }
+
   void _selectPeer(RemoteAssistPeer peer) {
     _targetIpController.text = peer.virtualIp;
     Clipboard.setData(ClipboardData(text: peer.virtualIp));
@@ -199,16 +301,14 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                     SizedBox(height: context.spacingLarge),
                     _buildAndroidPermissionCard(isDark, health),
                   ] else ...[
-                    _buildConnectCard(isDark, health),
-                    SizedBox(height: context.spacingLarge),
                     if (health.isMacOS) ...[
                       _buildMacosControlledCard(isDark, health),
                       SizedBox(height: context.spacingLarge),
                     ],
-                    _buildPeerList(isDark, peers),
+                    _buildPeerList(isDark, health, peers),
                   ],
                   SizedBox(height: context.spacingLarge),
-                  if (useAndroidLayout) _buildPeerList(isDark, peers),
+                  if (useAndroidLayout) _buildPeerList(isDark, health, peers),
                 ],
               ),
             );
@@ -743,86 +843,6 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     );
   }
 
-  Widget _buildConnectCard(bool isDark, RemoteAssistHealthStatus health) {
-    final primaryColor = Theme.of(context).primaryColor;
-    return Container(
-      padding: EdgeInsets.all(context.cardPadding),
-      decoration: BoxDecoration(
-        color:
-            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-        borderRadius: BorderRadius.circular(context.cardRadius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '目标连接',
-            style: TextStyle(
-              fontSize: context.fontLarge,
-              fontWeight: FontWeight.w700,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          TextField(
-            controller: _targetIpController,
-            decoration: InputDecoration(
-              labelText: '目标虚拟 IP',
-              hintText: '例如 10.26.0.8',
-              suffixIcon: IconButton(
-                tooltip: '粘贴',
-                onPressed: () async {
-                  final data = await Clipboard.getData(Clipboard.kTextPlain);
-                  final pasted = data?.text?.trim() ?? '';
-                  if (pasted.isNotEmpty) {
-                    _targetIpController.text = pasted;
-                  }
-                },
-                icon: const Icon(Icons.content_paste_go),
-              ),
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          TextField(
-            controller: _targetPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '访问密码',
-              hintText: '可选，留空则等待对方手动接受',
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          Text(
-            '点击下方在线用户卡片会自动复制并填入该用户虚拟 IP；访问密码需要按实际情况手动输入，随后点击“连接”即可发起协助。',
-            style: TextStyle(
-              fontSize: context.fontSmall,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: health.canLaunch ? _launchRemoteAssist : null,
-                  icon: const Icon(Icons.link),
-                  label: const Text('连接'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
-
   Widget _buildPermissionTile(
     bool isDark, {
     required String title,
@@ -930,7 +950,11 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     );
   }
 
-  Widget _buildPeerList(bool isDark, List<RemoteAssistPeer> peers) {
+  Widget _buildPeerList(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+    List<RemoteAssistPeer> peers,
+  ) {
     return Container(
       padding: EdgeInsets.all(context.cardPadding),
       decoration: BoxDecoration(
@@ -941,14 +965,26 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(
-            '在线用户',
-            style: TextStyle(
-              fontSize: context.fontLarge,
-              fontWeight: FontWeight.w700,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-            ),
+          Row(
+            children: [
+              Expanded(
+                child: Text(
+                  '在线用户',
+                  style: TextStyle(
+                    fontSize: context.fontLarge,
+                    fontWeight: FontWeight.w700,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+              ),
+              _buildChip(
+                isDark,
+                label: '${peers.length} 台在线',
+                isActive: peers.isNotEmpty,
+              ),
+            ],
           ),
           SizedBox(height: context.spacingMedium),
           if (peers.isEmpty)
@@ -962,23 +998,46 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
               ),
             )
           else
-            ...peers.map(
-              (peer) => Padding(
-                padding: EdgeInsets.only(bottom: context.spacingSmall),
-                child: _buildPeerCard(isDark, peer),
-              ),
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columns = constraints.maxWidth >= 1100
+                    ? 3
+                    : constraints.maxWidth >= 680
+                        ? 2
+                        : 1;
+                final spacing = context.spacingSmall;
+                final cardWidth =
+                    (constraints.maxWidth - spacing * (columns - 1)) / columns;
+                return Wrap(
+                  spacing: spacing,
+                  runSpacing: spacing,
+                  children: peers
+                      .map(
+                        (peer) => SizedBox(
+                          width: cardWidth,
+                          child: _buildPeerCard(isDark, health, peer),
+                        ),
+                      )
+                      .toList(growable: false),
+                );
+              },
             ),
         ],
       ),
     );
   }
 
-  Widget _buildPeerCard(bool isDark, RemoteAssistPeer peer) {
+  Widget _buildPeerCard(
+    bool isDark,
+    RemoteAssistHealthStatus health,
+    RemoteAssistPeer peer,
+  ) {
     final primaryColor = Theme.of(context).primaryColor;
+    final canConnect = health.canLaunch && !peer.isLinux;
     return Material(
       color: Colors.transparent,
       child: InkWell(
-        onTap: () => _selectPeer(peer),
+        onTap: canConnect ? () => _showPeerConnectDialog(peer) : null,
         borderRadius: BorderRadius.circular(context.cardRadius),
         child: Container(
           padding: EdgeInsets.all(context.spacingMedium),
@@ -1069,9 +1128,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                   ),
                   SizedBox(height: context.spacingXXSmall),
                   Text(
-                    peer.hasPresence
-                        ? '${_platformLabel(peer.platform)} · 可复制并连接'
-                        : '等待 Presence',
+                    _buildPeerActionLabel(peer, health),
                     style: TextStyle(
                       fontSize: context.fontXSmall,
                       color: isDark
@@ -1102,6 +1159,19 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     return '${_platformLabel(peer.platform)} · ${roles.join(' / ')}';
   }
 
+  String _buildPeerActionLabel(
+    RemoteAssistPeer peer,
+    RemoteAssistHealthStatus health,
+  ) {
+    if (peer.isLinux) {
+      return 'Linux · 不支持远程协助';
+    }
+    if (!health.canLaunch) {
+      return '${_platformLabel(peer.platform)} · 当前不可连接';
+    }
+    return '${_platformLabel(peer.platform)} · 点击连接';
+  }
+
   String _platformLabel(RemoteAssistPlatform platform) {
     switch (platform) {
       case RemoteAssistPlatform.windows:
@@ -1110,6 +1180,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         return 'Android';
       case RemoteAssistPlatform.macos:
         return 'macOS';
+      case RemoteAssistPlatform.linux:
+        return 'Linux';
       case RemoteAssistPlatform.unsupported:
         return '未知平台';
     }

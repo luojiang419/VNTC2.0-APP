@@ -1,7 +1,6 @@
 import 'dart:io';
 import 'dart:convert';
 import 'dart:isolate';
-import 'dart:ui' show lerpDouble;
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/color_utils.dart';
@@ -95,16 +94,15 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 ),
               ),
 
-              // 操作按钮行
-              SliverToBoxAdapter(
-                child: Padding(
-                  padding: EdgeInsets.symmetric(
-                      horizontal: isWideScreen
-                          ? context.spacingXLarge
-                          : context.spacingMedium),
-                  child: _buildActionRow(isDark),
+              if (!isWideScreen)
+                SliverToBoxAdapter(
+                  child: Padding(
+                    padding: EdgeInsets.symmetric(
+                      horizontal: context.spacingMedium,
+                    ),
+                    child: _buildActionRow(isDark),
+                  ),
                 ),
-              ),
 
               SliverToBoxAdapter(
                   child: SizedBox(height: context.spacingMedium)),
@@ -128,60 +126,30 @@ class _ConfigListPageState extends State<ConfigListPage> {
                                 ? context.spacingXLarge
                                 : context.spacingMedium,
                           ),
-                          sliver: SliverReorderableList(
-                            itemBuilder: (context, index) {
-                              final config = _configs[index];
-                              return ReorderableDelayedDragStartListener(
-                                key: ValueKey(config.itemKey),
-                                index: index,
-                                child: Padding(
-                                  padding: EdgeInsets.only(
-                                      bottom: context.cardSpacing),
-                                  child:
-                                      _buildConfigCard(config, index, isDark),
+                          sliver: SliverLayoutBuilder(
+                            builder: (context, constraints) {
+                              final columns =
+                                  constraints.crossAxisExtent >= 1180
+                                      ? 3
+                                      : constraints.crossAxisExtent >= 680
+                                          ? 2
+                                          : 1;
+                              return SliverGrid(
+                                gridDelegate:
+                                    SliverGridDelegateWithFixedCrossAxisCount(
+                                  crossAxisCount: columns,
+                                  crossAxisSpacing: context.cardSpacing,
+                                  mainAxisSpacing: context.cardSpacing,
+                                  mainAxisExtent: context.w(230),
                                 ),
-                              );
-                            },
-                            itemCount: _configs.length,
-                            onReorder: (oldIndex, newIndex) {
-                              setState(() {
-                                if (oldIndex < newIndex) {
-                                  newIndex -= 1;
-                                }
-                                final item = _configs.removeAt(oldIndex);
-                                _configs.insert(newIndex, item);
-                              });
-                              // 保存新的排序
-                              _dataPersistence.saveData(_configs);
-                              // 通知设置页面刷新配置列表
-                              widget.onDataChanged?.call();
-                            },
-                            proxyDecorator: (child, index, animation) {
-                              // 拖动时的视觉效果 - 提供明显的反馈
-                              return AnimatedBuilder(
-                                animation: animation,
-                                builder: (BuildContext context, Widget? child) {
-                                  final double animValue = Curves.easeInOut
-                                      .transform(animation.value);
-                                  final double elevation =
-                                      lerpDouble(0, 8, animValue)!;
-                                  final double scale =
-                                      lerpDouble(1, 1.05, animValue)!;
-                                  return Transform.scale(
-                                    scale: scale,
-                                    child: Material(
-                                      elevation: elevation,
-                                      color: Colors.transparent,
-                                      borderRadius: BorderRadius.circular(
-                                          context.cardRadius),
-                                      child: Opacity(
-                                        opacity: 0.9,
-                                        child: child,
-                                      ),
-                                    ),
-                                  );
-                                },
-                                child: child,
+                                delegate: SliverChildBuilderDelegate(
+                                  (context, index) => _buildDraggableConfigCard(
+                                    _configs[index],
+                                    index,
+                                    isDark,
+                                  ),
+                                  childCount: _configs.length,
+                                ),
                               );
                             },
                           ),
@@ -241,8 +209,73 @@ class _ConfigListPageState extends State<ConfigListPage> {
             ],
           ),
         ),
+        if (isWideScreen) ...[
+          OutlinedButton.icon(
+            onPressed: _importSingleConfig,
+            icon: const Icon(Icons.file_download_outlined),
+            label: const Text('导入'),
+          ),
+          SizedBox(width: context.spacingSmall),
+          FilledButton.icon(
+            onPressed: () => _addOrEditConfig(null, -1),
+            icon: const Icon(Icons.add),
+            label: const Text('新建配置'),
+          ),
+        ],
       ],
     );
+  }
+
+  Widget _buildDraggableConfigCard(
+    NetworkConfig config,
+    int index,
+    bool isDark,
+  ) {
+    return DragTarget<int>(
+      onWillAcceptWithDetails: (details) => details.data != index,
+      onAcceptWithDetails: (details) => _moveConfig(details.data, index),
+      builder: (context, candidates, rejectedData) {
+        final highlighted = candidates.isNotEmpty;
+        return LongPressDraggable<int>(
+          data: index,
+          feedback: Material(
+            color: Colors.transparent,
+            elevation: 10,
+            borderRadius: BorderRadius.circular(context.cardRadius),
+            child: SizedBox(
+              width: context.w(320),
+              height: context.w(230),
+              child: _buildConfigCard(config, index, isDark),
+            ),
+          ),
+          childWhenDragging: Opacity(
+            opacity: 0.35,
+            child: _buildConfigCard(config, index, isDark),
+          ),
+          child: AnimatedScale(
+            scale: highlighted ? 1.02 : 1,
+            duration: const Duration(milliseconds: 120),
+            child: _buildConfigCard(config, index, isDark),
+          ),
+        );
+      },
+    );
+  }
+
+  void _moveConfig(int oldIndex, int newIndex) {
+    if (oldIndex == newIndex ||
+        oldIndex < 0 ||
+        oldIndex >= _configs.length ||
+        newIndex < 0 ||
+        newIndex >= _configs.length) {
+      return;
+    }
+    setState(() {
+      final item = _configs.removeAt(oldIndex);
+      _configs.insert(newIndex, item);
+    });
+    _dataPersistence.saveData(_configs);
+    widget.onDataChanged?.call();
   }
 
   Widget _buildActionRow(bool isDark) {
@@ -387,7 +420,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
         ],
       ),
       child: Padding(
-        padding: ResponsiveUtils.padding(context, all: context.cardPadding),
+        padding: EdgeInsets.all(context.cardPadding),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [

@@ -1,3 +1,5 @@
+import 'remote_assist_models.dart';
+
 int? ipv4NetmaskToPrefix(String netmask) {
   final parts = netmask.trim().split('.');
   if (parts.length != 4) {
@@ -53,6 +55,18 @@ String normalizeRemoteAssistDisplayName(
     return '未命名设备';
   }
   return trimmed;
+}
+
+RemoteAssistPlatform inferRemoteAssistPlatformFromDeviceName(String name) {
+  final normalized = name.trim().toLowerCase();
+  if (RegExp(r'(^|[\s._-])linux([\s._-]|$)').hasMatch(normalized) ||
+      normalized.contains('ubuntu') ||
+      normalized.contains('debian') ||
+      normalized.contains('centos') ||
+      normalized.contains('fedora')) {
+    return RemoteAssistPlatform.linux;
+  }
+  return RemoteAssistPlatform.unsupported;
 }
 
 String buildRemoteAssistPeerKey({
