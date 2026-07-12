@@ -2,6 +2,8 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:shared_preferences/shared_preferences.dart';
+import 'package:vnt_app/update/update_proxy_settings.dart';
 import 'package:path/path.dart' as path;
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/update/update_session.dart';
@@ -291,6 +293,10 @@ void main() {
   });
 
   group('AppUpdateProxyResolver', () {
+    setUp(() {
+      SharedPreferences.setMockInitialValues({});
+    });
+
     test('parses common proxy formats', () {
       expect(
         AppUpdateProxyResolver.parseProxyValue(
@@ -321,6 +327,43 @@ void main() {
         'http://127.0.0.1:7890',
       );
       expect(AppUpdateProxyResolver.parseProxyValue('DIRECT', '环境代理'), isNull);
+    });
+
+    test('自定义代理禁止回退直连', () async {
+      await const AppUpdateProxySettings(
+        mode: AppUpdateProxyMode.custom,
+        customAddress: 'socks5://127.0.0.1:7890',
+      ).save();
+
+      final proxy = await AppUpdateProxyResolver.resolve();
+
+      expect(proxy?.config, 'SOCKS 127.0.0.1:7890');
+      expect(proxy?.label, '自定义代理 127.0.0.1:7890');
+      expect(proxy?.allowDirectFallback, isFalse);
+    });
+
+    test('强制直连返回显式 DIRECT 策略', () async {
+      await const AppUpdateProxySettings(
+        mode: AppUpdateProxyMode.direct,
+      ).save();
+
+      final proxy = await AppUpdateProxyResolver.resolve();
+
+      expect(proxy?.isDirect, isTrue);
+      expect(proxy?.label, '强制直连');
+      expect(proxy?.allowDirectFallback, isFalse);
+    });
+
+    test('拒绝无效的自定义代理', () async {
+      await const AppUpdateProxySettings(
+        mode: AppUpdateProxyMode.custom,
+        customAddress: 'http://',
+      ).save();
+
+      expect(
+        AppUpdateProxyResolver.resolve,
+        throwsA(isA<FormatException>()),
+      );
     });
   });
 

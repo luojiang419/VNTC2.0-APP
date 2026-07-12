@@ -10,6 +10,7 @@ import 'package:path/path.dart' as path;
 import 'package:path_provider/path_provider.dart';
 import 'package:url_launcher/url_launcher.dart';
 import 'package:vnt_app/update/app_update_config.dart';
+import 'package:vnt_app/update/update_proxy_settings.dart';
 import 'package:vnt_app/update/update_session.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 
@@ -112,10 +113,17 @@ class AppUpdateDownloadResult {
 }
 
 class AppUpdateProxy {
-  const AppUpdateProxy({required this.config, required this.label});
+  const AppUpdateProxy({
+    required this.config,
+    required this.label,
+    this.allowDirectFallback = true,
+  });
 
   final String config;
   final String label;
+  final bool allowDirectFallback;
+
+  bool get isDirect => config.trim().toUpperCase() == 'DIRECT';
 
   String get curlProxyUrl {
     final parts = config.trim().split(RegExp(r'\s+'));
@@ -471,7 +479,7 @@ class AppUpdateService {
         firstError = error;
       }
 
-      if (proxy != null) {
+      if (proxy?.allowDirectFallback ?? false) {
         try {
           return await _readUriWithCurl(
             uri,
@@ -487,7 +495,7 @@ class AppUpdateService {
       try {
         return await _readUriOnce(uri, proxy: proxy, accept: accept);
       } catch (dartError) {
-        if (proxy != null) {
+        if (proxy?.allowDirectFallback ?? false) {
           try {
             return await _readUriOnce(uri, proxy: null, accept: accept);
           } catch (_) {
@@ -501,7 +509,7 @@ class AppUpdateService {
     try {
       return await _readUriOnce(uri, proxy: proxy, accept: accept);
     } catch (_) {
-      if (proxy == null) {
+      if (proxy == null || !proxy.allowDirectFallback) {
         rethrow;
       }
       return _readUriOnce(uri, proxy: null, accept: accept);
@@ -554,8 +562,11 @@ class AppUpdateService {
       'Accept: $accept',
       '-H',
       'User-Agent: $_userAgent',
-      if (proxy != null) ...['--proxy', proxy.curlProxyUrl],
-      if (forceDirect) ...['--noproxy', '*'],
+      if (proxy != null && !proxy.isDirect) ...[
+        '--proxy',
+        proxy.curlProxyUrl,
+      ],
+      if (forceDirect || (proxy?.isDirect ?? false)) ...['--noproxy', '*'],
       uri.toString(),
     ];
     final result = await Process.run(
@@ -602,7 +613,7 @@ class AppUpdateService {
         }
       }
 
-      if (proxy != null) {
+      if (proxy?.allowDirectFallback ?? false) {
         try {
           await _downloadFileWithCurl(
             uri,
@@ -632,7 +643,7 @@ class AppUpdateService {
         if (await target.exists()) {
           await target.delete();
         }
-        if (proxy != null) {
+        if (proxy?.allowDirectFallback ?? false) {
           try {
             await _downloadFileOnce(
               uri,
@@ -659,7 +670,7 @@ class AppUpdateService {
         onProgress: onProgress,
       );
     } catch (_) {
-      if (proxy == null) {
+      if (proxy == null || !proxy.allowDirectFallback) {
         rethrow;
       }
       if (await target.exists()) {
@@ -696,8 +707,11 @@ class AppUpdateService {
       'Accept: application/octet-stream',
       '-H',
       'User-Agent: $_userAgent',
-      if (proxy != null) ...['--proxy', proxy.curlProxyUrl],
-      if (forceDirect) ...['--noproxy', '*'],
+      if (proxy != null && !proxy.isDirect) ...[
+        '--proxy',
+        proxy.curlProxyUrl,
+      ],
+      if (forceDirect || (proxy?.isDirect ?? false)) ...['--noproxy', '*'],
       '--output',
       target.path,
       uri.toString(),
@@ -752,7 +766,14 @@ class AppUpdateService {
       ..idleTimeout = const Duration(seconds: 20)
       ..autoUncompress = true;
     if (proxy != null) {
-      client.findProxy = (_) => '${proxy.config}; DIRECT';
+      client.findProxy = (_) {
+        if (proxy.isDirect) {
+          return 'DIRECT';
+        }
+        return proxy.allowDirectFallback
+            ? '${proxy.config}; DIRECT'
+            : proxy.config;
+      };
     }
     return client;
   }
@@ -1407,9 +1428,24 @@ class AppUpdateProxyResolver {
   );
 
   static Future<AppUpdateProxy?> resolve() async {
-    final envProxy = _fromEnvironment();
-    if (envProxy != null) {
-      return envProxy;
+    final settings = await AppUpdateProxySettings.load();
+    if (settings.mode == AppUpdateProxyMode.direct) {
+      return const AppUpdateProxy(
+        config: 'DIRECT',
+        label: '强制直连',
+        allowDirectFallback: false,
+      );
+    }
+    if (settings.mode == AppUpdateProxyMode.custom) {
+      final proxy = parseProxyValue(settings.customAddress, '自定义代理');
+      if (proxy == null) {
+        throw const FormatException('自定义代理地址无效，请在设置中重新填写');
+      }
+      return AppUpdateProxy(
+        config: proxy.config,
+        label: proxy.label,
+        allowDirectFallback: false,
+      );
     }
 
     if (!kIsWeb) {
@@ -1419,7 +1455,24 @@ class AppUpdateProxyResolver {
       }
     }
 
+    final envProxy = _fromEnvironment();
+    if (envProxy != null) {
+      return envProxy;
+    }
+
     return _fromReachableLocalProxy();
+  }
+
+  static Future<bool> canConnect(AppUpdateProxy proxy) async {
+    final endpoint = proxy.config.trim().split(RegExp(r'\s+'));
+    if (endpoint.length < 2) {
+      return false;
+    }
+    final uri = Uri.tryParse('http://${endpoint[1]}');
+    if (uri == null || uri.host.isEmpty || uri.port == 0) {
+      return false;
+    }
+    return _canConnect(uri.host, uri.port);
   }
 
   static AppUpdateProxy? parseProxyValue(String value, String source) {

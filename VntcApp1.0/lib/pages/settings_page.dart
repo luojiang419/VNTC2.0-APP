@@ -16,6 +16,7 @@ import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/update/update_dialog.dart';
+import 'package:vnt_app/update/update_proxy_dialog.dart';
 import 'package:vnt_app/windows_startup_manager.dart';
 
 /// 设置页面
@@ -726,6 +727,14 @@ class _SettingsPageState extends State<SettingsPage> {
             title: '软件更新',
             subtitle: '通过 GitHub Releases 检查并静默升级',
             onTap: () => showUpdateCheckDialog(context),
+          ),
+          _buildDivider(isDark),
+          _buildSettingItem(
+            isDark,
+            icon: Icons.lan_outlined,
+            title: '更新网络代理',
+            subtitle: '自动使用系统代理，或设置自定义代理地址',
+            onTap: () => showUpdateProxySettingsDialog(context),
           ),
           _buildDivider(isDark),
           _buildDefaultConfigSelector(isDark),
