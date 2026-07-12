@@ -89,6 +89,11 @@ VntcApp1.0/output.zip
 # 配置数据（运行时生成）
 VntcApp1.0/config/config.json
 
+# 本地基础设施凭据文档（禁止提交）
+云服务器.md
+**/云服务器.md
+**/*云服务器*.md
+
 # 日志
 *.log
 logs/
