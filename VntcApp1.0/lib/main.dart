@@ -2,7 +2,7 @@ import 'dart:async';
 import 'dart:io';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show MethodChannel, rootBundle;
 import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
@@ -447,12 +447,16 @@ class MainApp extends StatefulWidget {
 
 class _MainAppState extends State<MainApp> with WindowListener {
   static const Duration _startupUpdateCheckDelay = Duration(seconds: 2);
+  static const MethodChannel _macOSWindowCloseChannel = MethodChannel(
+    'top.wherewego.vnt/window_close',
+  );
 
   bool rememberChoice = false;
   late final Future<bool> _systemTrayInitialization;
   late final AppUpdateService _startupUpdateService;
   late final StartupUpdateCoordinator _startupUpdateCoordinator;
   bool _startupUpdatePromptInProgress = false;
+  bool _closeRequestInProgress = false;
 
   @override
   void initState() {
@@ -468,6 +472,13 @@ class _MainAppState extends State<MainApp> with WindowListener {
       // 设置窗口关闭拦截
       windowManager.setPreventClose(true);
       windowManager.addListener(this);
+      if (Platform.isMacOS) {
+        _macOSWindowCloseChannel.setMethodCallHandler((call) async {
+          if (call.method == 'onCloseRequested') {
+            await _handleWindowCloseRequest();
+          }
+        });
+      }
     } else {
       _systemTrayInitialization = Future<bool>.value(false);
     }
@@ -682,6 +693,9 @@ class _MainAppState extends State<MainApp> with WindowListener {
 
   @override
   void dispose() {
+    if (Platform.isMacOS) {
+      _macOSWindowCloseChannel.setMethodCallHandler(null);
+    }
     windowManager.removeListener(this);
     super.dispose();
   }
@@ -706,18 +720,30 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   @override
-  void onWindowClose() async {
-    var closeBehavior = await DataPersistence().loadWindowCloseBehavior();
-    if (closeBehavior == WindowCloseBehavior.ask) {
-      final selectedBehavior = await _showCloseConfirmationDialog(
-        closeBehavior,
-      );
-      if (selectedBehavior == null) {
-        return;
-      }
-      closeBehavior = selectedBehavior;
+  void onWindowClose() {
+    unawaited(_handleWindowCloseRequest());
+  }
+
+  Future<void> _handleWindowCloseRequest() async {
+    if (_closeRequestInProgress) {
+      return;
     }
-    await _performCloseBehavior(closeBehavior);
+    _closeRequestInProgress = true;
+    try {
+      var closeBehavior = await DataPersistence().loadWindowCloseBehavior();
+      if (closeBehavior == WindowCloseBehavior.ask) {
+        final selectedBehavior = await _showCloseConfirmationDialog(
+          closeBehavior,
+        );
+        if (selectedBehavior == null) {
+          return;
+        }
+        closeBehavior = selectedBehavior;
+      }
+      await _performCloseBehavior(closeBehavior);
+    } finally {
+      _closeRequestInProgress = false;
+    }
   }
 
   Future<void> _performCloseBehavior(
@@ -735,7 +761,8 @@ class _MainAppState extends State<MainApp> with WindowListener {
           return;
         }
         debugPrint('隐藏到托盘');
-        appWindow.hide();
+        await windowManager.setSkipTaskbar(true);
+        await windowManager.hide();
         return;
       case WindowCloseBehavior.exitApp:
         debugPrint('退出应用');

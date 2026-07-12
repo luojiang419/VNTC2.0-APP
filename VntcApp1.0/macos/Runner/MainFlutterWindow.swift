@@ -2,6 +2,8 @@ import Cocoa
 import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
+  private var closeRequestChannel: FlutterMethodChannel?
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
@@ -24,7 +26,20 @@ class MainFlutterWindow: NSWindow {
 
     RegisterGeneratedPlugins(registry: flutterViewController)
 
+    closeRequestChannel = FlutterMethodChannel(
+      name: "top.wherewego.vnt/window_close",
+      binaryMessenger: flutterViewController.engine.binaryMessenger
+    )
+    if let closeButton = standardWindowButton(.closeButton) {
+      closeButton.target = self
+      closeButton.action = #selector(handleCloseButton(_:))
+    }
+
     super.awakeFromNib()
+  }
+
+  @objc private func handleCloseButton(_ sender: Any?) {
+    closeRequestChannel?.invokeMethod("onCloseRequested", arguments: nil)
   }
 
   // 确保窗口可以成为主窗口
