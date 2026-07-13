@@ -129,7 +129,7 @@ codesign --force --deep --sign - "$DIST_APP"
 codesign --verify --deep --strict --verbose=2 "$DIST_APP"
 
 if [ "$CREATE_DMG" -eq 1 ]; then
-  DMG_PATH="$DIST_DIR/VNT_App_2.0.0_macOS.dmg"
+  DMG_PATH="$DIST_DIR/VNT_App_4.8.12_macOS.dmg"
   DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vnt_macos_dmg.XXXXXX")"
   trap 'rm -rf "$DMG_STAGE"' EXIT
   ditto "$DIST_APP" "$DMG_STAGE/vnt_app.app"

@@ -82,6 +82,51 @@ void main() {
     expect(remoteBridge, contains('"/librustdesk.so"'));
   });
 
+  test('Android input service state is synchronized from the live service', () {
+    final activity = _readProjectFile(
+      'android/app/src/main/java/top/wherewego/vnt_app/MainActivity.java',
+    );
+    final remoteBridge = _readProjectFile(
+      'android/app/src/main/java/top/wherewego/vnt_app/RemoteAssistAndroidBridge.java',
+    );
+    final adapter = _readProjectFile(
+      'lib/remote_assist/remote_assist_android_adapter.dart',
+    );
+    final runtime = _readProjectFile(
+      'lib/remote_assist/remote_assist_android_runtime.dart',
+    );
+
+    expect(
+      activity,
+      contains('notifyRustdeskStateChange("input", isRustdeskInputEnabled())'),
+    );
+    expect(
+      RegExp(
+        r'private boolean isRustdeskInputEnabled\(\) \{\s*return com\.carriez\.flutter_hbb\.InputService\.Companion\.isOpen\(\);\s*\}',
+      ).hasMatch(activity),
+      isTrue,
+    );
+    expect(
+      RegExp(
+        r'protected void onResume\(\) \{\s*super\.onResume\(\);\s*notifyRustdeskServiceState\(\);',
+      ).hasMatch(activity),
+      isTrue,
+    );
+    expect(remoteBridge, contains('activity.refreshRustdeskServiceState();'));
+    expect(
+      RegExp(
+        r'private boolean isAccessibilityConnected\(\) \{\s*return com\.carriez\.flutter_hbb\.InputService\.Companion\.isOpen\(\);\s*\}',
+      ).hasMatch(remoteBridge),
+      isTrue,
+    );
+    expect(remoteBridge, contains('status.put("accessibilitySettingEnabled",'));
+    expect(adapter, contains('await _runtime.refreshState();'));
+    expect(
+      runtime,
+      contains("await hbb_common.gFFI.invokeMethod('check_service');"),
+    );
+  });
+
   test('Android chat declares and requests local network permission', () {
     final manifest =
         _readProjectFile('android/app/src/main/AndroidManifest.xml');

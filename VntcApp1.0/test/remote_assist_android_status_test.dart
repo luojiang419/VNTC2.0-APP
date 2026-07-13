@@ -35,4 +35,16 @@ void main() {
     expect(status.listenerReady, isTrue);
     expect(status.portListening, isTrue);
   });
+
+  test('Android 无障碍设置已勾选不等于输入服务已连接', () {
+    final status = RemoteAssistAndroidStatus.fromMap(const <String, dynamic>{
+      'accessibilityPermissionGranted': false,
+      'accessibilitySettingEnabled': true,
+      'permissionsReady': false,
+    });
+
+    expect(status.accessibilitySettingEnabled, isTrue);
+    expect(status.accessibilityPermissionGranted, isFalse);
+    expect(status.permissionsReady, isFalse);
+  });
 }

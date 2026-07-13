@@ -1,7 +1,6 @@
 package top.wherewego.vnt_app;
 
 import android.Manifest;
-import android.content.ComponentName;
 import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.os.Environment;
@@ -561,19 +560,7 @@ public class MainActivity extends FlutterActivity {
     }
 
     private boolean isRustdeskInputEnabled() {
-        String enabledServices = Settings.Secure.getString(
-                getContentResolver(),
-                Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
-        );
-        if (TextUtils.isEmpty(enabledServices)) {
-            return com.carriez.flutter_hbb.InputService.Companion.isOpen();
-        }
-        String expectedService = new ComponentName(
-                this,
-                com.carriez.flutter_hbb.InputService.class
-        ).flattenToString();
-        return enabledServices.contains(expectedService)
-                || com.carriez.flutter_hbb.InputService.Companion.isOpen();
+        return com.carriez.flutter_hbb.InputService.Companion.isOpen();
     }
 
     private void notifyRustdeskServiceState() {
@@ -582,6 +569,10 @@ public class MainActivity extends FlutterActivity {
                 com.carriez.flutter_hbb.MainService.Companion.isReady()
         );
         notifyRustdeskStateChange("input", isRustdeskInputEnabled());
+    }
+
+    void refreshRustdeskServiceState() {
+        notifyRustdeskServiceState();
     }
 
     private void startRustdeskControlledService(boolean requestPermissionIfNeeded) {
@@ -696,6 +687,7 @@ public class MainActivity extends FlutterActivity {
     @Override
     protected void onResume() {
         super.onResume();
+        notifyRustdeskServiceState();
         resumePendingApkInstall();
     }
 

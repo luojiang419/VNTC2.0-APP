@@ -33,7 +33,7 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
 
   @override
   Future<void> refreshState() async {
-    await _bridge.refreshState();
+    await _runtime.refreshState();
   }
 
   @override
@@ -64,7 +64,11 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
       issues.add('未完成屏幕录制授权，无法让其他设备查看和控制本机屏幕');
     }
     if (!status.accessibilityPermissionGranted) {
-      issues.add('未开启无障碍控制服务，远程输入无法作用到本机');
+      issues.add(
+        status.accessibilitySettingEnabled
+            ? '无障碍控制服务已在系统设置中开启，但服务尚未连接，请重启该服务后重新连接'
+            : '未开启无障碍控制服务，远程输入无法作用到本机',
+      );
     }
     if (!status.overlayPermissionGranted) {
       issues.add('未授予悬浮窗权限，远控运行态浮窗和前台驻留能力不完整');
@@ -137,7 +141,7 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
   Future<void> repair({
     required List<String> remoteCidrs,
   }) async {
-    await _bridge.refreshState();
+    await refreshState();
   }
 
   @override

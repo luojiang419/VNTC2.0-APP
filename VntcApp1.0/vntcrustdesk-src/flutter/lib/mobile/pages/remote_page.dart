@@ -28,6 +28,11 @@ import '../widgets/custom_scale_widget.dart';
 
 final initText = '1' * 1024;
 
+@visibleForTesting
+bool shouldPaintAndroidPeerCursor({required bool touchMode}) {
+  return !touchMode;
+}
+
 // Workaround for Android (default input method, Microsoft SwiftKey keyboard) when using physical keyboard.
 // When connecting a physical keyboard, `KeyEvent.physicalKey.usbHidUsage` are wrong is using Microsoft SwiftKey keyboard.
 // https://github.com/flutter/flutter/issues/159384
@@ -583,7 +588,8 @@ class _RemotePageState extends State<RemotePage> with WidgetsBindingObserver {
   }
 
   bool get showCursorPaint =>
-      !gFFI.ffiModel.isPeerAndroid &&
+      (!gFFI.ffiModel.isPeerAndroid ||
+          shouldPaintAndroidPeerCursor(touchMode: gFFI.ffiModel.touchMode)) &&
       !gFFI.canvasModel.cursorEmbedded &&
       !gFFI.inputModel.relativeMouseMode.value;
 

@@ -48,6 +48,7 @@ public class RemoteAssistAndroidBridge {
                     result.success(buildStatus());
                     return;
                 case "refreshState":
+                    activity.refreshRustdeskServiceState();
                     result.success(null);
                     return;
                 case "requestPermission":
@@ -99,7 +100,8 @@ public class RemoteAssistAndroidBridge {
         boolean notificationGranted = hasNotificationPermission();
         boolean screenCaptureGranted =
                 com.carriez.flutter_hbb.MainService.Companion.isReady();
-        boolean accessibilityGranted = isAccessibilityEnabled();
+        boolean accessibilityGranted = isAccessibilityConnected();
+        boolean accessibilitySettingEnabled = isAccessibilitySettingEnabled();
         boolean overlayGranted = Settings.canDrawOverlays(activity);
         boolean batteryOptimizationIgnored = isIgnoringBatteryOptimizations();
         boolean controllerAvailable = hasBundledRustdeskController();
@@ -109,6 +111,7 @@ public class RemoteAssistAndroidBridge {
         status.put("notificationPermissionGranted", hasNotificationPermission());
         status.put("screenCapturePermissionGranted", screenCaptureGranted);
         status.put("accessibilityPermissionGranted", accessibilityGranted);
+        status.put("accessibilitySettingEnabled", accessibilitySettingEnabled);
         status.put("overlayPermissionGranted", overlayGranted);
         status.put("batteryOptimizationIgnored", batteryOptimizationIgnored);
         status.put("controllerAvailable", controllerAvailable);
@@ -254,20 +257,23 @@ public class RemoteAssistAndroidBridge {
         return manager != null && manager.isIgnoringBatteryOptimizations(activity.getPackageName());
     }
 
-    private boolean isAccessibilityEnabled() {
+    private boolean isAccessibilityConnected() {
+        return com.carriez.flutter_hbb.InputService.Companion.isOpen();
+    }
+
+    private boolean isAccessibilitySettingEnabled() {
         String enabledServices = Settings.Secure.getString(
                 activity.getContentResolver(),
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         );
         if (TextUtils.isEmpty(enabledServices)) {
-            return com.carriez.flutter_hbb.InputService.Companion.isOpen();
+            return false;
         }
         String expectedService = new ComponentName(
                 activity,
                 com.carriez.flutter_hbb.InputService.class
         ).flattenToString();
-        return enabledServices.contains(expectedService)
-                || com.carriez.flutter_hbb.InputService.Companion.isOpen();
+        return enabledServices.contains(expectedService);
     }
 
     private String readString(Object value) {

@@ -56,6 +56,11 @@ typedef HandleMsgBox = Function(Map<String, dynamic> evt, String id);
 typedef ReconnectHandle = Function(OverlayDialogManager, SessionID, bool);
 final _constSessionId = Uuid().v4obj();
 
+@visibleForTesting
+bool useDirectTouchModeForAndroidPeer(bool localIsAndroid) {
+  return !localIsAndroid;
+}
+
 class CachedPeerData {
   Map<String, dynamic> updatePrivacyMode = {};
   Map<String, dynamic> peerInfo = {};
@@ -1318,7 +1323,10 @@ class FfiModel with ChangeNotifier {
 
     final connType = parent.target?.connType;
     if (isPeerAndroid) {
-      _touchMode = true;
+      // Android -> Android falls back to the proven mouse-input path. The
+      // embedded Android controller cannot reliably control an Android peer
+      // through the forced direct-touch path.
+      _touchMode = useDirectTouchModeForAndroidPeer(isAndroid);
     } else {
       // `kOptionTouchMode` is originally peer option, but it is moved to local option later.
       // We check local option first, if not set, then check peer option.

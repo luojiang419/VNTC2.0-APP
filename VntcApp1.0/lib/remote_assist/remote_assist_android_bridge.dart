@@ -67,6 +67,7 @@ class RemoteAssistAndroidStatus {
     required this.notificationPermissionGranted,
     required this.screenCapturePermissionGranted,
     required this.accessibilityPermissionGranted,
+    required this.accessibilitySettingEnabled,
     required this.overlayPermissionGranted,
     required this.batteryOptimizationIgnored,
     required this.controllerAvailable,
@@ -85,6 +86,7 @@ class RemoteAssistAndroidStatus {
   final bool notificationPermissionGranted;
   final bool screenCapturePermissionGranted;
   final bool accessibilityPermissionGranted;
+  final bool accessibilitySettingEnabled;
   final bool overlayPermissionGranted;
   final bool batteryOptimizationIgnored;
   final bool controllerAvailable;
@@ -124,6 +126,7 @@ class RemoteAssistAndroidStatus {
           readBool('screenCapturePermissionGranted'),
       accessibilityPermissionGranted:
           readBool('accessibilityPermissionGranted'),
+      accessibilitySettingEnabled: readBool('accessibilitySettingEnabled'),
       overlayPermissionGranted: readBool('overlayPermissionGranted'),
       batteryOptimizationIgnored: readBool('batteryOptimizationIgnored'),
       controllerAvailable: readBool('controllerAvailable'),

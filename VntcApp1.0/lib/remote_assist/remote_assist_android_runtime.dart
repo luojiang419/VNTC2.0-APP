@@ -36,6 +36,7 @@ class RemoteAssistAndroidRuntime {
         await hbb_main.initEnv(kAppTypeMain);
         androidChannelInit();
         hbb_platform.platformFFI.syncAndroidServiceAppDirConfigPath();
+        await hbb_common.gFFI.invokeMethod('check_service');
         completer.complete();
       } catch (error, stackTrace) {
         _bootstrapCompleter = null;
@@ -44,6 +45,14 @@ class RemoteAssistAndroidRuntime {
     }();
 
     return completer.future;
+  }
+
+  Future<void> refreshState() async {
+    final alreadyInitialized = _bootstrapCompleter?.isCompleted ?? false;
+    await ensureInitialized();
+    if (alreadyInitialized) {
+      await hbb_common.gFFI.invokeMethod('check_service');
+    }
   }
 
   Future<void> configureAccessPassword(String password) async {
