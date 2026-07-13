@@ -1,0 +1,26 @@
+name: vntc-linux-webui
+
+services:
+  vntc:
+    image: vntc-linux-webui:${VNTC_VERSION:-4.5}
+    container_name: vntc-linux-webui
+    network_mode: host
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - NET_RAW
+    devices:
+      - /dev/net/tun:/dev/net/tun
+    environment:
+      RUST_LOG: ${RUST_LOG:-info}
+      VNTC_CONFIG: /data/config.json
+    volumes:
+      - ./data:/data
+    read_only: true
+    tmpfs:
+      - /tmp:rw,nosuid,nodev,noexec,size=16m
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    stop_grace_period: 15s

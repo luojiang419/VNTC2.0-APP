@@ -160,7 +160,7 @@ void main() {
     );
   });
 
-  test('Android remote assist remains explicitly hidden by default', () {
-    expect(RemoteAssistConstants.androidRemoteAssistEnabled, isFalse);
+  test('Android remote assist is enabled after native host wiring', () {
+    expect(RemoteAssistConstants.androidRemoteAssistEnabled, isTrue);
   });
 }

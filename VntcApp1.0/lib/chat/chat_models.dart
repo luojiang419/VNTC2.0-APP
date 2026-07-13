@@ -10,7 +10,7 @@ enum ChatMessageStatus { sending, sent, failed, missingAttachment }
 
 enum ChatAttachmentTransferPhase { preparing, uploading }
 
-enum ChatMainTab { hall, direct }
+enum ChatMainTab { hall, rooms, online, direct }
 
 class ChatAttachmentTransferProgress {
   const ChatAttachmentTransferProgress({
@@ -93,8 +93,26 @@ String chatEnumName(Object value) => _enumName(value);
 String buildHallId({
   required String connectServer,
   required String virtualNetwork,
+  String virtualNetmask = '',
 }) {
-  return 'hall:${normalizeChatConnectServer(connectServer)}|${virtualNetwork.trim()}';
+  return 'hall:${normalizeChatConnectServer(connectServer)}|${normalizeChatVirtualNetwork(virtualNetwork, virtualNetmask)}';
+}
+
+String normalizeChatVirtualNetwork(String value, [String netmask = '']) {
+  final address = value.trim().split('/').first;
+  final addressParts = address.split('.').map(int.tryParse).toList();
+  final maskParts = netmask.trim().split('.').map(int.tryParse).toList();
+  final validAddress = addressParts.length == 4 &&
+      addressParts.every((part) => part != null && part >= 0 && part <= 255);
+  final validMask = maskParts.length == 4 &&
+      maskParts.every((part) => part != null && part >= 0 && part <= 255);
+  if (!validAddress || !validMask) {
+    return value.trim().toLowerCase();
+  }
+  return List<String>.generate(
+    4,
+    (index) => (addressParts[index]! & maskParts[index]!).toString(),
+  ).join('.');
 }
 
 String buildLegacyChatHallId({

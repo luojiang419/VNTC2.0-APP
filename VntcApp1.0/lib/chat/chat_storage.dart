@@ -9,11 +9,9 @@ import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 
 class ChatStorage {
-  ChatStorage({
-    String? databasePath,
-    String? attachmentsDirectoryPath,
-  })  : _databasePath = databasePath,
-        _attachmentsDirectoryPath = attachmentsDirectoryPath;
+  ChatStorage({String? databasePath, String? attachmentsDirectoryPath})
+    : _databasePath = databasePath,
+      _attachmentsDirectoryPath = attachmentsDirectoryPath;
 
   final String? _databasePath;
   final String? _attachmentsDirectoryPath;
@@ -158,18 +156,13 @@ CREATE TABLE IF NOT EXISTS deleted_messages (
   }
 
   Future<String> _resolveDefaultDatabasePath() async {
-    return path.join(
-      await _resolveDefaultChatRootDirectoryPath(),
-      'chat.db',
-    );
+    return path.join(await _resolveDefaultChatRootDirectoryPath(), 'chat.db');
   }
 
   Future<String> ensureAttachmentsDirectory() async {
-    final directoryPath = _attachmentsDirectoryPath ??
-        path.join(
-          await _resolveDefaultChatRootDirectoryPath(),
-          'attachments',
-        );
+    final directoryPath =
+        _attachmentsDirectoryPath ??
+        path.join(await _resolveDefaultChatRootDirectoryPath(), 'attachments');
     final directory = Directory(directoryPath);
     if (!await directory.exists()) {
       await directory.create(recursive: true);
@@ -298,11 +291,7 @@ CREATE TABLE IF NOT EXISTS deleted_messages (
           conflictAlgorithm: ConflictAlgorithm.ignore,
         );
         if (updated == 0) {
-          await txn.delete(
-            'messages',
-            where: 'id = ?',
-            whereArgs: [messageId],
-          );
+          await txn.delete('messages', where: 'id = ?', whereArgs: [messageId]);
           await txn.delete(
             'attachments',
             where: 'message_id = ?',
@@ -316,14 +305,14 @@ CREATE TABLE IF NOT EXISTS deleted_messages (
         whereArgs: [sourceConversationId],
       );
 
-      final unreadRows = await txn.rawQuery('''
+      final unreadRows = await txn.rawQuery(
+        '''
 SELECT COUNT(*) AS total
 FROM messages
 WHERE conversation_id = ? AND direction = ? AND is_read = 0
-''', [
-        targetConversation.id,
-        chatEnumName(ChatMessageDirection.incoming),
-      ]);
+''',
+        [targetConversation.id, chatEnumName(ChatMessageDirection.incoming)],
+      );
       final unreadCount = unreadRows.isEmpty
           ? 0
           : int.tryParse('${unreadRows.first['total']}') ?? 0;
@@ -367,9 +356,7 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
     });
   }
 
-  Future<List<ChatRoomDescriptor>> loadRoomDescriptors({
-    String? hallId,
-  }) async {
+  Future<List<ChatRoomDescriptor>> loadRoomDescriptors({String? hallId}) async {
     final db = await _ensureDatabase();
     final rows = await db.query(
       'room_membership_cache',
@@ -419,16 +406,32 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
         .toList(growable: false);
   }
 
+  Future<bool> isMessageDeleted(ChatMessageRecord message) async {
+    final db = await _ensureDatabase();
+    final rows = await db.query(
+      'deleted_messages',
+      columns: const ['message_id'],
+      where: '''
+message_id = ? OR
+(conversation_id = ? AND sender_virtual_ip = ? AND sender_seq = ?)
+''',
+      whereArgs: [
+        message.id,
+        message.conversationId,
+        message.senderVirtualIp,
+        message.senderSeq,
+      ],
+      limit: 1,
+    );
+    return rows.isNotEmpty;
+  }
+
   Future<bool> deleteMessage(String messageId) async {
     final db = await _ensureDatabase();
     final result = await db.transaction<(bool, String?)>((txn) async {
       final messageRows = await txn.query(
         'messages',
-        columns: const [
-          'conversation_id',
-          'sender_virtual_ip',
-          'sender_seq',
-        ],
+        columns: const ['conversation_id', 'sender_virtual_ip', 'sender_seq'],
         where: 'id = ?',
         whereArgs: [messageId],
         limit: 1,
@@ -437,10 +440,10 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
         return (false, null);
       }
 
-      final conversationId =
-          (messageRows.first['conversation_id'] ?? '').toString();
-      final senderVirtualIp =
-          (messageRows.first['sender_virtual_ip'] ?? '').toString();
+      final conversationId = (messageRows.first['conversation_id'] ?? '')
+          .toString();
+      final senderVirtualIp = (messageRows.first['sender_virtual_ip'] ?? '')
+          .toString();
       final senderSeq = int.tryParse('${messageRows.first['sender_seq']}') ?? 0;
       final attachmentRows = await txn.query(
         'attachments',
@@ -453,42 +456,37 @@ WHERE conversation_id = ? AND direction = ? AND is_read = 0
           ? null
           : attachmentRows.first['relative_path']?.toString();
 
-      await txn.insert(
-        'deleted_messages',
-        {
-          'message_id': messageId,
-          'conversation_id': conversationId,
-          'sender_virtual_ip': senderVirtualIp,
-          'sender_seq': senderSeq,
-          'deleted_at': DateTime.now().millisecondsSinceEpoch,
-        },
-        conflictAlgorithm: ConflictAlgorithm.ignore,
-      );
+      await txn.insert('deleted_messages', {
+        'message_id': messageId,
+        'conversation_id': conversationId,
+        'sender_virtual_ip': senderVirtualIp,
+        'sender_seq': senderSeq,
+        'deleted_at': DateTime.now().millisecondsSinceEpoch,
+      }, conflictAlgorithm: ConflictAlgorithm.ignore);
 
       await txn.delete(
         'attachments',
         where: 'message_id = ?',
         whereArgs: [messageId],
       );
-      await txn.delete(
-        'messages',
-        where: 'id = ?',
-        whereArgs: [messageId],
-      );
+      await txn.delete('messages', where: 'id = ?', whereArgs: [messageId]);
 
-      final unreadRows = await txn.rawQuery('''
+      final unreadRows = await txn.rawQuery(
+        '''
 SELECT COUNT(*) AS total
 FROM messages
 WHERE conversation_id = ? AND direction = ? AND is_read = 0
-''', [
-        conversationId,
-        chatEnumName(ChatMessageDirection.incoming),
-      ]);
-      final latestRows = await txn.rawQuery('''
+''',
+        [conversationId, chatEnumName(ChatMessageDirection.incoming)],
+      );
+      final latestRows = await txn.rawQuery(
+        '''
 SELECT MAX(sent_at) AS latest
 FROM messages
 WHERE conversation_id = ?
-''', [conversationId]);
+''',
+        [conversationId],
+      );
       await txn.update(
         'conversations',
         {
@@ -515,6 +513,166 @@ WHERE conversation_id = ?
         }
       } on FileSystemException {
         // 消息已经删除，附件缓存被占用时留待后续缓存清理。
+      }
+    }
+    return result.$1;
+  }
+
+  Future<int> clearConversationMessages(String conversationId) async {
+    final db = await _ensureDatabase();
+    final result = await db.transaction<(int, List<String>)>((txn) async {
+      final messageRows = await txn.query(
+        'messages',
+        columns: const ['id', 'sender_virtual_ip', 'sender_seq'],
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+      final attachmentRows = await txn.rawQuery(
+        '''
+SELECT attachments.relative_path
+FROM attachments
+INNER JOIN messages ON messages.id = attachments.message_id
+WHERE messages.conversation_id = ?
+''',
+        [conversationId],
+      );
+
+      final deletedAt = DateTime.now().millisecondsSinceEpoch;
+      for (final messageRow in messageRows) {
+        await txn.insert('deleted_messages', {
+          'message_id': (messageRow['id'] ?? '').toString(),
+          'conversation_id': conversationId,
+          'sender_virtual_ip': (messageRow['sender_virtual_ip'] ?? '')
+              .toString(),
+          'sender_seq': int.tryParse('${messageRow['sender_seq']}') ?? 0,
+          'deleted_at': deletedAt,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+
+      await txn.rawDelete(
+        '''
+DELETE FROM attachments
+WHERE message_id IN (
+  SELECT id FROM messages WHERE conversation_id = ?
+)
+''',
+        [conversationId],
+      );
+      final deletedCount = await txn.delete(
+        'messages',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+      await txn.update(
+        'conversations',
+        {'unread_count': 0, 'last_message_at': 0, 'updated_at': deletedAt},
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+
+      return (
+        deletedCount,
+        attachmentRows
+            .map((row) => row['relative_path']?.toString().trim() ?? '')
+            .where((relativePath) => relativePath.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+      );
+    });
+
+    for (final relativePath in result.$2) {
+      try {
+        final attachmentFile = File(await resolveAttachmentPath(relativePath));
+        if (await attachmentFile.exists()) {
+          await attachmentFile.delete();
+        }
+      } on FileSystemException {
+        // 聊天记录已经清空，附件被占用时留待后续缓存清理。
+      }
+    }
+    return result.$1;
+  }
+
+  Future<bool> deleteConversation(String conversationId) async {
+    final db = await _ensureDatabase();
+    final result = await db.transaction<(bool, List<String>)>((txn) async {
+      final conversationRows = await txn.query(
+        'conversations',
+        columns: const ['id'],
+        where: 'id = ?',
+        whereArgs: [conversationId],
+        limit: 1,
+      );
+      if (conversationRows.isEmpty) {
+        return (false, const <String>[]);
+      }
+
+      final messageRows = await txn.query(
+        'messages',
+        columns: const ['id', 'sender_virtual_ip', 'sender_seq'],
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+      final attachmentRows = await txn.rawQuery(
+        '''
+SELECT attachments.relative_path
+FROM attachments
+INNER JOIN messages ON messages.id = attachments.message_id
+WHERE messages.conversation_id = ?
+''',
+        [conversationId],
+      );
+
+      final deletedAt = DateTime.now().millisecondsSinceEpoch;
+      for (final messageRow in messageRows) {
+        await txn.insert('deleted_messages', {
+          'message_id': (messageRow['id'] ?? '').toString(),
+          'conversation_id': conversationId,
+          'sender_virtual_ip': (messageRow['sender_virtual_ip'] ?? '')
+              .toString(),
+          'sender_seq': int.tryParse('${messageRow['sender_seq']}') ?? 0,
+          'deleted_at': deletedAt,
+        }, conflictAlgorithm: ConflictAlgorithm.ignore);
+      }
+
+      await txn.rawDelete(
+        '''
+DELETE FROM attachments
+WHERE message_id IN (
+  SELECT id FROM messages WHERE conversation_id = ?
+)
+''',
+        [conversationId],
+      );
+      await txn.delete(
+        'messages',
+        where: 'conversation_id = ?',
+        whereArgs: [conversationId],
+      );
+      final deletedCount = await txn.delete(
+        'conversations',
+        where: 'id = ?',
+        whereArgs: [conversationId],
+      );
+
+      return (
+        deletedCount > 0,
+        attachmentRows
+            .map((row) => row['relative_path']?.toString().trim() ?? '')
+            .where((relativePath) => relativePath.isNotEmpty)
+            .toSet()
+            .toList(growable: false),
+      );
+    });
+
+    for (final relativePath in result.$2) {
+      try {
+        final attachmentFile = File(await resolveAttachmentPath(relativePath));
+        if (await attachmentFile.exists()) {
+          await attachmentFile.delete();
+        }
+      } on FileSystemException {
+        // 会话已经删除，附件被占用时留待后续缓存清理。
       }
     }
     return result.$1;
@@ -636,11 +794,7 @@ message_id = ? OR
     await db.transaction((txn) async {
       await txn.update(
         'conversations',
-        {
-          'unread_count': 0,
-          'last_read_at': timestamp,
-          'updated_at': timestamp,
-        },
+        {'unread_count': 0, 'last_read_at': timestamp, 'updated_at': timestamp},
         where: 'id = ?',
         whereArgs: [conversationId],
       );
@@ -650,7 +804,7 @@ message_id = ? OR
         where: 'conversation_id = ? AND direction = ?',
         whereArgs: [
           conversationId,
-          chatEnumName(ChatMessageDirection.incoming)
+          chatEnumName(ChatMessageDirection.incoming),
         ],
       );
     });
@@ -658,11 +812,14 @@ message_id = ? OR
 
   Future<int> loadPrivateUnreadTotal() async {
     final db = await _ensureDatabase();
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT SUM(unread_count) AS total
 FROM conversations
 WHERE type = ?
-''', [chatEnumName(ChatConversationType.direct)]);
+''',
+      [chatEnumName(ChatConversationType.direct)],
+    );
     if (rows.isEmpty) {
       return 0;
     }
@@ -674,7 +831,8 @@ WHERE type = ?
     String senderVirtualIp,
   ) async {
     final db = await _ensureDatabase();
-    final rows = await db.rawQuery('''
+    final rows = await db.rawQuery(
+      '''
 SELECT MAX(sender_seq) AS max_seq
 FROM (
   SELECT sender_seq FROM messages
@@ -683,9 +841,12 @@ FROM (
   SELECT sender_seq FROM deleted_messages
   WHERE conversation_id = ? AND sender_virtual_ip = ?
 )
-''', [conversationId, senderVirtualIp, conversationId, senderVirtualIp]);
-    final current =
-        rows.isEmpty ? 0 : int.tryParse('${rows.first['max_seq']}') ?? 0;
+''',
+      [conversationId, senderVirtualIp, conversationId, senderVirtualIp],
+    );
+    final current = rows.isEmpty
+        ? 0
+        : int.tryParse('${rows.first['max_seq']}') ?? 0;
     return current + 1;
   }
 
@@ -695,7 +856,8 @@ FROM (
     final db = await _ensureDatabase();
     final result = <String, Map<String, int>>{};
     for (final conversationId in conversationIds.toSet()) {
-      final rows = await db.rawQuery('''
+      final rows = await db.rawQuery(
+        '''
 SELECT sender_virtual_ip, MAX(sender_seq) AS max_seq
 FROM (
   SELECT sender_virtual_ip, sender_seq FROM messages
@@ -705,7 +867,9 @@ FROM (
   WHERE conversation_id = ?
 )
 GROUP BY sender_virtual_ip
-''', [conversationId, conversationId]);
+''',
+        [conversationId, conversationId],
+      );
       final senderMap = <String, int>{};
       for (final row in rows) {
         senderMap[(row['sender_virtual_ip'] ?? '').toString()] =
@@ -847,10 +1011,9 @@ GROUP BY sender_virtual_ip
   }) {
     final segments = _validateAttachmentRelativePath(relativePath);
     final rootPath = path.canonicalize(path.absolute(attachmentsDir));
-    final targetPath = path.normalize(path.joinAll(<String>[
-      rootPath,
-      ...segments,
-    ]));
+    final targetPath = path.normalize(
+      path.joinAll(<String>[rootPath, ...segments]),
+    );
     final relativeToRoot = path.relative(targetPath, from: rootPath);
     if (relativeToRoot == '.' ||
         relativeToRoot.startsWith('..${path.separator}') ||
@@ -872,11 +1035,7 @@ GROUP BY sender_virtual_ip
         path.isAbsolute(value) ||
         path.windows.isAbsolute(value) ||
         path.posix.isAbsolute(value)) {
-      throw ArgumentError.value(
-        relativePath,
-        'relativePath',
-        '附件路径必须是非空相对路径',
-      );
+      throw ArgumentError.value(relativePath, 'relativePath', '附件路径必须是非空相对路径');
     }
 
     final normalizedSeparators = value.replaceAll('\\', '/');
@@ -888,11 +1047,7 @@ GROUP BY sender_virtual_ip
           segment == '..' ||
           segment.contains(':'),
     )) {
-      throw ArgumentError.value(
-        relativePath,
-        'relativePath',
-        '附件路径包含非法片段',
-      );
+      throw ArgumentError.value(relativePath, 'relativePath', '附件路径包含非法片段');
     }
     return segments;
   }
@@ -904,16 +1059,12 @@ GROUP BY sender_virtual_ip
   }) async {
     final db = await _ensureDatabase();
     final timestamp = timestampEpochMs ?? DateTime.now().millisecondsSinceEpoch;
-    await db.insert(
-      'sync_checkpoints',
-      {
-        'peer_key': peerKey,
-        'hall_id': hallId,
-        'last_sync_at': timestamp,
-        'updated_at': timestamp,
-      },
-      conflictAlgorithm: ConflictAlgorithm.replace,
-    );
+    await db.insert('sync_checkpoints', {
+      'peer_key': peerKey,
+      'hall_id': hallId,
+      'last_sync_at': timestamp,
+      'updated_at': timestamp,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
   }
 
   Future<Map<String, int>> loadSyncCheckpoints() async {

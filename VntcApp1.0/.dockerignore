@@ -1,0 +1,22 @@
+**
+!LICENSE
+!linux_webui/
+!linux_webui/Cargo.toml
+!linux_webui/Cargo.lock
+!linux_webui/src/
+!linux_webui/src/**
+!linux_webui/web/
+!linux_webui/web/**
+!linux_webui/docker/
+!linux_webui/docker/**
+!vendor/
+!vendor/vnt-core-2.0.0/
+!vendor/vnt-core-2.0.0/**
+!vendor/tun-rs-2.5.7/
+!vendor/tun-rs-2.5.7/**
+
+# Exclude local build and VCS caches after the source allow-list above.
+**/target
+**/target/**
+**/.git
+**/.git/**

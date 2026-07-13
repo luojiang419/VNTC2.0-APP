@@ -2,17 +2,37 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/chat/chat_manager.dart';
 
 void main() {
-  test('chat supports Windows and macOS desktop platforms', () {
+  test('chat supports Windows, macOS, and Android platforms', () {
     expect(
-      isChatSupportedPlatform(isWindows: true, isMacOS: false),
+      isChatSupportedPlatform(
+        isWindows: true,
+        isMacOS: false,
+        isAndroid: false,
+      ),
       isTrue,
     );
     expect(
-      isChatSupportedPlatform(isWindows: false, isMacOS: true),
+      isChatSupportedPlatform(
+        isWindows: false,
+        isMacOS: true,
+        isAndroid: false,
+      ),
       isTrue,
     );
     expect(
-      isChatSupportedPlatform(isWindows: false, isMacOS: false),
+      isChatSupportedPlatform(
+        isWindows: false,
+        isMacOS: false,
+        isAndroid: true,
+      ),
+      isTrue,
+    );
+    expect(
+      isChatSupportedPlatform(
+        isWindows: false,
+        isMacOS: false,
+        isAndroid: false,
+      ),
       isFalse,
     );
   });

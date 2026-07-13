@@ -79,6 +79,22 @@ void main() {
     expect(tcpHallId, 'hall:115.231.35.105:2225|10.10.10.0');
   });
 
+  test('同一服务器和同一子网忽略本机地址与配置名称差异', () {
+    final firstHallId = buildHallId(
+      connectServer: 'quic://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.4',
+      virtualNetmask: '255.255.255.0',
+    );
+    final secondHallId = buildHallId(
+      connectServer: 'tcp://115.231.35.105:2225',
+      virtualNetwork: '10.10.10.200',
+      virtualNetmask: '255.255.255.0',
+    );
+
+    expect(firstHallId, secondHallId);
+    expect(firstHallId, 'hall:115.231.35.105:2225|10.10.10.0');
+  });
+
   test('动态地址与txt前缀会归一化到同一大厅ID', () {
     final txtHallId = buildHallId(
       connectServer: 'txt:115.231.35.105:2225',

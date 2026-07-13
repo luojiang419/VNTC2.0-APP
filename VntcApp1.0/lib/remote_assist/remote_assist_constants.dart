@@ -32,7 +32,7 @@ class RemoteAssistConstants {
   static const String capabilityController = 'remote_assist_controller';
   static const String capabilityControlled = 'remote_assist_controlled';
 
-  static const bool androidRemoteAssistEnabled = false;
+  static const bool androidRemoteAssistEnabled = true;
 
   static const String androidPermissionNotification = 'notification';
   static const String androidPermissionScreenCapture = 'screen_capture';

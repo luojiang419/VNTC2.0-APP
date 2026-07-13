@@ -591,7 +591,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   Future<void> _checkForStartupUpdate() async {
-    if (!Platform.isWindows) {
+    if (!supportsStartupUpdateCheck(resolveCurrentUpdatePlatform())) {
       return;
     }
 

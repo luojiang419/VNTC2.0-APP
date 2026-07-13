@@ -129,6 +129,11 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
   }
 
   @override
+  Future<String> loadAccessPassword() {
+    return _runtime.loadAccessPassword();
+  }
+
+  @override
   Future<void> repair({
     required List<String> remoteCidrs,
   }) async {

@@ -1,8 +1,24 @@
 plugins {
+    id "com.google.protobuf" version "0.9.4"
     id "com.android.application"
     id "kotlin-android"
     // The Flutter Gradle Plugin must be applied after the Android and Kotlin Gradle plugins.
     id "dev.flutter.flutter-gradle-plugin"
+}
+
+protobuf {
+    protoc {
+        artifact = 'com.google.protobuf:protoc:3.20.1'
+    }
+    generateProtoTasks {
+        all().configureEach { task ->
+            task.builtins {
+                java {
+                    option "lite"
+                }
+            }
+        }
+    }
 }
 
 def localProperties = new Properties()
@@ -48,7 +64,7 @@ android {
         versionCode = flutter.versionCode
         versionName = flutter.versionName
         ndk {
-            abiFilters "armeabi-v7a", "arm64-v8a", "x86", "x86_64"
+            abiFilters "arm64-v8a"
         }
     }
 
@@ -64,11 +80,19 @@ android {
             // 主业务 Rust so 继续由 rust_builder/CargoKit 的 buildType sourceSet 注入，
             // 这里额外挂入内置远控控制端 so。
             jniLibs.srcDirs = ['src/main/rustdeskJniLibs']
+            java.srcDirs += '../../vntcrustdesk-src/flutter/android/app/src/main/kotlin'
+            proto.srcDirs += '../../vntcrustdesk-src/libs/hbb_common/protos'
+            proto.includes += 'message.proto'
         }
     }
     packagingOptions {
         jniLibs {
             pickFirsts += ['**/libc++_shared.so']
+            excludes += [
+                'lib/armeabi-v7a/**',
+                'lib/x86/**',
+                'lib/x86_64/**'
+            ]
         }
     }
 }
@@ -77,6 +101,10 @@ dependencies {
     // 添加AndroidX核心库，确保FileProvider正常工作
     implementation 'androidx.core:core:1.12.0'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.5'
+    implementation 'com.google.protobuf:protobuf-javalite:3.20.1'
+    implementation 'androidx.media:media:1.6.0'
+    implementation 'com.github.getActivity:XXPermissions:18.5'
+    implementation 'com.caverock:androidsvg-aar:1.4'
 }
 
 flutter {

@@ -39,6 +39,12 @@ migrate_working_dir/
 /third_party/vntcrustdesk/macos/dist/
 /configure-access-password/
 /rust/target/
+/linux_webui/target/
+
+# 本地构建日志与发布产物（仅推送源码）
+/build_logs/
+/release/
+/vntcrustdesk-src/artifacts/
 /android/.kotlin/
 /windows/flutter/generated_config.cmake
 /linux/flutter/ephemeral/

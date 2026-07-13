@@ -1,5 +1,7 @@
 package com.carriez.flutter_hbb
 
+import top.wherewego.vnt_app.R
+
 import android.annotation.SuppressLint
 import android.app.PendingIntent
 import android.app.Service

@@ -10,10 +10,36 @@ import 'package:record/record.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/chat/chat_models.dart';
+import 'package:vnt_app/chat/chat_security.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:url_launcher/url_launcher.dart';
+
+bool isCompactChatWindow({required double width, required double height}) {
+  return width < 900 || height < 700;
+}
+
+bool usesCompactChatNavigation({
+  required double width,
+  required double height,
+}) {
+  return width < 900 || height < 700;
+}
+
+bool usesSinglePanelChatLayout({
+  required double width,
+  required double height,
+}) {
+  return width < 980 || height < 620;
+}
+
+bool usesMobileDirectConversationSwipe({
+  required double width,
+  required double height,
+}) {
+  return (width < height ? width : height) < 600;
+}
 
 class ChatPage extends StatefulWidget {
   const ChatPage({super.key});
@@ -29,19 +55,23 @@ class _ChatPageState extends State<ChatPage>
   final AudioPlayer _audioPlayer = AudioPlayer();
   final AudioRecorder _audioRecorder = AudioRecorder();
   late final TabController _tabController;
+  int _lastHandledTabIndex = 0;
   bool _isRecording = false;
   DateTime? _recordingStartedAt;
   String? _playingAttachmentId;
+  final Set<String> _pendingDeletedConversationIds = {};
 
   @override
   void initState() {
     super.initState();
-    _tabController = TabController(length: 2, vsync: this);
+    _tabController = TabController(
+      length: ChatMainTab.values.length,
+      vsync: this,
+    );
     _tabController.addListener(() {
-      if (_tabController.indexIsChanging) {
-        _manager.selectTab(
-          _tabController.index == 0 ? ChatMainTab.hall : ChatMainTab.direct,
-        );
+      if (_tabController.index != _lastHandledTabIndex) {
+        _lastHandledTabIndex = _tabController.index;
+        _manager.selectTab(ChatMainTab.values[_tabController.index]);
       }
     });
     _audioPlayer.playerStateStream.listen((state) {
@@ -73,8 +103,18 @@ class _ChatPageState extends State<ChatPage>
   @override
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final targetTabIndex = _manager.selectedTab == ChatMainTab.hall ? 0 : 1;
+    final windowSize = MediaQuery.sizeOf(context);
+    final compactLayout = isCompactChatWindow(
+      width: windowSize.width,
+      height: windowSize.height,
+    );
+    final compactNavigation = usesCompactChatNavigation(
+      width: windowSize.width,
+      height: windowSize.height,
+    );
+    final targetTabIndex = _manager.selectedTab.index;
     if (_tabController.index != targetTabIndex) {
+      _lastHandledTabIndex = targetTabIndex;
       _tabController.index = targetTabIndex;
     }
 
@@ -92,35 +132,53 @@ class _ChatPageState extends State<ChatPage>
             return Column(
               children: [
                 Padding(
-                  padding: EdgeInsets.all(context.spacingLarge),
-                  child: _buildHeader(context, isDark),
-                ),
-                Container(
-                  margin:
-                      EdgeInsets.symmetric(horizontal: context.spacingLarge),
-                  child: TabBar(
-                    controller: _tabController,
-                    labelColor: Theme.of(context).primaryColor,
-                    unselectedLabelColor: isDark
-                        ? AppTheme.darkTextSecondary
-                        : AppTheme.lightTextSecondary,
-                    dividerColor: isDark
-                        ? Colors.white.withValues(alpha: 0.05)
-                        : Colors.black.withValues(alpha: 0.05),
-                    indicatorColor: Theme.of(context).primaryColor,
-                    indicatorSize: TabBarIndicatorSize.tab,
-                    tabs: [
-                      const Tab(text: '大厅'),
-                      Tab(
-                        child: _buildDirectTabLabel(
-                          context,
-                          isDark,
-                          unreadCount: _manager.privateUnreadTotal,
-                        ),
-                      ),
-                    ],
+                  padding: EdgeInsets.all(
+                    compactLayout ? context.spacingSmall : context.spacingLarge,
+                  ),
+                  child: _buildHeader(
+                    context,
+                    isDark,
+                    compact: compactLayout,
+                    showNavigationMenu: compactNavigation,
                   ),
                 ),
+                if (!compactNavigation)
+                  Container(
+                    margin: EdgeInsets.symmetric(
+                      horizontal: context.spacingLarge,
+                    ),
+                    child: Row(
+                      children: [
+                        Expanded(
+                          child: TabBar(
+                            controller: _tabController,
+                            tabAlignment: TabAlignment.fill,
+                            labelColor: Theme.of(context).primaryColor,
+                            unselectedLabelColor: isDark
+                                ? AppTheme.darkTextSecondary
+                                : AppTheme.lightTextSecondary,
+                            dividerColor: isDark
+                                ? Colors.white.withValues(alpha: 0.05)
+                                : Colors.black.withValues(alpha: 0.05),
+                            indicatorColor: Theme.of(context).primaryColor,
+                            indicatorSize: TabBarIndicatorSize.tab,
+                            tabs: [
+                              const Tab(text: '大厅'),
+                              const Tab(text: '房间'),
+                              const Tab(text: '在线'),
+                              Tab(
+                                child: _buildDirectTabLabel(
+                                  context,
+                                  isDark,
+                                  unreadCount: _manager.privateUnreadTotal,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
                 Expanded(
                   child: _manager.loading && _manager.halls.isEmpty
                       ? const Center(child: CircularProgressIndicator())
@@ -128,6 +186,8 @@ class _ChatPageState extends State<ChatPage>
                           controller: _tabController,
                           children: [
                             _buildHallTab(context, isDark),
+                            _buildRoomsTab(context, isDark),
+                            _buildOnlineTab(context, isDark),
                             _buildDirectTab(context, isDark),
                           ],
                         ),
@@ -140,25 +200,32 @@ class _ChatPageState extends State<ChatPage>
     );
   }
 
-  Widget _buildHeader(BuildContext context, bool isDark) {
+  Widget _buildHeader(
+    BuildContext context,
+    bool isDark, {
+    required bool compact,
+    required bool showNavigationMenu,
+  }) {
     final primaryColor = Theme.of(context).primaryColor;
     return Row(
       children: [
         Container(
-          width: context.iconXLarge,
-          height: context.iconXLarge,
+          width: compact ? context.iconLarge : context.iconXLarge,
+          height: compact ? context.iconLarge : context.iconXLarge,
           decoration: BoxDecoration(
             gradient: LinearGradient(
               colors: [primaryColor, primaryColor.withValues(alpha: 0.75)],
               begin: Alignment.topLeft,
               end: Alignment.bottomRight,
             ),
-            borderRadius: BorderRadius.circular(context.cardRadius),
+            borderRadius: BorderRadius.circular(
+              compact ? context.radius(10) : context.cardRadius,
+            ),
           ),
           child: Icon(
             Icons.forum,
             color: Colors.white,
-            size: context.iconLarge,
+            size: compact ? context.iconMedium : context.iconLarge,
           ),
         ),
         SizedBox(width: context.spacingMedium),
@@ -176,15 +243,16 @@ class _ChatPageState extends State<ChatPage>
                       : AppTheme.lightTextPrimary,
                 ),
               ),
-              Text(
-                '基于 VNT 虚拟组网的大厅、房间与在线私聊',
-                style: TextStyle(
-                  fontSize: context.fontBody,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
+              if (!compact)
+                Text(
+                  '基于 VNT 虚拟组网的大厅、房间与在线私聊',
+                  style: TextStyle(
+                    fontSize: context.fontBody,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
                 ),
-              ),
             ],
           ),
         ),
@@ -201,8 +269,79 @@ class _ChatPageState extends State<ChatPage>
                 isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
           ),
         ),
+        if (showNavigationMenu) _buildCompactNavigationMenu(context, isDark),
       ],
     );
+  }
+
+  Widget _buildCompactNavigationMenu(BuildContext context, bool isDark) {
+    final selectedTab = _manager.selectedTab;
+    return PopupMenuButton<ChatMainTab>(
+      initialValue: selectedTab,
+      onSelected: _selectMainTab,
+      tooltip: '切换聊天页面',
+      icon: Icon(
+        Icons.menu_rounded,
+        color: isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+      ),
+      itemBuilder: (context) => ChatMainTab.values.map((tab) {
+        final unreadCount =
+            tab == ChatMainTab.direct ? _manager.privateUnreadTotal : 0;
+        return PopupMenuItem<ChatMainTab>(
+          value: tab,
+          child: Row(
+            children: [
+              SizedBox(
+                width: context.iconLarge,
+                child: Icon(
+                  tab == selectedTab ? Icons.check_rounded : _tabIcon(tab),
+                  size: context.iconMedium,
+                  color: tab == selectedTab
+                      ? Theme.of(context).primaryColor
+                      : null,
+                ),
+              ),
+              SizedBox(width: context.spacingSmall),
+              Expanded(child: Text(_tabLabel(tab))),
+              if (unreadCount > 0)
+                Text(
+                  unreadCount > 99 ? '99+' : '$unreadCount',
+                  style: const TextStyle(
+                    color: Colors.red,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  void _selectMainTab(ChatMainTab tab) {
+    _lastHandledTabIndex = tab.index;
+    _manager.selectTab(tab);
+    if (_tabController.index != tab.index) {
+      _tabController.animateTo(tab.index);
+    }
+  }
+
+  String _tabLabel(ChatMainTab tab) {
+    return switch (tab) {
+      ChatMainTab.hall => '大厅',
+      ChatMainTab.rooms => '房间',
+      ChatMainTab.online => '在线',
+      ChatMainTab.direct => '私聊',
+    };
+  }
+
+  IconData _tabIcon(ChatMainTab tab) {
+    return switch (tab) {
+      ChatMainTab.hall => Icons.public_rounded,
+      ChatMainTab.rooms => Icons.meeting_room_outlined,
+      ChatMainTab.online => Icons.people_outline_rounded,
+      ChatMainTab.direct => Icons.chat_bubble_outline_rounded,
+    };
   }
 
   Widget _buildDirectTabLabel(
@@ -263,50 +402,115 @@ class _ChatPageState extends State<ChatPage>
 
     final selectedHallId = _manager.selectedHallId ?? _manager.halls.first.id;
     final selectedConversation = _resolveHallConversation(selectedHallId);
-    final layoutIsWide = MediaQuery.of(context).size.width >= 1080;
     final startupIssue = _manager.chatStartupIssue;
-
-    if (layoutIsWide) {
-      return Column(
-        children: [
-          if (startupIssue != null)
-            _buildStartupIssueBanner(context, isDark, startupIssue),
-          Expanded(
-            child: Row(
-              children: [
-                SizedBox(
-                  width: context.w(280),
-                  child: _buildHallUsersPanel(context, isDark, selectedHallId),
-                ),
-                Expanded(
-                  child: _buildHallContent(
-                    context,
-                    isDark,
-                    selectedHallId,
-                    selectedConversation,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        ],
-      );
-    }
 
     return Column(
       children: [
         if (startupIssue != null)
           _buildStartupIssueBanner(context, isDark, startupIssue),
-        SizedBox(
-          height: context.w(220),
-          child: _buildHallUsersPanel(context, isDark, selectedHallId),
-        ),
         Expanded(
-          child: _buildHallContent(
-            context,
-            isDark,
-            selectedHallId,
-            selectedConversation,
+          child: _buildHallContent(context, isDark, selectedConversation),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildOnlineTab(BuildContext context, bool isDark) {
+    if (_manager.halls.isEmpty) {
+      return _buildEmptyState(
+        context,
+        isDark,
+        title: '暂无在线用户',
+        message: '连接 VNT 虚拟组网后，这里会显示同一大厅内可私聊的用户。',
+        icon: Icons.people_outline,
+      );
+    }
+    final selectedHallId = _manager.selectedHallId ?? _manager.halls.first.id;
+    return Column(
+      children: [
+        _buildHallCardStrip(context, isDark, selectedHallId),
+        Expanded(child: _buildHallUsersPanel(context, isDark, selectedHallId)),
+      ],
+    );
+  }
+
+  Widget _buildRoomsTab(BuildContext context, bool isDark) {
+    if (_manager.halls.isEmpty) {
+      return _buildEmptyState(
+        context,
+        isDark,
+        title: '暂无群组房间',
+        message: '先连接 VNT 虚拟组网，再使用房间页右下角“＋”创建房间。',
+        icon: Icons.meeting_room_outlined,
+      );
+    }
+    final selectedHallId = _manager.selectedHallId ?? _manager.halls.first.id;
+    final selected = _manager.selectedConversation;
+    final selectedRoom = selected?.hallId == selectedHallId &&
+            selected?.type == ChatConversationType.room
+        ? selected
+        : null;
+    final windowSize = MediaQuery.sizeOf(context);
+    final compact = usesSinglePanelChatLayout(
+      width: windowSize.width,
+      height: windowSize.height,
+    );
+    if (compact && selectedRoom != null) {
+      return _buildConversationPanel(
+        context,
+        isDark,
+        selectedRoom,
+        emptyTitle: '请选择群组房间',
+        emptyMessage: '选择已加入的房间，或加入同一大厅内其他用户创建的房间。',
+        onBack: () =>
+            _manager.clearSelectedConversation(type: ChatConversationType.room),
+      );
+    }
+    final content = compact
+        ? Column(
+            children: [
+              _buildHallCardStrip(context, isDark, selectedHallId),
+              Expanded(
+                child: SingleChildScrollView(
+                  child: _buildRoomStrip(
+                    context,
+                    isDark,
+                    selectedHallId,
+                    selectedRoom,
+                  ),
+                ),
+              ),
+            ],
+          )
+        : Column(
+            children: [
+              _buildHallCardStrip(context, isDark, selectedHallId),
+              _buildRoomStrip(context, isDark, selectedHallId, selectedRoom),
+              Expanded(
+                child: _buildConversationPanel(
+                  context,
+                  isDark,
+                  selectedRoom,
+                  emptyTitle: '请选择群组房间',
+                  emptyMessage: '选择已加入的房间，或加入同一大厅内其他用户创建的房间。',
+                ),
+              ),
+            ],
+          );
+    final actionBottom = selectedRoom == null
+        ? context.spacingLarge
+        : context.spacingLarge + context.w(88);
+    return Stack(
+      children: [
+        Positioned.fill(child: content),
+        Positioned(
+          right: context.spacingLarge,
+          bottom: actionBottom,
+          child: FloatingActionButton.small(
+            heroTag: 'chat-create-room',
+            onPressed: () => _showCreateRoomDialog(selectedHallId),
+            tooltip: '创建房间',
+            child: const Icon(Icons.add_rounded),
           ),
         ),
       ],
@@ -511,28 +715,14 @@ class _ChatPageState extends State<ChatPage>
   Widget _buildHallContent(
     BuildContext context,
     bool isDark,
-    String selectedHallId,
     ChatConversation? selectedConversation,
   ) {
-    return Column(
-      children: [
-        _buildHallCardStrip(context, isDark, selectedHallId),
-        _buildRoomStrip(
-          context,
-          isDark,
-          selectedHallId,
-          selectedConversation,
-        ),
-        Expanded(
-          child: _buildConversationPanel(
-            context,
-            isDark,
-            selectedConversation,
-            emptyTitle: '请选择大厅或房间',
-            emptyMessage: '点击一个公共大厅卡片，或创建/加入一个自定义聊天室开始聊天。',
-          ),
-        ),
-      ],
+    return _buildConversationPanel(
+      context,
+      isDark,
+      selectedConversation,
+      emptyTitle: '暂无公共大厅会话',
+      emptyMessage: '连接 VNT 虚拟组网后即可进入公共大厅聊天。',
     );
   }
 
@@ -648,30 +838,9 @@ class _ChatPageState extends State<ChatPage>
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                '自定义聊天室',
-                style: TextStyle(
-                  fontSize: context.fontMedium,
-                  fontWeight: FontWeight.w700,
-                  color: isDark
-                      ? AppTheme.darkTextPrimary
-                      : AppTheme.lightTextPrimary,
-                ),
-              ),
-              const Spacer(),
-              TextButton.icon(
-                onPressed: () => _showCreateRoomDialog(selectedHallId),
-                icon: const Icon(Icons.add_circle_outline),
-                label: const Text('创建聊天室'),
-              ),
-            ],
-          ),
-          SizedBox(height: context.spacingSmall),
           if (rooms.isEmpty)
             Text(
-              '当前大厅还没有自定义聊天室，创建一个后其他在线用户就能自由加入。',
+              '暂无房间，请使用右下角“＋”创建。',
               style: TextStyle(
                 fontSize: context.fontSmall,
                 color: isDark
@@ -680,70 +849,246 @@ class _ChatPageState extends State<ChatPage>
               ),
             )
           else
-            Wrap(
-              spacing: context.spacingSmall,
-              runSpacing: context.spacingSmall,
-              children: rooms.map((room) {
-                final isSelected = selectedConversation?.id == room.roomId;
-                return ActionChip(
-                  backgroundColor: isSelected
-                      ? Theme.of(context).primaryColor.withValues(alpha: 0.14)
-                      : (isDark
-                          ? Colors.white.withValues(alpha: 0.04)
-                          : Colors.black.withValues(alpha: 0.02)),
-                  side: BorderSide(
-                    color: room.isActive
-                        ? Theme.of(context).primaryColor.withValues(alpha: 0.25)
-                        : Colors.grey.withValues(alpha: 0.20),
-                  ),
-                  avatar: Icon(
-                    room.isActive ? Icons.meeting_room : Icons.history,
-                    size: context.iconSmall,
-                    color: room.isActive
-                        ? Theme.of(context).primaryColor
-                        : Colors.grey,
-                  ),
-                  label: Text(
-                    room.locallyJoined
-                        ? '${room.roomName} (已加入)'
-                        : room.roomName,
-                    style: TextStyle(
-                      fontSize: context.fontSmall,
-                      color: isDark
-                          ? AppTheme.darkTextPrimary
-                          : AppTheme.lightTextPrimary,
-                    ),
-                  ),
-                  onPressed: () async {
-                    if (!room.locallyJoined) {
-                      await _manager.joinRoom(room);
-                      if (!mounted) {
-                        return;
-                      }
-                      showTopToast(
-                        this.context,
-                        '已加入 ${room.roomName}',
-                        isSuccess: true,
-                      );
-                    } else {
-                      await _manager.openConversation(room.roomId);
-                    }
-                  },
+            LayoutBuilder(
+              builder: (context, constraints) {
+                final columnCount = constraints.maxWidth >= 900
+                    ? 3
+                    : constraints.maxWidth >= 560
+                        ? 2
+                        : 1;
+                final cardWidth = (constraints.maxWidth -
+                        context.spacingSmall * (columnCount - 1)) /
+                    columnCount;
+                return Wrap(
+                  spacing: context.spacingSmall,
+                  runSpacing: context.spacingSmall,
+                  children: rooms
+                      .map(
+                        (room) => SizedBox(
+                          width: cardWidth,
+                          child: _buildRoomCard(
+                            context,
+                            isDark,
+                            room,
+                            isSelected: selectedConversation?.id == room.roomId,
+                          ),
+                        ),
+                      )
+                      .toList(growable: false),
                 );
-              }).toList(growable: false),
+              },
             ),
         ],
       ),
     );
   }
 
+  Widget _buildRoomCard(
+    BuildContext context,
+    bool isDark,
+    ChatRoomDescriptor room, {
+    required bool isSelected,
+  }) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final requiresPassword = chatRoomRequiresPassword(room.metadataJson);
+    return Card(
+      key: ValueKey('chat-room-card-${room.roomId}'),
+      margin: EdgeInsets.zero,
+      elevation: isSelected ? 2 : 0,
+      color: isSelected
+          ? primaryColor.withValues(alpha: isDark ? 0.16 : 0.08)
+          : (isDark
+              ? Colors.white.withValues(alpha: 0.035)
+              : Colors.black.withValues(alpha: 0.018)),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(context.cardRadius),
+        side: BorderSide(
+          color: isSelected
+              ? primaryColor.withValues(alpha: 0.65)
+              : room.isActive
+                  ? primaryColor.withValues(alpha: 0.25)
+                  : Colors.grey.withValues(alpha: 0.20),
+          width: isSelected ? 1.5 : 1,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: () => _openOrJoinRoom(room),
+        child: Padding(
+          padding: EdgeInsets.all(context.cardPaddingSmall),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    width: context.iconXLarge,
+                    height: context.iconXLarge,
+                    decoration: BoxDecoration(
+                      color: primaryColor.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(context.radius(12)),
+                    ),
+                    child: Icon(
+                      requiresPassword
+                          ? Icons.lock_outline_rounded
+                          : Icons.meeting_room_outlined,
+                      color: primaryColor,
+                    ),
+                  ),
+                  SizedBox(width: context.spacingSmall),
+                  Expanded(
+                    child: Text(
+                      room.roomName,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: context.fontMedium,
+                        fontWeight: FontWeight.w700,
+                        color: isDark
+                            ? AppTheme.darkTextPrimary
+                            : AppTheme.lightTextPrimary,
+                      ),
+                    ),
+                  ),
+                  Icon(
+                    Icons.chevron_right_rounded,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ],
+              ),
+              SizedBox(height: context.spacingSmall),
+              Text(
+                '创建者 ${room.creatorVirtualIp}',
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: TextStyle(
+                  fontSize: context.fontXSmall,
+                  color: isDark
+                      ? AppTheme.darkTextSecondary
+                      : AppTheme.lightTextSecondary,
+                ),
+              ),
+              SizedBox(height: context.spacingSmall),
+              Wrap(
+                spacing: context.spacingXSmall,
+                runSpacing: context.spacingXSmall,
+                children: [
+                  _buildRoomStatusBadge(
+                    context,
+                    icon: room.locallyJoined
+                        ? Icons.check_circle_outline_rounded
+                        : Icons.login_rounded,
+                    label: room.locallyJoined ? '已加入' : '点击加入',
+                    color: room.locallyJoined ? Colors.green : primaryColor,
+                  ),
+                  _buildRoomStatusBadge(
+                    context,
+                    icon: room.isActive
+                        ? Icons.wifi_rounded
+                        : Icons.history_rounded,
+                    label: room.isActive ? '在线' : '历史',
+                    color: room.isActive ? Colors.green : Colors.grey,
+                  ),
+                  _buildRoomStatusBadge(
+                    context,
+                    icon: requiresPassword
+                        ? Icons.lock_outline_rounded
+                        : Icons.lock_open_rounded,
+                    label: requiresPassword ? '密码房' : '公开房',
+                    color: requiresPassword ? Colors.orange : Colors.blueGrey,
+                  ),
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildRoomStatusBadge(
+    BuildContext context, {
+    required IconData icon,
+    required String label,
+    required Color color,
+  }) {
+    return Container(
+      padding: EdgeInsets.symmetric(
+        horizontal: context.spacingXSmall,
+        vertical: context.spacingXXSmall,
+      ),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(context.radius(999)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: context.iconXSmall, color: color),
+          SizedBox(width: context.spacingXXSmall),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: context.fontXSmall,
+              color: color,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openOrJoinRoom(ChatRoomDescriptor room) async {
+    if (room.locallyJoined) {
+      await _manager.openConversation(room.roomId);
+      return;
+    }
+    final password = chatRoomRequiresPassword(room.metadataJson)
+        ? await _showJoinRoomPasswordDialog(room)
+        : '';
+    if (password == null) {
+      return;
+    }
+    try {
+      await _manager.joinRoom(room, password: password);
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        '已加入 ${room.roomName}',
+        isSuccess: true,
+      );
+    } catch (error) {
+      if (mounted) {
+        showTopToast(
+          context,
+          error.toString().contains('密码错误') ? '房间密码错误' : '加入房间失败: $error',
+          isSuccess: false,
+        );
+      }
+    }
+  }
+
   Widget _buildDirectTab(BuildContext context, bool isDark) {
-    final conversations = _manager.directConversations;
+    final conversations = _manager.directConversations
+        .where(
+          (conversation) =>
+              !_pendingDeletedConversationIds.contains(conversation.id),
+        )
+        .toList(growable: false);
     final selectedConversation =
         _manager.selectedConversation?.type == ChatConversationType.direct
             ? _manager.selectedConversation
             : null;
-    final isWide = MediaQuery.of(context).size.width >= 980;
+    final windowSize = MediaQuery.sizeOf(context);
+    final isWide = !usesSinglePanelChatLayout(
+      width: windowSize.width,
+      height: windowSize.height,
+    );
 
     if (conversations.isEmpty) {
       return _buildEmptyState(
@@ -755,14 +1100,26 @@ class _ChatPageState extends State<ChatPage>
       );
     }
 
-    final listPanel =
-        _buildDirectConversationList(context, isDark, conversations);
+    final listPanel = _buildDirectConversationList(
+      context,
+      isDark,
+      conversations,
+      allowSwipeDelete: usesMobileDirectConversationSwipe(
+        width: windowSize.width,
+        height: windowSize.height,
+      ),
+    );
     final chatPanel = _buildConversationPanel(
       context,
       isDark,
       selectedConversation,
       emptyTitle: '请选择一个私聊会话',
       emptyMessage: '左侧会显示最近的私聊会话，点击后即可继续聊天。',
+      onBack: isWide || selectedConversation == null
+          ? null
+          : () => _manager.clearSelectedConversation(
+                type: ChatConversationType.direct,
+              ),
     );
 
     if (isWide) {
@@ -774,19 +1131,15 @@ class _ChatPageState extends State<ChatPage>
       );
     }
 
-    return Column(
-      children: [
-        SizedBox(height: context.w(280), child: listPanel),
-        Expanded(child: chatPanel),
-      ],
-    );
+    return selectedConversation == null ? listPanel : chatPanel;
   }
 
   Widget _buildDirectConversationList(
     BuildContext context,
     bool isDark,
-    List<ChatConversation> conversations,
-  ) {
+    List<ChatConversation> conversations, {
+    required bool allowSwipeDelete,
+  }) {
     return Container(
       margin: EdgeInsets.fromLTRB(
         context.spacingLarge,
@@ -806,7 +1159,7 @@ class _ChatPageState extends State<ChatPage>
         itemBuilder: (context, index) {
           final conversation = conversations[index];
           final isSelected = conversation.id == _manager.selectedConversationId;
-          return InkWell(
+          final conversationCard = InkWell(
             onTap: () async {
               await _manager.selectTab(ChatMainTab.direct);
               await _manager.openConversation(conversation.id);
@@ -861,8 +1214,9 @@ class _ChatPageState extends State<ChatPage>
                       ),
                       decoration: BoxDecoration(
                         color: Colors.red,
-                        borderRadius:
-                            BorderRadius.circular(context.radius(999)),
+                        borderRadius: BorderRadius.circular(
+                          context.radius(999),
+                        ),
                       ),
                       child: Text(
                         conversation.unreadCount > 99
@@ -875,9 +1229,50 @@ class _ChatPageState extends State<ChatPage>
                         ),
                       ),
                     ),
+                  SizedBox(width: context.spacingSmall),
+                  IconButton(
+                    tooltip: '删除会话',
+                    onPressed: () =>
+                        _confirmAndDeleteDirectConversation(conversation),
+                    icon: const Icon(Icons.delete_outline_rounded),
+                    color: AppTheme.errorColor,
+                    visualDensity: VisualDensity.compact,
+                  ),
                 ],
               ),
             ),
+          );
+          if (!allowSwipeDelete) {
+            return conversationCard;
+          }
+          return Dismissible(
+            key: ValueKey('direct-conversation-${conversation.id}'),
+            direction: DismissDirection.endToStart,
+            confirmDismiss: (_) =>
+                _confirmDeleteDirectConversation(conversation),
+            onDismissed: (_) => unawaited(
+              _deleteDirectConversation(
+                conversation,
+                hideImmediately: true,
+              ),
+            ),
+            background: Container(
+              padding: EdgeInsets.symmetric(horizontal: context.spacingLarge),
+              alignment: Alignment.centerRight,
+              decoration: BoxDecoration(
+                color: AppTheme.errorColor,
+                borderRadius: BorderRadius.circular(context.cardRadius),
+              ),
+              child: const Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(Icons.delete_outline_rounded, color: Colors.white),
+                  SizedBox(width: 6),
+                  Text('删除', style: TextStyle(color: Colors.white)),
+                ],
+              ),
+            ),
+            child: conversationCard,
           );
         },
       ),
@@ -890,6 +1285,7 @@ class _ChatPageState extends State<ChatPage>
     ChatConversation? conversation, {
     required String emptyTitle,
     required String emptyMessage,
+    VoidCallback? onBack,
   }) {
     if (conversation == null) {
       return _buildEmptyState(
@@ -904,13 +1300,18 @@ class _ChatPageState extends State<ChatPage>
     final messages = _manager.selectedConversationId == conversation.id
         ? _manager.selectedMessages
         : const <ChatMessageRecord>[];
+    final windowSize = MediaQuery.sizeOf(context);
+    final compact = isCompactChatWindow(
+      width: windowSize.width,
+      height: windowSize.height,
+    );
 
     return Container(
       margin: EdgeInsets.fromLTRB(
         context.spacingSmall,
-        context.spacingLarge,
-        context.spacingLarge,
-        context.spacingLarge,
+        compact ? context.spacingSmall : context.spacingLarge,
+        compact ? context.spacingSmall : context.spacingLarge,
+        compact ? context.spacingSmall : context.spacingLarge,
       ),
       decoration: BoxDecoration(
         color:
@@ -920,7 +1321,9 @@ class _ChatPageState extends State<ChatPage>
       child: Column(
         children: [
           Container(
-            padding: EdgeInsets.all(context.cardPadding),
+            padding: EdgeInsets.all(
+              compact ? context.cardPaddingSmall : context.cardPadding,
+            ),
             decoration: BoxDecoration(
               border: Border(
                 bottom: BorderSide(
@@ -932,6 +1335,14 @@ class _ChatPageState extends State<ChatPage>
             ),
             child: Row(
               children: [
+                if (onBack != null) ...[
+                  IconButton(
+                    onPressed: onBack,
+                    tooltip: '返回会话列表',
+                    icon: const Icon(Icons.arrow_back_rounded),
+                  ),
+                  SizedBox(width: context.spacingXSmall),
+                ],
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -959,6 +1370,15 @@ class _ChatPageState extends State<ChatPage>
                     ],
                   ),
                 ),
+                if ((conversation.type == ChatConversationType.hall ||
+                        conversation.type == ChatConversationType.direct) &&
+                    messages.isNotEmpty)
+                  IconButton(
+                    onPressed: () =>
+                        _confirmClearConversationHistory(conversation),
+                    tooltip: '清理聊天记录',
+                    icon: const Icon(Icons.delete_sweep_outlined),
+                  ),
                 if (conversation.type == ChatConversationType.room)
                   TextButton(
                     onPressed: () async {
@@ -1030,9 +1450,8 @@ class _ChatPageState extends State<ChatPage>
 
     return GestureDetector(
       behavior: HitTestBehavior.deferToChild,
-      onSecondaryTapDown: (details) => unawaited(
-        _showMessageMenu(context, details.globalPosition, message),
-      ),
+      onSecondaryTapDown: (details) =>
+          unawaited(_showMessageMenu(context, details.globalPosition, message)),
       child: Align(
         alignment: isOutgoing ? Alignment.centerRight : Alignment.centerLeft,
         child: ConstrainedBox(
@@ -1196,10 +1615,7 @@ class _ChatPageState extends State<ChatPage>
         message.attachment == null) {
       return Text(
         message.text,
-        style: TextStyle(
-          fontSize: context.fontBody,
-          color: textColor,
-        ),
+        style: TextStyle(fontSize: context.fontBody, color: textColor),
       );
     }
 
@@ -1469,9 +1885,7 @@ class _ChatPageState extends State<ChatPage>
                   textInputAction: TextInputAction.newline,
                   minLines: 1,
                   maxLines: 5,
-                  decoration: const InputDecoration(
-                    hintText: '输入消息后按发送',
-                  ),
+                  decoration: const InputDecoration(hintText: '输入消息后按发送'),
                 ),
               ),
             ),
@@ -1492,7 +1906,7 @@ class _ChatPageState extends State<ChatPage>
       context,
       isDark,
       title: '当前平台暂未接入聊天室',
-      message: '聊天室当前支持 Windows 和 macOS 桌面端。',
+      message: '聊天室当前支持 Windows、macOS 和 Android。',
       icon: Icons.desktop_mac_outlined,
     );
   }
@@ -1604,7 +2018,7 @@ class _ChatPageState extends State<ChatPage>
     if (!mounted) {
       return;
     }
-    _tabController.index = 1;
+    _tabController.index = ChatMainTab.direct.index;
   }
 
   Future<void> _showPeerMenu(
@@ -1621,10 +2035,7 @@ class _ChatPageState extends State<ChatPage>
         position.dy,
       ),
       items: const [
-        PopupMenuItem<String>(
-          value: 'direct',
-          child: Text('发起私聊'),
-        ),
+        PopupMenuItem<String>(value: 'direct', child: Text('发起私聊')),
       ],
     );
     if (value == 'direct' && mounted) {
@@ -1701,40 +2112,189 @@ class _ChatPageState extends State<ChatPage>
     }
   }
 
-  Future<void> _showCreateRoomDialog(String hallId) async {
-    final controller = TextEditingController();
-    try {
-      final roomName = await showDialog<String>(
-        context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: const Text('创建自定义聊天室'),
-            content: TextField(
-              controller: controller,
-              autofocus: true,
-              decoration: const InputDecoration(
-                labelText: '聊天室名称',
-                hintText: '例如 运维讨论组',
-              ),
+  Future<bool> _confirmDeleteDirectConversation(
+    ChatConversation conversation,
+  ) async {
+    return await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('删除私聊会话'),
+            content: Text(
+              '确定删除与“${conversation.title}”的私聊会话吗？\n\n'
+              '本机会话、聊天记录和附件将被删除，且无法撤销。',
             ),
             actions: [
               TextButton(
-                onPressed: () => Navigator.of(dialogContext).pop(),
+                onPressed: () => Navigator.pop(dialogContext, false),
                 child: const Text('取消'),
               ),
               FilledButton(
-                onPressed: () =>
-                    Navigator.of(dialogContext).pop(controller.text),
-                child: const Text('创建'),
+                onPressed: () => Navigator.pop(dialogContext, true),
+                style: FilledButton.styleFrom(
+                  backgroundColor: AppTheme.errorColor,
+                ),
+                child: const Text('删除'),
               ),
             ],
+          ),
+        ) ??
+        false;
+  }
+
+  Future<void> _confirmAndDeleteDirectConversation(
+    ChatConversation conversation,
+  ) async {
+    if (!await _confirmDeleteDirectConversation(conversation) || !mounted) {
+      return;
+    }
+    await _deleteDirectConversation(conversation);
+  }
+
+  Future<void> _deleteDirectConversation(
+    ChatConversation conversation, {
+    bool hideImmediately = false,
+  }) async {
+    if (hideImmediately && mounted) {
+      setState(() {
+        _pendingDeletedConversationIds.add(conversation.id);
+      });
+    }
+    try {
+      final deleted = await _manager.deleteDirectConversation(conversation.id);
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _pendingDeletedConversationIds.remove(conversation.id);
+      });
+      showTopToast(
+        context,
+        deleted ? '私聊会话已删除' : '会话不存在或已被删除',
+        isSuccess: deleted,
+      );
+    } catch (error) {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _pendingDeletedConversationIds.remove(conversation.id);
+      });
+      showTopToast(context, '删除私聊会话失败: $error', isSuccess: false);
+    }
+  }
+
+  Future<void> _confirmClearConversationHistory(
+    ChatConversation conversation,
+  ) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('清理聊天记录'),
+            content: Text(
+              '确定清理“${conversation.title}”中的全部聊天记录吗？\n\n'
+              '此操作只清理本机记录，且无法撤销。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('清理'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) {
+      return;
+    }
+
+    try {
+      final clearedCount = await _manager.clearConversationMessages(
+        conversation.id,
+      );
+      if (!mounted) {
+        return;
+      }
+      showTopToast(
+        context,
+        clearedCount > 0 ? '已清理 $clearedCount 条聊天记录' : '当前没有聊天记录',
+        isSuccess: true,
+      );
+    } catch (error) {
+      if (mounted) {
+        showTopToast(context, '清理聊天记录失败: $error', isSuccess: false);
+      }
+    }
+  }
+
+  Future<void> _showCreateRoomDialog(String hallId) async {
+    final nameController = TextEditingController();
+    final passwordController = TextEditingController();
+    try {
+      final shouldCreate = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) {
+          var obscurePassword = true;
+          return StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: const Text('创建群组房间'),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  TextField(
+                    controller: nameController,
+                    autofocus: true,
+                    decoration: const InputDecoration(
+                      labelText: '房间名称',
+                      hintText: '例如 运维讨论组',
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  TextField(
+                    controller: passwordController,
+                    obscureText: obscurePassword,
+                    decoration: InputDecoration(
+                      labelText: '房间密码（可留空）',
+                      suffixIcon: IconButton(
+                        onPressed: () => setDialogState(
+                          () => obscurePassword = !obscurePassword,
+                        ),
+                        icon: Icon(
+                          obscurePassword
+                              ? Icons.visibility_outlined
+                              : Icons.visibility_off_outlined,
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(false),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(true),
+                  child: const Text('创建'),
+                ),
+              ],
+            ),
           );
         },
       );
-      if (roomName == null || roomName.trim().isEmpty) {
+      final roomName = nameController.text;
+      if (shouldCreate != true || roomName.trim().isEmpty) {
         return;
       }
-      await _manager.createRoom(hallId, roomName);
+      await _manager.createRoom(
+        hallId,
+        roomName,
+        password: passwordController.text,
+      );
       if (!mounted) {
         return;
       }
@@ -1744,6 +2304,56 @@ class _ChatPageState extends State<ChatPage>
         return;
       }
       showTopToast(context, '创建聊天室失败: $error', isSuccess: false);
+    } finally {
+      nameController.dispose();
+      passwordController.dispose();
+    }
+  }
+
+  Future<String?> _showJoinRoomPasswordDialog(ChatRoomDescriptor room) async {
+    final controller = TextEditingController();
+    try {
+      return await showDialog<String>(
+        context: context,
+        builder: (dialogContext) {
+          var obscurePassword = true;
+          return StatefulBuilder(
+            builder: (context, setDialogState) => AlertDialog(
+              title: Text('加入 ${room.roomName}'),
+              content: TextField(
+                controller: controller,
+                autofocus: true,
+                obscureText: obscurePassword,
+                decoration: InputDecoration(
+                  labelText: '房间密码',
+                  suffixIcon: IconButton(
+                    onPressed: () => setDialogState(
+                      () => obscurePassword = !obscurePassword,
+                    ),
+                    icon: Icon(
+                      obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+                onSubmitted: (value) => Navigator.of(dialogContext).pop(value),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.of(dialogContext).pop(),
+                  child: const Text('取消'),
+                ),
+                FilledButton(
+                  onPressed: () =>
+                      Navigator.of(dialogContext).pop(controller.text),
+                  child: const Text('加入'),
+                ),
+              ],
+            ),
+          );
+        },
+      );
     } finally {
       controller.dispose();
     }
@@ -1961,10 +2571,9 @@ class _ChatPageState extends State<ChatPage>
       );
       if (!opened) {
         if (Platform.isAndroid) {
-          await Share.shareXFiles(
-            [XFile(filePath, name: attachment.fileName)],
-            text: attachment.fileName,
-          );
+          await Share.shareXFiles([
+            XFile(filePath, name: attachment.fileName),
+          ], text: attachment.fileName);
           return;
         }
         if (mounted) {

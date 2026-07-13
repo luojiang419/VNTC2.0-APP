@@ -14,8 +14,13 @@ import android.text.TextUtils;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
+import java.io.BufferedReader;
+import java.io.FileReader;
+import java.io.IOException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
+import java.util.zip.ZipFile;
 
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodCall;
@@ -23,6 +28,7 @@ import io.flutter.plugin.common.MethodChannel;
 
 public class RemoteAssistAndroidBridge {
     private static final String CHANNEL = "top.wherewego.vnt/remote_assist_android";
+    private static final int DIRECT_ACCESS_PORT = 49999;
 
     private final MainActivity activity;
 
@@ -91,12 +97,15 @@ public class RemoteAssistAndroidBridge {
     private Map<String, Object> buildStatus() {
         Map<String, Object> status = new HashMap<>();
         boolean notificationGranted = hasNotificationPermission();
-        boolean screenCaptureGranted = RemoteAssistStateHolder.hasMediaProjectionPermission();
+        boolean screenCaptureGranted =
+                com.carriez.flutter_hbb.MainService.Companion.isReady();
         boolean accessibilityGranted = isAccessibilityEnabled();
         boolean overlayGranted = Settings.canDrawOverlays(activity);
         boolean batteryOptimizationIgnored = isIgnoringBatteryOptimizations();
         boolean controllerAvailable = hasBundledRustdeskController();
-        boolean controlledServiceRunning = RemoteAssistControlledService.isRunning();
+        boolean controlledServiceRunning =
+                com.carriez.flutter_hbb.MainService.Companion.isReady();
+        boolean portListening = controlledServiceRunning && isTcpPortListening(DIRECT_ACCESS_PORT);
         status.put("notificationPermissionGranted", hasNotificationPermission());
         status.put("screenCapturePermissionGranted", screenCaptureGranted);
         status.put("accessibilityPermissionGranted", accessibilityGranted);
@@ -104,7 +113,7 @@ public class RemoteAssistAndroidBridge {
         status.put("batteryOptimizationIgnored", batteryOptimizationIgnored);
         status.put("controllerAvailable", controllerAvailable);
         status.put("controlledRoleSupported", true);
-        status.put("controlledRuntimeReady", controlledServiceRunning);
+        status.put("controlledRuntimeReady", portListening);
         status.put("controlledServiceRunning", controlledServiceRunning);
         status.put(
                 "permissionsReady",
@@ -114,21 +123,49 @@ public class RemoteAssistAndroidBridge {
                         && overlayGranted
                         && batteryOptimizationIgnored
         );
-        status.put("listenerReady", controlledServiceRunning);
+        status.put("listenerReady", portListening);
         status.put("runtimeVersion", "android-integrated-v3");
         status.put("runtimeAvailable", true);
         status.put("serviceInstalled", true);
         status.put("serviceRunning", controlledServiceRunning);
-        status.put("portListening", controlledServiceRunning);
+        status.put("portListening", portListening);
         return status;
+    }
+
+    private boolean isTcpPortListening(int port) {
+        String expectedPort = String.format(Locale.US, "%04X", port);
+        return isTcpPortListeningIn("/proc/self/net/tcp", expectedPort)
+                || isTcpPortListeningIn("/proc/self/net/tcp6", expectedPort);
+    }
+
+    private boolean isTcpPortListeningIn(String path, String expectedPort) {
+        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String[] columns = line.trim().split("\\s+");
+                if (columns.length < 4) {
+                    continue;
+                }
+                String localAddress = columns[1].toUpperCase(Locale.US);
+                String state = columns[3];
+                if ("0A".equals(state) && localAddress.endsWith(":" + expectedPort)) {
+                    return true;
+                }
+            }
+        } catch (IOException ignored) {
+            // procfs 不可读时保持未就绪，避免把前台服务误报成端口监听。
+        }
+        return false;
     }
 
     private void requestPermission(String permission, boolean startServiceAfterGrant) {
         switch (permission) {
             case "screen_capture":
-                Intent intent = new Intent(activity, RemoteAssistScreenCaptureActivity.class);
-                intent.putExtra(RemoteAssistScreenCaptureActivity.EXTRA_START_SERVICE,
-                        startServiceAfterGrant);
+                Intent intent = new Intent(
+                        activity,
+                        com.carriez.flutter_hbb.PermissionRequestTransparentActivity.class
+                );
+                intent.setAction("REQUEST_MEDIA_PROJECTION");
                 activity.startActivity(intent);
                 break;
             case "accessibility":
@@ -185,11 +222,12 @@ public class RemoteAssistAndroidBridge {
     }
 
     private void startControlledService() {
-        if (!RemoteAssistStateHolder.hasMediaProjectionPermission()) {
+        if (!com.carriez.flutter_hbb.MainService.Companion.isReady()) {
             requestPermission("screen_capture", true);
             return;
         }
-        Intent serviceIntent = new Intent(activity, RemoteAssistControlledService.class);
+        Intent serviceIntent = new Intent(activity, com.carriez.flutter_hbb.MainService.class);
+        serviceIntent.setAction("INIT_MEDIA_PROJECTION_AND_SERVICE");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             activity.startForegroundService(serviceIntent);
         } else {
@@ -198,7 +236,7 @@ public class RemoteAssistAndroidBridge {
     }
 
     private void stopControlledService() {
-        activity.stopService(new Intent(activity, RemoteAssistControlledService.class));
+        activity.stopService(new Intent(activity, com.carriez.flutter_hbb.MainService.class));
     }
 
     private boolean hasNotificationPermission() {
@@ -222,13 +260,14 @@ public class RemoteAssistAndroidBridge {
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         );
         if (TextUtils.isEmpty(enabledServices)) {
-            return RemoteAssistInputService.isRunning();
+            return com.carriez.flutter_hbb.InputService.Companion.isOpen();
         }
         String expectedService = new ComponentName(
                 activity,
-                RemoteAssistInputService.class
+                com.carriez.flutter_hbb.InputService.class
         ).flattenToString();
-        return enabledServices.contains(expectedService) || RemoteAssistInputService.isRunning();
+        return enabledServices.contains(expectedService)
+                || com.carriez.flutter_hbb.InputService.Companion.isOpen();
     }
 
     private String readString(Object value) {
@@ -238,6 +277,43 @@ public class RemoteAssistAndroidBridge {
     private boolean hasBundledRustdeskController() {
         File nativeDir = new File(activity.getApplicationInfo().nativeLibraryDir);
         File rustdeskLib = new File(nativeDir, "librustdesk.so");
-        return rustdeskLib.exists();
+        if (rustdeskLib.exists()) {
+            return true;
+        }
+
+        String[] apkPaths = buildApkPaths();
+        for (String abi : Build.SUPPORTED_ABIS) {
+            String entryName = "lib/" + abi + "/librustdesk.so";
+            for (String apkPath : apkPaths) {
+                if (apkContainsEntry(apkPath, entryName)) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
+    private String[] buildApkPaths() {
+        String sourceDir = activity.getApplicationInfo().sourceDir;
+        String[] splitSourceDirs = activity.getApplicationInfo().splitSourceDirs;
+        if (splitSourceDirs == null || splitSourceDirs.length == 0) {
+            return new String[]{sourceDir};
+        }
+
+        String[] paths = new String[splitSourceDirs.length + 1];
+        paths[0] = sourceDir;
+        System.arraycopy(splitSourceDirs, 0, paths, 1, splitSourceDirs.length);
+        return paths;
+    }
+
+    private boolean apkContainsEntry(String apkPath, String entryName) {
+        if (TextUtils.isEmpty(apkPath)) {
+            return false;
+        }
+        try (ZipFile apk = new ZipFile(apkPath)) {
+            return apk.getEntry(entryName) != null;
+        } catch (IOException ignored) {
+            return false;
+        }
     }
 }

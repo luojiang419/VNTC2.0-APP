@@ -1,0 +1,33 @@
+[Unit]
+Description=VNTC Linux P2P Service and WebUI (/root/vntc-linux)
+Documentation=https://github.com/luojiang419/VNTC2.0-APP
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/root/vntc-linux
+ExecStart=/root/vntc-linux/vntc-linux-webui --config /root/vntc-linux/config.json
+Restart=on-failure
+RestartSec=3
+Environment=RUST_LOG=info
+
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+DeviceAllow=/dev/net/tun rw
+PrivateDevices=no
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=false
+PrivateTmp=true
+ReadWritePaths=/root/vntc-linux
+RestrictAddressFamilies=AF_UNIX AF_INET AF_INET6 AF_NETLINK
+LockPersonality=true
+MemoryDenyWriteExecute=false
+LimitNOFILE=65536
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target

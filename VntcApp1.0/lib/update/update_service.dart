@@ -1362,6 +1362,11 @@ AppUpdatePlatform resolveCurrentUpdatePlatform() {
   return AppUpdatePlatform.unsupported;
 }
 
+bool supportsStartupUpdateCheck(AppUpdatePlatform platform) {
+  return platform == AppUpdatePlatform.windows ||
+      platform == AppUpdatePlatform.android;
+}
+
 AppUpdateInfo parseGitHubRelease(
   Map<String, dynamic> release, {
   required String currentVersion,

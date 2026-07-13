@@ -3,6 +3,14 @@ import 'package:vnt_app/update/startup_update_coordinator.dart';
 import 'package:vnt_app/update/update_service.dart';
 
 void main() {
+  test('启动自动更新检查支持 Windows 和 Android', () {
+    expect(supportsStartupUpdateCheck(AppUpdatePlatform.windows), isTrue);
+    expect(supportsStartupUpdateCheck(AppUpdatePlatform.android), isTrue);
+    expect(supportsStartupUpdateCheck(AppUpdatePlatform.macos), isFalse);
+    expect(supportsStartupUpdateCheck(AppUpdatePlatform.linux), isFalse);
+    expect(supportsStartupUpdateCheck(AppUpdatePlatform.ios), isFalse);
+  });
+
   test('启动自动更新检查在单次运行中只请求一次', () async {
     var calls = 0;
     final coordinator = StartupUpdateCoordinator(

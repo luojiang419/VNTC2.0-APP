@@ -31,6 +31,8 @@ abstract class RemoteAssistPlatformAdapter {
 
   Future<void> configureAccessPassword(String password);
 
+  Future<String> loadAccessPassword() async => '';
+
   Future<void> repair({
     required List<String> remoteCidrs,
   });

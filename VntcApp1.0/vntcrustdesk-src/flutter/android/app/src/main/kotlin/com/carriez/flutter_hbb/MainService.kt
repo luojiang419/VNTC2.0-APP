@@ -37,6 +37,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
+import top.wherewego.vnt_app.R
 import io.flutter.embedding.android.FlutterActivity
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
@@ -631,7 +632,7 @@ class MainService : Service() {
         }
         val notification = notificationBuilder
             .setOngoing(true)
-            .setSmallIcon(R.mipmap.ic_stat_logo)
+            .setSmallIcon(R.drawable.ic_stat_icon)
             .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
@@ -639,7 +640,7 @@ class MainService : Service() {
             .setContentText(translate(DEFAULT_NOTIFY_TEXT))
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)
-            .setColor(ContextCompat.getColor(this, R.color.primary))
+            .setColor(Color.BLUE)
             .setWhen(System.currentTimeMillis())
             .build()
         startForeground(DEFAULT_NOTIFY_ID, notification)

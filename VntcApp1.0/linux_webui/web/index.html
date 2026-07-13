@@ -1,0 +1,74 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="system" data-accent="blue">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+    <meta name="theme-color" content="#f5f7fb">
+    <meta name="description" content="VNTC Linux P2P 网络管理">
+    <title>VNTC Linux</title>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+    <link rel="stylesheet" href="/assets/styles/tokens.css">
+    <link rel="stylesheet" href="/assets/styles/shell.css">
+    <link rel="stylesheet" href="/assets/styles/components.css">
+    <link rel="stylesheet" href="/assets/styles/pages.css">
+    <link rel="stylesheet" href="/assets/styles/responsive.css">
+    <script type="module" src="/assets/js/app.js"></script>
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="side-navigation" aria-label="主导航">
+        <a class="brand" href="#dashboard" aria-label="VNTC 仪表盘">
+          <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="brand-copy"><strong>VNTC</strong><small>Linux WebUI</small></span>
+        </a>
+        <nav class="nav-list">
+          <a class="nav-item" href="#dashboard" data-route="dashboard"><span class="nav-icon">⌂</span><span>仪表盘</span></a>
+          <a class="nav-item" href="#link-status" data-route="link-status"><span class="nav-icon">⌁</span><span>链接状态</span></a>
+          <a class="nav-item" href="#configs" data-route="configs"><span class="nav-icon">▤</span><span>配置</span></a>
+          <a class="nav-item" href="#settings" data-route="settings"><span class="nav-icon">⚙</span><span>设置</span></a>
+          <a class="nav-item" href="#about" data-route="about"><span class="nav-icon">ⓘ</span><span>关于</span></a>
+        </nav>
+        <div class="nav-footer">
+          <span class="health-dot" id="healthDot"></span>
+          <span><strong id="healthText">连接控制面</strong><small id="navVersion">VNT Core</small></span>
+        </div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <div><p class="page-kicker" id="pageKicker">网络概览</p><h1 id="pageTitle">仪表盘</h1></div>
+          <div class="topbar-actions">
+            <button class="icon-button" id="themeToggle" type="button" title="切换亮暗主题" aria-label="切换亮暗主题">◐</button>
+            <button class="icon-button" id="refreshButton" type="button" title="立即刷新" aria-label="立即刷新">↻</button>
+            <span class="status-summary">
+              <span class="status-chip loading" id="statusChip"><i></i><strong>载入中</strong></span>
+              <span class="status-uptime mono" id="statusUptime" hidden></span>
+            </span>
+          </div>
+        </header>
+        <div id="pageRoot" tabindex="-1"></div>
+      </main>
+
+      <nav class="bottom-navigation" aria-label="移动端主导航">
+        <a class="nav-item" href="#dashboard" data-route="dashboard"><span class="nav-icon">⌂</span><span>仪表盘</span></a>
+        <a class="nav-item" href="#link-status" data-route="link-status"><span class="nav-icon">⌁</span><span>链接</span></a>
+        <a class="nav-item" href="#configs" data-route="configs"><span class="nav-icon">▤</span><span>配置</span></a>
+        <a class="nav-item" href="#settings" data-route="settings"><span class="nav-icon">⚙</span><span>设置</span></a>
+        <a class="nav-item" href="#about" data-route="about"><span class="nav-icon">ⓘ</span><span>关于</span></a>
+      </nav>
+    </div>
+
+    <div class="modal-layer" id="modalLayer" hidden></div>
+    <div class="auth-overlay" id="authOverlay" hidden>
+      <form class="auth-card" id="authForm">
+        <span class="brand-mark large" aria-hidden="true"><i></i><i></i><i></i></span>
+        <p class="page-kicker">安全访问</p><h2>进入 VNTC Linux</h2>
+        <p>控制面已启用访问令牌，请输入管理员提供的 Token。</p>
+        <label class="field"><span>访问令牌</span><input id="accessToken" type="password" autocomplete="current-password" required autofocus></label>
+        <p class="form-error" id="authError"></p>
+        <button class="button primary full" type="submit">验证并进入</button>
+      </form>
+    </div>
+    <div class="toast-region" id="toastRegion" aria-live="polite"></div>
+  </body>
+</html>

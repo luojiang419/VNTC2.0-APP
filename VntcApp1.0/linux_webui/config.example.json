@@ -1,0 +1,33 @@
+{
+  "auto_start": false,
+  "web": {
+    "listen": "127.0.0.1",
+    "port": 18080,
+    "access_token": null
+  },
+  "vnt": {
+    "server_addresses": [
+      "quic://127.0.0.1:2225"
+    ],
+    "network_code": "replace-with-network-code",
+    "device_id": null,
+    "device_name": "vntc-linux",
+    "tun_name": "vnt0",
+    "virtual_ip": null,
+    "password": null,
+    "channel_mode": "all",
+    "mtu": 1400,
+    "compress": false,
+    "rtx": false,
+    "fec": false,
+    "no_tun": false,
+    "no_nat": false,
+    "allow_port_mapping": false,
+    "udp_stun": [],
+    "tcp_stun": [],
+    "tunnel_port": null,
+    "input_routes": [],
+    "output_routes": [],
+    "port_mappings": []
+  }
+}

@@ -40,9 +40,14 @@ public class MainActivity extends FlutterActivity {
     private static final int RUSTDESK_PERMISSION_REQUEST_CODE = 4;
     private static final int RUSTDESK_OVERLAY_PERMISSION_REQUEST_CODE = 5;
     private static final int RUSTDESK_MANAGE_STORAGE_PERMISSION_REQUEST_CODE = 6;
+    private static final int CHAT_LOCAL_NETWORK_PERMISSION_REQUEST_CODE = 7;
+    private static final int APK_INSTALL_PERMISSION_REQUEST_CODE = 8;
 
     private static final String FILE_CHANNEL = "top.wherewego.vnt/file";
     private static final String UPDATE_CHANNEL = "top.wherewego.vnt/update";
+    private static final String CHAT_ANDROID_CHANNEL = "top.wherewego.vnt/chat_android";
+    private static final String ACCESS_LOCAL_NETWORK_PERMISSION =
+            "android.permission.ACCESS_LOCAL_NETWORK";
     private static final String RUSTDESK_CHANNEL = "mChannel";
     private static final String RUSTDESK_KEY_SHARED_PREFERENCES = "KEY_SHARED_PREFERENCES";
     private static final String RUSTDESK_KEY_START_ON_BOOT_OPT = "KEY_START_ON_BOOT_OPT";
@@ -54,6 +59,9 @@ public class MainActivity extends FlutterActivity {
     private String pendingFilePath;
     private MethodChannel.Result pendingFileResult;
     private String pendingRustdeskPermission;
+    private MethodChannel.Result pendingChatPermissionResult;
+    private String pendingInstallApkPath;
+    private MethodChannel.Result pendingInstallResult;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -101,6 +109,15 @@ public class MainActivity extends FlutterActivity {
             final boolean granted = grantResults.length > 0
                     && grantResults[0] == PackageManager.PERMISSION_GRANTED;
             notifyRustdeskPermissionResult(permission, granted);
+            return;
+        }
+        if (requestCode == CHAT_LOCAL_NETWORK_PERMISSION_REQUEST_CODE) {
+            final boolean granted = grantResults.length > 0
+                    && grantResults[0] == PackageManager.PERMISSION_GRANTED;
+            if (pendingChatPermissionResult != null) {
+                pendingChatPermissionResult.success(granted);
+                pendingChatPermissionResult = null;
+            }
             return;
         }
         if (requestCode == NOTIFICATION_PERMISSION_REQUEST_CODE) {
@@ -269,13 +286,59 @@ public class MainActivity extends FlutterActivity {
             }
         });
 
+        new MethodChannel(
+                flutterEngine.getDartExecutor().getBinaryMessenger(),
+                CHAT_ANDROID_CHANNEL
+        ).setMethodCallHandler((call, result) -> {
+            if (call.method.equals("hasLocalNetworkPermission")) {
+                result.success(hasChatLocalNetworkPermission());
+            } else if (call.method.equals("requestLocalNetworkPermission")) {
+                requestChatLocalNetworkPermission(result);
+            } else {
+                result.notImplemented();
+            }
+        });
+
         rustdeskChannel = new MethodChannel(
                 flutterEngine.getDartExecutor().getBinaryMessenger(),
                 RUSTDESK_CHANNEL
         );
         rustdeskChannel.setMethodCallHandler(this::handleRustdeskMethodCall);
         rustdeskEventChannel = rustdeskChannel;
+        new RemoteAssistAndroidBridge(this, flutterEngine);
 
+    }
+
+    private String getChatLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT >= 37) {
+            return ACCESS_LOCAL_NETWORK_PERMISSION;
+        }
+        return Manifest.permission.NEARBY_WIFI_DEVICES;
+    }
+
+    private boolean hasChatLocalNetworkPermission() {
+        if (Build.VERSION.SDK_INT < 36) {
+            return true;
+        }
+        return ContextCompat.checkSelfPermission(this, getChatLocalNetworkPermission())
+                == PackageManager.PERMISSION_GRANTED;
+    }
+
+    private void requestChatLocalNetworkPermission(@NonNull MethodChannel.Result result) {
+        if (hasChatLocalNetworkPermission()) {
+            result.success(true);
+            return;
+        }
+        if (pendingChatPermissionResult != null) {
+            result.error("REQUEST_IN_PROGRESS", "本地网络权限请求正在进行", null);
+            return;
+        }
+        pendingChatPermissionResult = result;
+        ActivityCompat.requestPermissions(
+                this,
+                new String[]{getChatLocalNetworkPermission()},
+                CHAT_LOCAL_NETWORK_PERMISSION_REQUEST_CODE
+        );
     }
 
     private void installDownloadedApk(@Nullable String filePath, @NonNull MethodChannel.Result result) {
@@ -290,39 +353,79 @@ public class MainActivity extends FlutterActivity {
             return;
         }
 
+        if (pendingInstallResult != null) {
+            result.error("REQUEST_IN_PROGRESS", "安装授权请求正在进行", null);
+            return;
+        }
+
         try {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     && !getPackageManager().canRequestPackageInstalls()) {
+                pendingInstallApkPath = apkFile.getAbsolutePath();
+                pendingInstallResult = result;
                 Intent settingsIntent = new Intent(
                         Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
                         Uri.parse("package:" + getPackageName())
                 );
-                startActivity(settingsIntent);
-                result.error(
-                        "INSTALL_PERMISSION_REQUIRED",
-                        "请允许此应用安装未知来源应用后再次点击安装",
-                        null
-                );
+                startActivityForResult(settingsIntent, APK_INSTALL_PERMISSION_REQUEST_CODE);
                 return;
             }
+            openApkInstaller(apkFile, result);
+        } catch (Exception error) {
+            clearPendingInstallRequest();
+            result.error("INSTALL_APK_FAILED", error.getMessage(), null);
+        }
+    }
 
-            Uri apkUri = FileProvider.getUriForFile(
-                    this,
-                    getPackageName() + ".fileprovider",
-                    apkFile
-            );
-            Intent installIntent = new Intent(Intent.ACTION_VIEW);
-            installIntent.setDataAndType(
-                    apkUri,
-                    "application/vnd.android.package-archive"
-            );
-            installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
-            startActivity(installIntent);
-            result.success(true);
+    private void resumePendingApkInstall() {
+        if (pendingInstallResult == null || TextUtils.isEmpty(pendingInstallApkPath)) {
+            return;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                && !getPackageManager().canRequestPackageInstalls()) {
+            MethodChannel.Result result = pendingInstallResult;
+            clearPendingInstallRequest();
+            result.error("INSTALL_PERMISSION_DENIED", "未授予安装未知来源应用权限", null);
+            return;
+        }
+
+        File apkFile = new File(pendingInstallApkPath);
+        MethodChannel.Result result = pendingInstallResult;
+        clearPendingInstallRequest();
+        if (!apkFile.exists()) {
+            result.error("APK_NOT_FOUND", "APK file not found: " + apkFile.getAbsolutePath(), null);
+            return;
+        }
+        try {
+            openApkInstaller(apkFile, result);
         } catch (Exception error) {
             result.error("INSTALL_APK_FAILED", error.getMessage(), null);
         }
+    }
+
+    private void openApkInstaller(
+            @NonNull File apkFile,
+            @NonNull MethodChannel.Result result
+    ) {
+        Uri apkUri = FileProvider.getUriForFile(
+                this,
+                getPackageName() + ".fileprovider",
+                apkFile
+        );
+        Intent installIntent = new Intent(Intent.ACTION_VIEW);
+        installIntent.setDataAndType(
+                apkUri,
+                "application/vnd.android.package-archive"
+        );
+        installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+        installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        startActivity(installIntent);
+        result.success(true);
+    }
+
+    private void clearPendingInstallRequest() {
+        pendingInstallApkPath = null;
+        pendingInstallResult = null;
     }
 
     public static void notifyRustdeskMethod(String method, @Nullable Object arguments) {
@@ -463,33 +566,41 @@ public class MainActivity extends FlutterActivity {
                 Settings.Secure.ENABLED_ACCESSIBILITY_SERVICES
         );
         if (TextUtils.isEmpty(enabledServices)) {
-            return RemoteAssistInputService.isRunning();
+            return com.carriez.flutter_hbb.InputService.Companion.isOpen();
         }
         String expectedService = new ComponentName(
                 this,
-                RemoteAssistInputService.class
+                com.carriez.flutter_hbb.InputService.class
         ).flattenToString();
-        return enabledServices.contains(expectedService) || RemoteAssistInputService.isRunning();
+        return enabledServices.contains(expectedService)
+                || com.carriez.flutter_hbb.InputService.Companion.isOpen();
     }
 
     private void notifyRustdeskServiceState() {
-        notifyRustdeskStateChange("media", RemoteAssistStateHolder.hasMediaProjectionPermission());
+        notifyRustdeskStateChange(
+                "media",
+                com.carriez.flutter_hbb.MainService.Companion.isReady()
+        );
         notifyRustdeskStateChange("input", isRustdeskInputEnabled());
     }
 
     private void startRustdeskControlledService(boolean requestPermissionIfNeeded) {
-        if (!RemoteAssistStateHolder.hasMediaProjectionPermission()) {
+        if (!com.carriez.flutter_hbb.MainService.Companion.isReady()) {
             notifyRustdeskStateChange("media", false);
             notifyRustdeskStateChange("input", isRustdeskInputEnabled());
             if (requestPermissionIfNeeded) {
-                Intent intent = new Intent(this, RemoteAssistScreenCaptureActivity.class);
-                intent.putExtra(RemoteAssistScreenCaptureActivity.EXTRA_START_SERVICE, true);
+                Intent intent = new Intent(
+                        this,
+                        com.carriez.flutter_hbb.PermissionRequestTransparentActivity.class
+                );
+                intent.setAction("REQUEST_MEDIA_PROJECTION");
                 startActivity(intent);
             }
             return;
         }
 
-        Intent serviceIntent = new Intent(this, RemoteAssistControlledService.class);
+        Intent serviceIntent = new Intent(this, com.carriez.flutter_hbb.MainService.class);
+        serviceIntent.setAction("INIT_MEDIA_PROJECTION_AND_SERVICE");
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             startForegroundService(serviceIntent);
         } else {
@@ -499,7 +610,7 @@ public class MainActivity extends FlutterActivity {
     }
 
     private void stopRustdeskControlledService() {
-        stopService(new Intent(this, RemoteAssistControlledService.class));
+        stopService(new Intent(this, com.carriez.flutter_hbb.MainService.class));
         notifyRustdeskStateChange("media", false);
         notifyRustdeskStateChange("input", isRustdeskInputEnabled());
     }
@@ -549,6 +660,8 @@ public class MainActivity extends FlutterActivity {
                     permission,
                     permission != null && isRustdeskPermissionGranted(permission)
             );
+        } else if (requestCode == APK_INSTALL_PERMISSION_REQUEST_CODE) {
+            resumePendingApkInstall();
         } else if (requestCode == VPN_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
                 Intent serviceIntent = new Intent(this, MyVpnService.class);
@@ -578,6 +691,12 @@ public class MainActivity extends FlutterActivity {
             pendingFilePath = null;
         }
         super.onActivityResult(requestCode, resultCode, data);
+    }
+
+    @Override
+    protected void onResume() {
+        super.onResume();
+        resumePendingApkInstall();
     }
 
     private void copyFileToUri(String sourcePath, Uri destUri) {

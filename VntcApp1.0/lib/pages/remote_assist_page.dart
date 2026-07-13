@@ -1,13 +1,27 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
-import 'package:vnt_app/remote_assist/remote_assist_utils.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
+
+@visibleForTesting
+String remoteAccessPasswordActionLabel(bool hasAccessPassword) {
+  return hasAccessPassword ? '修改访问密码' : '设置访问密码';
+}
+
+@visibleForTesting
+class RemotePeerConnectRequest {
+  const RemotePeerConnectRequest({
+    required this.password,
+    required this.rememberPassword,
+  });
+
+  final String password;
+  final bool rememberPassword;
+}
 
 class RemoteAssistPage extends StatefulWidget {
   const RemoteAssistPage({super.key});
@@ -18,50 +32,24 @@ class RemoteAssistPage extends StatefulWidget {
 
 class _RemoteAssistPageState extends State<RemoteAssistPage> {
   final RemoteAssistManager _manager = RemoteAssistManager.instance;
-  final TextEditingController _targetIpController = TextEditingController();
-  final TextEditingController _targetPasswordController =
-      TextEditingController();
+  bool _hasAccessPassword = false;
 
   @override
   void initState() {
     super.initState();
     _manager.start();
     _manager.refresh();
+    _refreshAccessPasswordState();
   }
 
-  @override
-  void dispose() {
-    _targetIpController.dispose();
-    _targetPasswordController.dispose();
-    super.dispose();
-  }
-
-  Future<void> _launchRemoteAssist() async {
-    final targetIp = _targetIpController.text.trim();
-    final accessPassword = _targetPasswordController.text;
-    if (!isValidIpv4(targetIp)) {
-      showTopToast(context, '请输入有效的目标虚拟 IP', isSuccess: false);
-      return;
-    }
-
+  Future<void> _refreshAccessPasswordState() async {
     try {
-      await _manager.launchController(
-        targetIp,
-        password: accessPassword.isEmpty ? null : accessPassword,
-      );
-      if (!mounted) {
-        return;
+      final password = await _manager.loadAccessPassword();
+      if (mounted) {
+        setState(() => _hasAccessPassword = password.isNotEmpty);
       }
-      showTopToast(
-        context,
-        accessPassword.isEmpty ? '已拉起远程协助窗口，等待对方确认' : '已拉起远程协助窗口，正在尝试使用访问密码连接',
-        isSuccess: true,
-      );
-    } catch (error) {
-      if (!mounted) {
-        return;
-      }
-      showTopToast(context, '远程协助启动失败: $error', isSuccess: false);
+    } catch (_) {
+      // 运行时尚未完成初始化时保留“设置”状态，打开对话框时会再次读取。
     }
   }
 
@@ -97,10 +85,24 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       return;
     }
 
-    final controller = TextEditingController();
-    var obscurePassword = true;
+    var savedPassword = '';
     try {
-      final password = await showDialog<String?>(
+      savedPassword = await _manager.loadSavedPeerPassword(peer.key);
+    } catch (error) {
+      if (mounted) {
+        showTopToast(context, '读取已保存密码失败: $error', isSuccess: false);
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+
+    final controller = TextEditingController(text: savedPassword);
+    var obscurePassword = true;
+    var rememberPassword = savedPassword.isNotEmpty;
+    var hasSavedPassword = savedPassword.isNotEmpty;
+    try {
+      final request = await showDialog<RemotePeerConnectRequest?>(
         context: context,
         builder: (dialogContext) => StatefulBuilder(
           builder: (context, setDialogState) => AlertDialog(
@@ -122,8 +124,12 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                     controller: controller,
                     autofocus: true,
                     obscureText: obscurePassword,
-                    onSubmitted: (value) =>
-                        Navigator.of(dialogContext).pop(value),
+                    onSubmitted: (value) => Navigator.of(dialogContext).pop(
+                      RemotePeerConnectRequest(
+                        password: value,
+                        rememberPassword: rememberPassword,
+                      ),
+                    ),
                     decoration: InputDecoration(
                       labelText: '访问密码',
                       hintText: '未设置密码时可留空',
@@ -141,6 +147,47 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                       ),
                     ),
                   ),
+                  CheckboxListTile(
+                    contentPadding: EdgeInsets.zero,
+                    value: rememberPassword,
+                    onChanged: (value) => setDialogState(
+                      () => rememberPassword = value ?? false,
+                    ),
+                    title: const Text('记住此设备密码'),
+                    subtitle: Text(
+                      hasSavedPassword ? '已保存密码，可直接修改后连接' : '密码将保存在系统安全凭据存储中',
+                    ),
+                    controlAffinity: ListTileControlAffinity.leading,
+                  ),
+                  if (hasSavedPassword)
+                    Align(
+                      alignment: Alignment.centerLeft,
+                      child: TextButton.icon(
+                        onPressed: () async {
+                          try {
+                            await _manager.deleteSavedPeerPassword(peer.key);
+                            if (!dialogContext.mounted) {
+                              return;
+                            }
+                            controller.clear();
+                            setDialogState(() {
+                              hasSavedPassword = false;
+                              rememberPassword = false;
+                            });
+                          } catch (error) {
+                            if (mounted) {
+                              showTopToast(
+                                context,
+                                '删除已保存密码失败: $error',
+                                isSuccess: false,
+                              );
+                            }
+                          }
+                        },
+                        icon: const Icon(Icons.delete_outline),
+                        label: const Text('删除已保存密码'),
+                      ),
+                    ),
                 ],
               ),
             ),
@@ -150,8 +197,12 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 child: const Text('取消'),
               ),
               FilledButton.icon(
-                onPressed: () =>
-                    Navigator.of(dialogContext).pop(controller.text),
+                onPressed: () => Navigator.of(dialogContext).pop(
+                  RemotePeerConnectRequest(
+                    password: controller.text,
+                    rememberPassword: rememberPassword,
+                  ),
+                ),
                 icon: const Icon(Icons.link),
                 label: const Text('连接'),
               ),
@@ -159,47 +210,69 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           ),
         ),
       );
-      if (password != null && mounted) {
-        await _launchRemoteAssistForPeer(peer, password);
+      if (request == null || !mounted) {
+        return;
+      }
+
+      try {
+        if (request.rememberPassword && request.password.isNotEmpty) {
+          await _manager.savePeerPassword(peer.key, request.password);
+        } else {
+          await _manager.deleteSavedPeerPassword(peer.key);
+        }
+      } catch (error) {
+        if (mounted) {
+          showTopToast(context, '保存连接密码失败: $error', isSuccess: false);
+        }
+      }
+      if (mounted) {
+        await _launchRemoteAssistForPeer(peer, request.password);
       }
     } finally {
       controller.dispose();
     }
   }
 
-  void _selectPeer(RemoteAssistPeer peer) {
-    _targetIpController.text = peer.virtualIp;
-    Clipboard.setData(ClipboardData(text: peer.virtualIp));
-    showTopToast(
-      context,
-      '${peer.virtualIp} 已复制并填入连接框',
-      isSuccess: true,
-    );
-  }
-
   Future<void> _showAccessPasswordDialog() async {
-    final controller = TextEditingController();
+    TextEditingController? controller;
     try {
+      final savedPassword = await _manager.loadAccessPassword();
+      if (!mounted) {
+        return;
+      }
+      controller = TextEditingController(text: savedPassword);
+      var obscurePassword = true;
       final password = await showDialog<String?>(
         context: context,
-        builder: (dialogContext) {
-          return AlertDialog(
-            title: const Text('设置远程密码'),
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => AlertDialog(
+            title: Text(savedPassword.isEmpty ? '设置远程密码' : '修改远程密码'),
             content: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Text(
-                  '设置后，对方输入正确密码即可直接远程控制；留空则清空密码，并恢复为本机手动接受。',
+                  '密码保存在 RustDesk 配置中。对方输入正确密码即可直接协助；清空后恢复为本机手动接受。',
                 ),
                 SizedBox(height: context.spacingMedium),
                 TextField(
                   controller: controller,
-                  obscureText: true,
+                  obscureText: obscurePassword,
                   autofocus: true,
-                  decoration: const InputDecoration(
+                  decoration: InputDecoration(
                     labelText: '远程密码',
                     hintText: '留空表示清空密码',
+                    suffixIcon: IconButton(
+                      tooltip: obscurePassword ? '显示密码' : '隐藏密码',
+                      onPressed: () => setDialogState(
+                        () => obscurePassword = !obscurePassword,
+                      ),
+                      icon: Icon(
+                        obscurePassword
+                            ? Icons.visibility_outlined
+                            : Icons.visibility_off_outlined,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -211,12 +284,12 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
               ),
               FilledButton(
                 onPressed: () =>
-                    Navigator.of(dialogContext).pop(controller.text),
-                child: const Text('确定'),
+                    Navigator.of(dialogContext).pop(controller!.text),
+                child: Text(savedPassword.isEmpty ? '保存' : '确认修改'),
               ),
             ],
-          );
-        },
+          ),
+        ),
       );
 
       if (password == null) {
@@ -227,6 +300,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       if (!mounted) {
         return;
       }
+      setState(() => _hasAccessPassword = password.trim().isNotEmpty);
       showTopToast(
         context,
         password.isEmpty ? '已清空远程密码，后续需要本机手动接受协助' : '已设置远程密码，后续可通过密码无人值守协助',
@@ -238,7 +312,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       }
       showTopToast(context, '远程密码设置失败: $error', isSuccess: false);
     } finally {
-      controller.dispose();
+      controller?.dispose();
     }
   }
 
@@ -295,7 +369,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                   _buildHeader(isDark),
                   SizedBox(height: context.spacingLarge),
                   if (useAndroidLayout) ...[
-                    _buildAndroidControllerCard(isDark, health, peers),
+                    _buildPeerList(isDark, health, peers),
                     SizedBox(height: context.spacingLarge),
                     _buildAndroidControlledCard(isDark, health),
                     SizedBox(height: context.spacingLarge),
@@ -307,8 +381,6 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                     ],
                     _buildPeerList(isDark, health, peers),
                   ],
-                  SizedBox(height: context.spacingLarge),
-                  if (useAndroidLayout) _buildPeerList(isDark, health, peers),
                 ],
               ),
             );
@@ -366,7 +438,9 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         ),
         TextButton(
           onPressed: _showAccessPasswordDialog,
-          child: const Text('设置远程密码'),
+          child: Text(
+            _hasAccessPassword ? '修改远程密码' : '设置远程密码',
+          ),
         ),
         IconButton(
           onPressed: _manager.refreshing ? null : () => _manager.refresh(),
@@ -378,109 +452,6 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           ),
         ),
       ],
-    );
-  }
-
-  Widget _buildAndroidControllerCard(
-    bool isDark,
-    RemoteAssistHealthStatus health,
-    List<RemoteAssistPeer> peers,
-  ) {
-    final primaryColor = Theme.of(context).primaryColor;
-    return Container(
-      padding: EdgeInsets.all(context.cardPadding),
-      decoration: BoxDecoration(
-        color:
-            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-        borderRadius: BorderRadius.circular(context.cardRadius),
-      ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            '控制别人',
-            style: TextStyle(
-              fontSize: context.fontLarge,
-              fontWeight: FontWeight.w700,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
-            ),
-          ),
-          SizedBox(height: context.spacingSmall),
-          Text(
-            '使用 VNT 虚拟 IP 直接打开内置远控会话。同一个 APK 内即可完成组网、聊天和远程协助。',
-            style: TextStyle(
-              fontSize: context.fontSmall,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          TextField(
-            controller: _targetIpController,
-            decoration: InputDecoration(
-              labelText: '目标虚拟 IP',
-              hintText: '例如 10.26.0.8',
-              suffixIcon: IconButton(
-                tooltip: '粘贴',
-                onPressed: () async {
-                  final data = await Clipboard.getData(Clipboard.kTextPlain);
-                  final pasted = data?.text?.trim() ?? '';
-                  if (pasted.isNotEmpty) {
-                    _targetIpController.text = pasted;
-                  }
-                },
-                icon: const Icon(Icons.content_paste_go),
-              ),
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          TextField(
-            controller: _targetPasswordController,
-            obscureText: true,
-            decoration: const InputDecoration(
-              labelText: '访问密码',
-              hintText: '可选，留空则等待对方手动接受',
-            ),
-          ),
-          SizedBox(height: context.spacingMedium),
-          Row(
-            children: [
-              Expanded(
-                child: ElevatedButton.icon(
-                  onPressed: health.canLaunch ? _launchRemoteAssist : null,
-                  icon: const Icon(Icons.computer),
-                  label: const Text('发起协助'),
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: primaryColor,
-                    foregroundColor: Colors.white,
-                  ),
-                ),
-              ),
-              SizedBox(width: context.spacingSmall),
-              TextButton(
-                onPressed:
-                    peers.isEmpty ? null : () => _selectPeer(peers.first),
-                child: const Text('填入首个在线设备'),
-              ),
-            ],
-          ),
-          if (!health.controllerAvailable) ...[
-            SizedBox(height: context.spacingMedium),
-            _buildWarningBox(
-              isDark,
-              '当前安装包未包含适用于本机架构的内置控制端，请使用 arm64 真机安装包后再发起协助。',
-            ),
-          ] else if (!health.vntConnected) ...[
-            SizedBox(height: context.spacingMedium),
-            _buildWarningBox(
-              isDark,
-              '当前还未连接 VNT 虚拟网络。先建立组网连接后，Android 控制端才能通过虚拟 IP 发起协助。',
-            ),
-          ],
-        ],
-      ),
     );
   }
 
@@ -611,7 +582,9 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 SizedBox(width: context.spacingSmall),
                 OutlinedButton(
                   onPressed: _showAccessPasswordDialog,
-                  child: const Text('设置访问密码'),
+                  child: Text(
+                    remoteAccessPasswordActionLabel(_hasAccessPassword),
+                  ),
                 ),
               ],
             ),
@@ -805,7 +778,9 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
               OutlinedButton(
                 onPressed:
                     health.runtimeAvailable ? _showAccessPasswordDialog : null,
-                child: const Text('设置访问密码'),
+                child: Text(
+                  remoteAccessPasswordActionLabel(_hasAccessPassword),
+                ),
               ),
             ],
           ),

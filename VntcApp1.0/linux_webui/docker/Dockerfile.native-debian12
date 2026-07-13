@@ -1,0 +1,33 @@
+ARG RUST_VERSION=1.95.0
+FROM debian:12-slim AS builder
+
+ARG RUST_VERSION
+ARG VNTC_BUILD_TIME=not-injected
+
+RUN apt-get update \
+    && apt-get install --yes --no-install-recommends curl clang libclang-dev cmake pkg-config git ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN curl --proto '=https' --tlsv1.2 --fail --silent --show-error https://sh.rustup.rs \
+    | sh -s -- -y --profile minimal --default-toolchain "${RUST_VERSION}" \
+    && /root/.cargo/bin/rustup component add rustfmt
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+WORKDIR /src
+
+COPY linux_webui ./linux_webui
+COPY vendor/vnt-core-2.0.0 ./vendor/vnt-core-2.0.0
+COPY vendor/tun-rs-2.5.7 ./vendor/tun-rs-2.5.7
+
+RUN cargo fmt --manifest-path linux_webui/Cargo.toml --check \
+    && cargo test --manifest-path linux_webui/Cargo.toml --locked --all-targets \
+    && VNTC_BUILD_TIME="${VNTC_BUILD_TIME}" cargo build --manifest-path linux_webui/Cargo.toml --release --locked
+
+RUN install -d -m 0755 /out \
+    && install -m 0755 linux_webui/target/release/vntc-linux-webui /out/vntc-linux-webui \
+    && /out/vntc-linux-webui --help >/dev/null \
+    && /out/vntc-linux-webui --config linux_webui/config.example.json --check-config >/dev/null \
+    && ldd /out/vntc-linux-webui > /out/LINKED_LIBRARIES.txt
+
+FROM scratch AS export
+COPY --from=builder /out/ /

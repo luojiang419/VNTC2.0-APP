@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 
@@ -154,12 +155,34 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
         return;
       }
 
+      if (mounted) {
+        setState(() {
+          _statusText = Platform.isAndroid
+              ? '正在打开系统安装器...'
+              : '正在打开安装包...';
+        });
+      }
       await widget.service.openDownloadedInstaller(result);
       if (!mounted) {
         return;
       }
       showTopToast(context, '安装包已下载，已交给系统处理', isSuccess: true);
       Navigator.of(context).pop();
+    } on PlatformException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      final message = switch (error.code) {
+        'INSTALL_PERMISSION_DENIED' =>
+          '未授予安装权限，安装包已保留，可授权后重新安装',
+        'REQUEST_IN_PROGRESS' => '已有安装授权请求正在处理',
+        _ => '下载或打开失败: ${error.message ?? error.code}',
+      };
+      showTopToast(context, message, isSuccess: false);
+      setState(() {
+        _downloading = false;
+        _statusText = message;
+      });
     } catch (error) {
       if (!mounted) {
         return;

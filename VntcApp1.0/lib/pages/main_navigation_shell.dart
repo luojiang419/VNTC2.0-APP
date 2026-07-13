@@ -42,7 +42,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   VoidCallback? _refreshConfigList;
   VoidCallback? _refreshSettings;
 
-  bool get _showChatPage => !Platform.isAndroid;
+  bool get _showChatPage => true;
   bool get _showRemoteAssistPage =>
       !Platform.isAndroid || RemoteAssistConstants.androidRemoteAssistEnabled;
 

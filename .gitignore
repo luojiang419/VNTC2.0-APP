@@ -94,6 +94,9 @@ VntcApp1.0/config/config.json
 **/云服务器.md
 **/*云服务器*.md
 
+# 本地临时工作目录
+tmp/
+
 # 日志
 *.log
 logs/

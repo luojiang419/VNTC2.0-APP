@@ -8,6 +8,7 @@ list(APPEND FLUTTER_PLUGIN_LIST
   desktop_multi_window
   file_selector_linux
   flutter_custom_cursor
+  flutter_secure_storage_linux
   record_linux
   screen_retriever
   system_tray

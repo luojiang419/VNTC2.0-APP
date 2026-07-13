@@ -86,6 +86,11 @@ class RemoteAssistAndroidRuntime {
     await hbb_common.gFFI.serverModel.updatePasswordModel();
   }
 
+  Future<String> loadAccessPassword() async {
+    await ensureInitialized();
+    return (await hbb_platform.bind.mainGetPermanentPassword()).trim();
+  }
+
   Future<void> startControlledService() async {
     await ensureInitialized();
 

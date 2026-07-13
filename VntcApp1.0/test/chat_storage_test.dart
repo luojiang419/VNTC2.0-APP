@@ -431,29 +431,254 @@ void main() {
         conversationId: {'10.0.0.2': 2},
       },
     );
-    expect(
-      await reopened.nextSenderSequence(conversationId, '10.0.0.2'),
-      3,
+    expect(await reopened.nextSenderSequence(conversationId, '10.0.0.2'), 3);
+  });
+
+  test('清空当前会话会保留其他会话并阻止旧消息重新同步', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
     );
+    openedStorages.add(storage);
+    await storage.init();
+
+    const targetConversationId = 'dm:hall:test:10.0.0.2';
+    const otherConversationId = 'hall:test';
+    for (final conversation in const [
+      ChatConversation(
+        id: targetConversationId,
+        type: ChatConversationType.direct,
+        hallId: otherConversationId,
+        title: '设备 B',
+        unreadCount: 0,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 0,
+        updatedAtEpochMs: 0,
+        metadataJson: '{}',
+      ),
+      ChatConversation(
+        id: otherConversationId,
+        type: ChatConversationType.hall,
+        hallId: otherConversationId,
+        title: '公共大厅',
+        unreadCount: 0,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 0,
+        updatedAtEpochMs: 0,
+        metadataJson: '{}',
+      ),
+    ]) {
+      await storage.upsertConversation(conversation);
+    }
+
+    const textMessage = ChatMessageRecord(
+      id: 'clear-text-message',
+      conversationId: targetConversationId,
+      hallId: otherConversationId,
+      conversationType: ChatConversationType.direct,
+      senderVirtualIp: '10.0.0.2',
+      senderName: '设备 B',
+      senderSeq: 10,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.text,
+      status: ChatMessageStatus.sent,
+      text: '需要清理的文本',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 1000,
+      createdAtEpochMs: 1000,
+      metadataJson: '{}',
+    );
+    const attachment = ChatAttachmentRecord(
+      id: 'clear-attachment',
+      messageId: 'clear-file-message',
+      fileName: 'clear.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      relativePath: 'clear-file-message.txt',
+      autoSyncEligible: true,
+      payloadAvailable: true,
+      needsManualResend: false,
+      createdAtEpochMs: 2000,
+    );
+    const fileMessage = ChatMessageRecord(
+      id: 'clear-file-message',
+      conversationId: targetConversationId,
+      hallId: otherConversationId,
+      conversationType: ChatConversationType.direct,
+      senderVirtualIp: '10.0.0.2',
+      senderName: '设备 B',
+      senderSeq: 11,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.file,
+      status: ChatMessageStatus.sent,
+      text: 'clear.txt',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 2000,
+      createdAtEpochMs: 2000,
+      metadataJson: '{}',
+      attachmentId: 'clear-attachment',
+      attachment: attachment,
+    );
+    const otherMessage = ChatMessageRecord(
+      id: 'keep-message',
+      conversationId: otherConversationId,
+      hallId: otherConversationId,
+      conversationType: ChatConversationType.hall,
+      senderVirtualIp: '10.0.0.3',
+      senderName: '设备 C',
+      senderSeq: 1,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.text,
+      status: ChatMessageStatus.sent,
+      text: '其他会话保留',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 3000,
+      createdAtEpochMs: 3000,
+      metadataJson: '{}',
+    );
+    await storage.upsertMessage(textMessage, incrementUnread: true);
+    await storage.upsertMessage(
+      fileMessage,
+      attachment: attachment,
+      incrementUnread: true,
+    );
+    await storage.upsertMessage(otherMessage, incrementUnread: true);
+    await storage.writeAttachmentBytes(attachment.relativePath, [1, 2, 3, 4]);
+
+    expect(await storage.clearConversationMessages(targetConversationId), 2);
+    expect(await storage.loadMessages(targetConversationId), isEmpty);
+    expect(
+      (await storage.loadMessages(otherConversationId)).single.id,
+      otherMessage.id,
+    );
+    expect(
+      await File(
+        await storage.resolveAttachmentPath(attachment.relativePath),
+      ).exists(),
+      isFalse,
+    );
+    final clearedConversation = await storage.getConversation(
+      targetConversationId,
+    );
+    expect(clearedConversation?.unreadCount, 0);
+    expect(clearedConversation?.lastMessageAtEpochMs, 0);
+
+    await storage.upsertMessage(textMessage);
+    await storage.upsertMessage(fileMessage, attachment: attachment);
+    expect(await storage.loadMessages(targetConversationId), isEmpty);
+  });
+
+  test('删除私聊会话会清除消息附件并阻止旧消息恢复', () async {
+    final storage = ChatStorage(
+      databasePath: dbPath,
+      attachmentsDirectoryPath: attachmentDirPath,
+    );
+    openedStorages.add(storage);
+    await storage.init();
+
+    const conversationId = 'dm:hall:test:10.0.0.8';
+    const hallId = 'hall:test';
+    await storage.upsertConversation(
+      const ChatConversation(
+        id: conversationId,
+        type: ChatConversationType.direct,
+        hallId: hallId,
+        title: '待删除设备',
+        unreadCount: 1,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 2000,
+        updatedAtEpochMs: 2000,
+        metadataJson: '{}',
+      ),
+    );
+    await storage.upsertConversation(
+      const ChatConversation(
+        id: hallId,
+        type: ChatConversationType.hall,
+        hallId: hallId,
+        title: '保留的大厅',
+        unreadCount: 0,
+        lastReadAtEpochMs: 0,
+        lastMessageAtEpochMs: 0,
+        updatedAtEpochMs: 0,
+        metadataJson: '{}',
+      ),
+    );
+    const attachment = ChatAttachmentRecord(
+      id: 'delete-conversation-attachment',
+      messageId: 'delete-conversation-message',
+      fileName: 'delete.txt',
+      mimeType: 'text/plain',
+      sizeBytes: 4,
+      relativePath: 'delete-conversation-message.txt',
+      autoSyncEligible: true,
+      payloadAvailable: true,
+      needsManualResend: false,
+      createdAtEpochMs: 2000,
+    );
+    const message = ChatMessageRecord(
+      id: 'delete-conversation-message',
+      conversationId: conversationId,
+      hallId: hallId,
+      conversationType: ChatConversationType.direct,
+      senderVirtualIp: '10.0.0.8',
+      senderName: '待删除设备',
+      senderSeq: 6,
+      direction: ChatMessageDirection.incoming,
+      contentType: ChatMessageContentType.file,
+      status: ChatMessageStatus.sent,
+      text: 'delete.txt',
+      isSyncMessage: false,
+      isRead: false,
+      sentAtEpochMs: 2000,
+      createdAtEpochMs: 2000,
+      metadataJson: '{}',
+      attachmentId: 'delete-conversation-attachment',
+      attachment: attachment,
+    );
+    await storage.upsertMessage(
+      message,
+      attachment: attachment,
+      incrementUnread: true,
+    );
+    await storage.writeAttachmentBytes(attachment.relativePath, [1, 2, 3, 4]);
+
+    expect(await storage.deleteConversation(conversationId), isTrue);
+    expect(await storage.isMessageDeleted(message), isTrue);
+    expect(await storage.getConversation(conversationId), isNull);
+    expect(await storage.getConversation(hallId), isNotNull);
+    expect(await storage.loadMessages(conversationId), isEmpty);
+    expect(
+      await File(
+        await storage.resolveAttachmentPath(attachment.relativePath),
+      ).exists(),
+      isFalse,
+    );
+
+    await storage.upsertMessage(message, attachment: attachment);
+    expect(await storage.getConversation(conversationId), isNull);
+    expect(await storage.loadMessages(conversationId), isEmpty);
+    expect(await storage.deleteConversation(conversationId), isFalse);
   });
 
   group('默认聊天室存储目录', () {
     test('macOS 类平台使用应用支持目录，避免写入根目录 /config', () {
       final resolved =
           ChatStorage.resolveDefaultChatRootDirectoryPathForPlatform(
-        useApplicationSupportDirectory: true,
-        applicationSupportDirectoryPath:
-            path.join('/Users/test/Library/Application Support', 'vnt_app'),
-        configDirectoryPath: path.join(path.separator, 'config'),
-      );
+            useApplicationSupportDirectory: true,
+            applicationSupportDirectoryPath: path.join(
+              '/Users/test/Library/Application Support',
+              'vnt_app',
+            ),
+            configDirectoryPath: path.join(path.separator, 'config'),
+          );
 
       expect(
         resolved,
-        path.join(
-          '/Users/test/Library/Application Support',
-          'vnt_app',
-          'chat',
-        ),
+        path.join('/Users/test/Library/Application Support', 'vnt_app', 'chat'),
       );
       expect(resolved, isNot(path.join(path.separator, 'config', 'chat')));
     });
@@ -461,14 +686,16 @@ void main() {
     test('Windows 便携式场景继续使用 config 目录', () {
       final resolved =
           ChatStorage.resolveDefaultChatRootDirectoryPathForPlatform(
-        useApplicationSupportDirectory: false,
-        applicationSupportDirectoryPath:
-            path.join('/Users/test/Library/Application Support', 'vnt_app'),
-        configDirectoryPath: path.windows.join(
-          r'C:\Apps\VNT App 2.0',
-          'config',
-        ),
-      );
+            useApplicationSupportDirectory: false,
+            applicationSupportDirectoryPath: path.join(
+              '/Users/test/Library/Application Support',
+              'vnt_app',
+            ),
+            configDirectoryPath: path.windows.join(
+              r'C:\Apps\VNT App 2.0',
+              'config',
+            ),
+          );
 
       expect(
         resolved,

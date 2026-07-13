@@ -6,9 +6,11 @@ import 'package:flutter/foundation.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 
 import 'remote_assist_constants.dart';
+import 'remote_assist_android_adapter.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
 import 'remote_assist_macos_adapter.dart';
+import 'remote_assist_password_store.dart';
 import 'remote_assist_platform_adapter.dart';
 import 'remote_assist_presence_service.dart';
 import 'remote_assist_utils.dart';
@@ -23,6 +25,8 @@ class RemoteAssistManager extends ChangeNotifier {
   final RemoteAssistPlatformAdapter _adapter = _createAdapter();
   final RemoteAssistPresenceService _presenceService =
       RemoteAssistPresenceService();
+  final RemoteAssistPasswordStore _passwordStore =
+      RemoteAssistPasswordStore.instance;
 
   Timer? _refreshTimer;
   bool _started = false;
@@ -43,9 +47,10 @@ class RemoteAssistManager extends ChangeNotifier {
   List<RemoteAssistPeer> get peers => UnmodifiableListView(_peers);
 
   static RemoteAssistPlatformAdapter _createAdapter() {
-    if (Platform.isAndroid &&
-        !RemoteAssistConstants.androidRemoteAssistEnabled) {
-      return const RemoteAssistUnsupportedAdapter();
+    if (Platform.isAndroid) {
+      return RemoteAssistConstants.androidRemoteAssistEnabled
+          ? RemoteAssistAndroidAdapter()
+          : const RemoteAssistUnsupportedAdapter();
     }
     if (Platform.isWindows) {
       return RemoteAssistWindowsAdapter();
@@ -212,6 +217,22 @@ class RemoteAssistManager extends ChangeNotifier {
   Future<void> configureAccessPassword(String password) async {
     await _adapter.configureAccessPassword(password);
     await refresh();
+  }
+
+  Future<String> loadAccessPassword() {
+    return _adapter.loadAccessPassword();
+  }
+
+  Future<String> loadSavedPeerPassword(String peerKey) {
+    return _passwordStore.load(peerKey);
+  }
+
+  Future<void> savePeerPassword(String peerKey, String password) {
+    return _passwordStore.save(peerKey, password);
+  }
+
+  Future<void> deleteSavedPeerPassword(String peerKey) {
+    return _passwordStore.delete(peerKey);
   }
 
   Future<void> repair() async {

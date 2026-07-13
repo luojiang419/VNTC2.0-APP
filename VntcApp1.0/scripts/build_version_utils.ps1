@@ -10,6 +10,13 @@ function Get-VntBuildVersion {
 function Get-NextVntBuildVersion {
     param([Parameter(Mandatory = $true)][string]$CurrentVersion)
 
+    if ($CurrentVersion -match '^(\d+)\.(\d+)\.(\d+)$') {
+        $major = [int]$Matches[1]
+        $minor = [int]$Matches[2]
+        $patch = [int]$Matches[3] + 1
+        return "$major.$minor.$patch"
+    }
+
     $nextVersion = [decimal]::Parse(
         $CurrentVersion,
         [System.Globalization.CultureInfo]::InvariantCulture

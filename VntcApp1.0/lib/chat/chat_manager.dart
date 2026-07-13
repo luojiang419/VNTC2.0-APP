@@ -5,6 +5,7 @@ import 'package:flutter/foundation.dart';
 import 'package:mime/mime.dart';
 import 'package:path/path.dart' as path;
 import 'package:uuid/uuid.dart';
+import 'package:vnt_app/chat/chat_android_permission_service.dart';
 import 'package:vnt_app/chat/chat_constants.dart';
 import 'package:vnt_app/chat/chat_firewall_service.dart';
 import 'package:vnt_app/chat/chat_log.dart';
@@ -20,8 +21,9 @@ import 'package:vnt_app/vnt/vnt_manager.dart';
 bool isChatSupportedPlatform({
   required bool isWindows,
   required bool isMacOS,
+  required bool isAndroid,
 }) {
-  return isWindows || isMacOS;
+  return isWindows || isMacOS || isAndroid;
 }
 
 @visibleForTesting
@@ -110,6 +112,8 @@ class ChatManager extends ChangeNotifier {
   final ChatPresenceService _presenceService = ChatPresenceService();
   final ChatTransportService _transportService = ChatTransportService();
   final ChatFirewallService _firewallService = ChatFirewallService();
+  final ChatAndroidPermissionService _androidPermissionService =
+      ChatAndroidPermissionService.instance;
   final Uuid _uuid = const Uuid();
 
   Timer? _refreshTimer;
@@ -126,10 +130,10 @@ class ChatManager extends ChangeNotifier {
   List<ChatRoomDescriptor> _rooms = const [];
   final Map<String, List<ChatMessageRecord>> _messageCache = {};
   final Map<String, ChatAttachmentTransferProgress>
-      _attachmentTransferProgress = {};
+  _attachmentTransferProgress = {};
   final Set<String> _locallyDeletedMessageIds = {};
   final Map<String, _IncomingAttachmentTransferState>
-      _incomingAttachmentTransfers = {};
+  _incomingAttachmentTransfers = {};
   int _privateUnreadTotal = 0;
 
   List<ChatHall> _halls = const [];
@@ -149,9 +153,10 @@ class ChatManager extends ChangeNotifier {
   List<String> _lastSkippedVntStates = const [];
 
   bool get supported => isChatSupportedPlatform(
-        isWindows: Platform.isWindows,
-        isMacOS: Platform.isMacOS,
-      );
+    isWindows: Platform.isWindows,
+    isMacOS: Platform.isMacOS,
+    isAndroid: Platform.isAndroid,
+  );
   bool get loading => _loading || _refreshing;
   bool get started => _started;
   ChatMainTab get selectedTab => _selectedTab;
@@ -168,10 +173,10 @@ class ChatManager extends ChangeNotifier {
   bool get hasActiveVntConnections =>
       _observedVntConnectionCount > 0 || _hasLiveVntConnectionSnapshot();
   String? get chatStartupIssue => buildChatStartupIssueMessage(
-        transportError: _transportStartError,
-        presenceError: _presenceStartError,
-        refreshError: _refreshError,
-      );
+    transportError: _transportStartError,
+    presenceError: _presenceStartError,
+    refreshError: _refreshError,
+  );
   String? get lastVntConnectionIssue =>
       _lastSkippedVntStates.isEmpty ? null : _lastSkippedVntStates.first;
   List<ChatMessageRecord> get selectedMessages =>
@@ -181,13 +186,13 @@ class ChatManager extends ChangeNotifier {
 
   ChatAttachmentTransferProgress? attachmentTransferProgressFor(
     String messageId,
-  ) =>
-      _attachmentTransferProgress[messageId];
+  ) => _attachmentTransferProgress[messageId];
 
   List<ChatConversation> get directConversations =>
       List<ChatConversation>.unmodifiable(
-        _conversations
-            .where((item) => item.type == ChatConversationType.direct),
+        _conversations.where(
+          (item) => item.type == ChatConversationType.direct,
+        ),
       );
 
   bool _hasLiveVntConnectionSnapshot() {
@@ -233,8 +238,9 @@ class ChatManager extends ChangeNotifier {
     );
     for (final conversation in conversations) {
       final localHallId = _resolveLocalHallId(conversation.hallId);
-      final peerVirtualIp =
-          normalizeChatVirtualIp(conversation.peerVirtualIp ?? '');
+      final peerVirtualIp = normalizeChatVirtualIp(
+        conversation.peerVirtualIp ?? '',
+      );
       if (localHallId == null || peerVirtualIp.isEmpty) {
         continue;
       }
@@ -284,8 +290,10 @@ class ChatManager extends ChangeNotifier {
     if (creatorSeparator <= 'room:'.length) {
       return value;
     }
-    final creatorVirtualIp =
-        value.substring(creatorSeparator + 1, tokenSeparator);
+    final creatorVirtualIp = value.substring(
+      creatorSeparator + 1,
+      tokenSeparator,
+    );
     final roomToken = value.substring(tokenSeparator + 1);
     if (creatorVirtualIp.trim().isEmpty || roomToken.trim().isEmpty) {
       return value;
@@ -329,10 +337,10 @@ class ChatManager extends ChangeNotifier {
     final conversationId = switch (message.conversationType) {
       ChatConversationType.hall => localHallId,
       ChatConversationType.direct => buildDirectConversationId(
-          hallId: localHallId,
-          firstVirtualIp: localNode.hall.localVirtualIp,
-          secondVirtualIp: message.senderVirtualIp,
-        ),
+        hallId: localHallId,
+        firstVirtualIp: localNode.hall.localVirtualIp,
+        secondVirtualIp: message.senderVirtualIp,
+      ),
       ChatConversationType.room => roomId ?? message.conversationId,
     };
     return ChatMessageRecord(
@@ -365,9 +373,7 @@ class ChatManager extends ChangeNotifier {
     required Object? networkConfig,
     required String canonicalHallId,
   }) {
-    final servers = <String>{
-      connectServer,
-    };
+    final servers = <String>{connectServer};
     try {
       final config = networkConfig as dynamic;
       final primary = config.primaryServerAddress?.toString() ?? '';
@@ -421,8 +427,10 @@ class ChatManager extends ChangeNotifier {
     if (creatorSeparator <= 'room:'.length) {
       return value;
     }
-    final creatorVirtualIp =
-        value.substring(creatorSeparator + 1, tokenSeparator);
+    final creatorVirtualIp = value.substring(
+      creatorSeparator + 1,
+      tokenSeparator,
+    );
     final roomToken = value.substring(tokenSeparator + 1);
     if (creatorVirtualIp.trim().isEmpty || roomToken.trim().isEmpty) {
       return value;
@@ -453,7 +461,9 @@ class ChatManager extends ChangeNotifier {
         );
       case ChatConversationType.room:
         return _legacyRoomIdForHallAlias(
-                roomId ?? conversationId, aliasHallId) ??
+              roomId ?? conversationId,
+              aliasHallId,
+            ) ??
             conversationId;
     }
   }
@@ -520,8 +530,11 @@ class ChatManager extends ChangeNotifier {
               requesterVirtualIp: syncRequest.requesterVirtualIp,
               requesterName: syncRequest.requesterName,
               joinedRoomIds: syncRequest.joinedRoomIds
-                  .map((roomId) =>
-                      _legacyRoomIdForHallAlias(roomId, aliasHallId) ?? roomId)
+                  .map(
+                    (roomId) =>
+                        _legacyRoomIdForHallAlias(roomId, aliasHallId) ??
+                        roomId,
+                  )
                   .toList(growable: false),
               summary: syncRequest.summary.map(
                 (conversationId, value) => MapEntry(
@@ -530,8 +543,8 @@ class ChatManager extends ChangeNotifier {
                     type: conversationId == localNode.hall.id
                         ? ChatConversationType.hall
                         : conversationId.startsWith('dm:')
-                            ? ChatConversationType.direct
-                            : ChatConversationType.room,
+                        ? ChatConversationType.direct
+                        : ChatConversationType.room,
                     aliasHallId: aliasHallId,
                     localNode: localNode,
                     targetIp: targetIp,
@@ -583,9 +596,11 @@ class ChatManager extends ChangeNotifier {
     var sent = false;
     final packets = <ChatTransportPacket>[packet];
     for (var index = 0; index < packets.length; index += 1) {
-      for (var attempt = 1;
-          attempt <= ChatConstants.attachmentTransferMaxAttempts;
-          attempt += 1) {
+      for (
+        var attempt = 1;
+        attempt <= ChatConstants.attachmentTransferMaxAttempts;
+        attempt += 1
+      ) {
         try {
           await _transportService.sendAttachmentStream(
             targetIp: targetIp,
@@ -683,6 +698,9 @@ class ChatManager extends ChangeNotifier {
 
     _ensureVntConnectionListener();
     _ensureRefreshTimer();
+    await _androidPermissionService.ensureLocalNetworkPermission(
+      requestIfNeeded: true,
+    );
     await _ensureTransportStarted();
     await refresh();
     await ChatLog.write('聊天室管理器已启动');
@@ -725,13 +743,10 @@ class ChatManager extends ChangeNotifier {
   }
 
   void _ensureRefreshTimer() {
-    _refreshTimer ??= Timer.periodic(
-      ChatConstants.refreshInterval,
-      (_) {
-        unawaited(_ensureTransportStarted());
-        unawaited(refresh());
-      },
-    );
+    _refreshTimer ??= Timer.periodic(ChatConstants.refreshInterval, (_) {
+      unawaited(_ensureTransportStarted());
+      unawaited(refresh());
+    });
   }
 
   Future<void> _ensureTransportStarted() async {
@@ -743,6 +758,12 @@ class ChatManager extends ChangeNotifier {
     }
     _transportStartInProgress = true;
     try {
+      final permissionGranted = await _androidPermissionService
+          .ensureLocalNetworkPermission();
+      if (!permissionGranted) {
+        _transportStartError = chatAndroidLocalNetworkPermissionIssue();
+        return;
+      }
       await _transportService.start(
         onPacket: _handleTransportPacket,
         onAttachmentStream: _openIncomingAttachmentStream,
@@ -751,9 +772,7 @@ class ChatManager extends ChangeNotifier {
       await ChatLog.write('聊天室消息监听已就绪');
     } catch (error) {
       _transportStartError = error.toString();
-      await ChatLog.write(
-        '聊天室消息监听启动失败，继续刷新 VNT 大厅: $error',
-      );
+      await ChatLog.write('聊天室消息监听启动失败，继续刷新 VNT 大厅: $error');
     } finally {
       _transportStartInProgress = false;
       notifyListeners();
@@ -806,7 +825,9 @@ class ChatManager extends ChangeNotifier {
           continue;
         }
         joinedRoomsByHall.putIfAbsent(
-            room.hallId, () => <ChatRoomDescriptor>[]);
+          room.hallId,
+          () => <ChatRoomDescriptor>[],
+        );
         joinedRoomsByHall[room.hallId]!.add(room);
       }
 
@@ -839,14 +860,18 @@ class ChatManager extends ChangeNotifier {
         try {
           final currentDevice = box.currentDevice();
           final networkConfig = box.getNetConfig();
-          final localVirtualIp =
-              (currentDevice['virtualIp'] ?? '').toString().trim();
-          final virtualNetwork =
-              (currentDevice['virtualNetwork'] ?? '').toString().trim();
-          final connectServer =
-              (currentDevice['connectServer'] ?? '').toString().trim();
-          final virtualNetmask =
-              (currentDevice['virtualNetmask'] ?? '').toString().trim();
+          final localVirtualIp = (currentDevice['virtualIp'] ?? '')
+              .toString()
+              .trim();
+          final virtualNetwork = (currentDevice['virtualNetwork'] ?? '')
+              .toString()
+              .trim();
+          final connectServer = (currentDevice['connectServer'] ?? '')
+              .toString()
+              .trim();
+          final virtualNetmask = (currentDevice['virtualNetmask'] ?? '')
+              .toString()
+              .trim();
           if (localVirtualIp.isEmpty || virtualNetwork.isEmpty) {
             final configName = networkConfig?.configName.trim();
             final status = (currentDevice['status'] ?? '').toString().trim();
@@ -862,14 +887,15 @@ class ChatManager extends ChangeNotifier {
           final hallId = buildHallId(
             connectServer: connectServer.isEmpty ? 'unknown' : connectServer,
             virtualNetwork: virtualNetwork,
+            virtualNetmask: virtualNetmask,
           );
           final hallTitle = networkConfig?.configName.trim().isNotEmpty == true
               ? networkConfig!.configName.trim()
               : (connectServer.isEmpty ? virtualNetwork : connectServer);
           final displayName =
               networkConfig?.deviceName.trim().isNotEmpty == true
-                  ? networkConfig!.deviceName.trim()
-                  : hallTitle;
+              ? networkConfig!.deviceName.trim()
+              : hallTitle;
           final peerDevices = box.peerDeviceList();
           final peerVirtualIps = peerDevices
               .map((item) => item.virtualIp.trim())
@@ -877,18 +903,29 @@ class ChatManager extends ChangeNotifier {
               .toSet()
               .toList(growable: false);
 
-          nextHalls.add(
-            ChatHall(
-              id: hallId,
-              title: hallTitle,
-              networkName: virtualNetwork,
-              connectServer: connectServer,
-              localVirtualIp: localVirtualIp,
-              peerVirtualIps: peerVirtualIps,
-            ),
+          final existingHallIndex = nextHalls.indexWhere(
+            (hall) => hall.id == hallId,
           );
+          final mergedPeerVirtualIps = <String>{
+            if (existingHallIndex >= 0)
+              ...nextHalls[existingHallIndex].peerVirtualIps,
+            ...peerVirtualIps,
+          }.toList(growable: false);
+          final hall = ChatHall(
+            id: hallId,
+            title: hallTitle,
+            networkName: virtualNetwork,
+            connectServer: connectServer,
+            localVirtualIp: localVirtualIp,
+            peerVirtualIps: mergedPeerVirtualIps,
+          );
+          if (existingHallIndex >= 0) {
+            nextHalls[existingHallIndex] = hall;
+          } else {
+            nextHalls.add(hall);
+          }
           nextLocalNodes[hallId] = _LocalHallNode(
-            hall: nextHalls.last,
+            hall: hall,
             displayName: displayName,
             joinedRooms:
                 joinedRoomsByHall[hallId] ?? const <ChatRoomDescriptor>[],
@@ -944,46 +981,41 @@ class ChatManager extends ChangeNotifier {
       try {
         await _mergeDirectConversationAliases();
       } catch (error, stackTrace) {
-        await _recordRefreshIssue(
-          refreshIssues,
-          '合并重复私聊会话',
-          error,
-          stackTrace,
-        );
+        await _recordRefreshIssue(refreshIssues, '合并重复私聊会话', error, stackTrace);
       }
 
       try {
         await _ensureHallConversations();
       } catch (error, stackTrace) {
-        await _recordRefreshIssue(
-          refreshIssues,
-          '写入大厅会话',
-          error,
-          stackTrace,
-        );
+        await _recordRefreshIssue(refreshIssues, '写入大厅会话', error, stackTrace);
       }
       try {
-        await _presenceService.updateContexts(
-          contexts: nextLocalNodes.values
-              .map(
-                (node) => ChatPresenceContext(
-                  hallId: node.hall.id,
-                  hallTitle: node.hall.title,
-                  displayName: node.displayName,
-                  virtualIp: node.hall.localVirtualIp,
-                  peerVirtualIps: node.hall.peerVirtualIps,
-                  rooms: node.joinedRooms,
-                ),
-              )
-              .toList(growable: false),
-          onSnapshot: _handlePresenceSnapshot,
-        );
-        _presenceStartError = null;
+        final permissionGranted = await _androidPermissionService
+            .ensureLocalNetworkPermission();
+        if (!permissionGranted) {
+          await _presenceService.stop();
+          _presenceStartError = chatAndroidLocalNetworkPermissionIssue();
+        } else {
+          await _presenceService.updateContexts(
+            contexts: nextLocalNodes.values
+                .map(
+                  (node) => ChatPresenceContext(
+                    hallId: node.hall.id,
+                    hallTitle: node.hall.title,
+                    displayName: node.displayName,
+                    virtualIp: node.hall.localVirtualIp,
+                    peerVirtualIps: node.hall.peerVirtualIps,
+                    rooms: node.joinedRooms,
+                  ),
+                )
+                .toList(growable: false),
+            onSnapshot: _handlePresenceSnapshot,
+          );
+          _presenceStartError = null;
+        }
       } catch (error) {
         _presenceStartError = error.toString();
-        await ChatLog.write(
-          '聊天室在线状态广播更新失败，继续保留 VNT 大厅: $error',
-        );
+        await ChatLog.write('聊天室在线状态广播更新失败，继续保留 VNT 大厅: $error');
       }
 
       try {
@@ -999,32 +1031,17 @@ class ChatManager extends ChangeNotifier {
       try {
         await reloadFromStorage(notify: false);
       } catch (error, stackTrace) {
-        await _recordRefreshIssue(
-          refreshIssues,
-          '重新加载聊天记录',
-          error,
-          stackTrace,
-        );
+        await _recordRefreshIssue(refreshIssues, '重新加载聊天记录', error, stackTrace);
       }
       try {
         _mergeOnlinePeers();
       } catch (error, stackTrace) {
-        await _recordRefreshIssue(
-          refreshIssues,
-          '合并在线用户',
-          error,
-          stackTrace,
-        );
+        await _recordRefreshIssue(refreshIssues, '合并在线用户', error, stackTrace);
       }
       try {
         await _syncKnownPeers();
       } catch (error, stackTrace) {
-        await _recordRefreshIssue(
-          refreshIssues,
-          '同步已知聊天节点',
-          error,
-          stackTrace,
-        );
+        await _recordRefreshIssue(refreshIssues, '同步已知聊天节点', error, stackTrace);
       }
       try {
         await _syncFirewallRulesIfNeeded();
@@ -1080,8 +1097,9 @@ class ChatManager extends ChangeNotifier {
     required List<String> skippedStates,
   }) async {
     final hallSummary = halls
-        .map((hall) =>
-            '${hall.title}/${hall.localVirtualIp}/${hall.networkName}')
+        .map(
+          (hall) => '${hall.title}/${hall.localVirtualIp}/${hall.networkName}',
+        )
         .join(',');
     final skippedSummary = skippedStates.join('; ');
     final stateKey = '$activeVntConnections|$hallSummary|$skippedSummary';
@@ -1112,7 +1130,6 @@ class ChatManager extends ChangeNotifier {
 
   Future<void> selectHall(String hallId) async {
     _selectedHallId = hallId;
-    _selectedTab = ChatMainTab.hall;
     await openConversation(hallId);
   }
 
@@ -1124,6 +1141,15 @@ class ChatManager extends ChangeNotifier {
         conversation.type == ChatConversationType.direct) {
       await markConversationRead(conversationId, notify: false);
     }
+    notifyListeners();
+  }
+
+  void clearSelectedConversation({ChatConversationType? type}) {
+    final conversation = selectedConversation;
+    if (type != null && conversation?.type != type) {
+      return;
+    }
+    _selectedConversationId = null;
     notifyListeners();
   }
 
@@ -1144,6 +1170,54 @@ class ChatManager extends ChangeNotifier {
     }
     notifyListeners();
     return deleted;
+  }
+
+  Future<int> clearConversationMessages(String conversationId) async {
+    final cachedMessages = List<ChatMessageRecord>.of(
+      _messageCache[conversationId] ?? const [],
+    );
+    final clearedCount = await _storage.clearConversationMessages(
+      conversationId,
+    );
+    for (final message in cachedMessages) {
+      _locallyDeletedMessageIds.add(message.id);
+      _attachmentTransferProgress.remove(message.id);
+    }
+    await loadConversationMessages(conversationId);
+    await reloadFromStorage(notify: false);
+    notifyListeners();
+    return clearedCount;
+  }
+
+  Future<bool> deleteDirectConversation(String conversationId) async {
+    final conversation = _conversations
+        .where((item) => item.id == conversationId)
+        .firstOrNull;
+    if (conversation == null) {
+      return false;
+    }
+    if (conversation.type != ChatConversationType.direct) {
+      throw StateError('只能删除私聊会话');
+    }
+
+    final cachedMessages = List<ChatMessageRecord>.of(
+      _messageCache[conversationId] ?? const [],
+    );
+    final deleted = await _storage.deleteConversation(conversationId);
+    if (!deleted) {
+      return false;
+    }
+    for (final message in cachedMessages) {
+      _locallyDeletedMessageIds.add(message.id);
+      _attachmentTransferProgress.remove(message.id);
+    }
+    _messageCache.remove(conversationId);
+    if (_selectedConversationId == conversationId) {
+      _selectedConversationId = null;
+    }
+    await reloadFromStorage(notify: false);
+    notifyListeners();
+    return true;
   }
 
   Future<void> markConversationRead(
@@ -1190,7 +1264,11 @@ class ChatManager extends ChangeNotifier {
     await openConversation(conversationId);
   }
 
-  Future<void> createRoom(String hallId, String roomName) async {
+  Future<void> createRoom(
+    String hallId,
+    String roomName, {
+    String password = '',
+  }) async {
     final localNode = _localNodes[hallId];
     if (localNode == null) {
       throw StateError('当前大厅未在线，暂时无法创建房间');
@@ -1214,15 +1292,21 @@ class ChatManager extends ChangeNotifier {
       isActive: true,
       lastSeenAtEpochMs: now,
       updatedAtEpochMs: now,
+      metadataJson: createChatRoomPasswordMetadata(password),
     );
     await _storage.upsertRoomDescriptor(room);
     await _ensureRoomConversation(room);
     await reloadFromStorage(notify: false);
     await refresh();
+    _selectedTab = ChatMainTab.rooms;
     await openConversation(roomId);
   }
 
-  Future<void> joinRoom(ChatRoomDescriptor room) async {
+  Future<void> joinRoom(ChatRoomDescriptor room, {String password = ''}) async {
+    if (chatRoomRequiresPassword(room.metadataJson) &&
+        !verifyChatRoomPassword(password, room.metadataJson)) {
+      throw ArgumentError('房间密码错误');
+    }
     final now = DateTime.now().millisecondsSinceEpoch;
     await _storage.upsertRoomDescriptor(
       room.copyWith(
@@ -1235,16 +1319,14 @@ class ChatManager extends ChangeNotifier {
     await _ensureRoomConversation(room);
     await reloadFromStorage(notify: false);
     await refresh();
+    _selectedTab = ChatMainTab.rooms;
     await openConversation(room.roomId);
   }
 
   Future<void> leaveRoom(ChatRoomDescriptor room) async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await _storage.upsertRoomDescriptor(
-      room.copyWith(
-        locallyJoined: false,
-        updatedAtEpochMs: now,
-      ),
+      room.copyWith(locallyJoined: false, updatedAtEpochMs: now),
     );
     await reloadFromStorage(notify: false);
     await refresh();
@@ -1436,11 +1518,9 @@ class ChatManager extends ChangeNotifier {
     final mimeType =
         lookupMimeType(sourceFilePath) ?? 'application/octet-stream';
     final sizeBytes = await sourceFile.length();
-    final contentType = explicitContentType ??
-        _contentTypeFromMimeType(
-          mimeType,
-          fallbackPath: sourceFilePath,
-        );
+    final contentType =
+        explicitContentType ??
+        _contentTypeFromMimeType(mimeType, fallbackPath: sourceFilePath);
     final relativePath = '$messageId${path.extension(sourceFilePath)}';
     final attachment = ChatAttachmentRecord(
       id: attachmentId,
@@ -1501,9 +1581,11 @@ class ChatManager extends ChangeNotifier {
         type: 'attachment_stream',
         message: localMessage.copyWith(status: ChatMessageStatus.sent),
       );
-      for (var recipientIndex = 0;
-          recipientIndex < recipients.length;
-          recipientIndex += 1) {
+      for (
+        var recipientIndex = 0;
+        recipientIndex < recipients.length;
+        recipientIndex += 1
+      ) {
         final recipient = recipients[recipientIndex];
         _updateAttachmentTransfer(
           messageId: messageId,
@@ -1524,7 +1606,7 @@ class ChatManager extends ChangeNotifier {
                   : (sizeBytes * sentBytes ~/ totalBytes);
               final transferredBytes =
                   ((sizeBytes * recipientIndex) + currentRecipientBytes) ~/
-                      recipients.length;
+                  recipients.length;
               final elapsedMilliseconds =
                   DateTime.now().millisecondsSinceEpoch - now;
               _updateAttachmentTransfer(
@@ -1598,8 +1680,9 @@ class ChatManager extends ChangeNotifier {
     if (attachment == null) {
       throw StateError('附件记录缺失，无法重发');
     }
-    final filePath =
-        await _storage.resolveAttachmentPath(attachment.relativePath);
+    final filePath = await _storage.resolveAttachmentPath(
+      attachment.relativePath,
+    );
     return sendAttachment(
       conversationId: message.conversationId,
       sourceFilePath: filePath,
@@ -1661,6 +1744,10 @@ class ChatManager extends ChangeNotifier {
       );
       return null;
     }
+    if (await _storage.isMessageDeleted(remoteMessage)) {
+      await ChatLog.write('丢弃本机已删除消息的附件流 id=${remoteMessage.id}');
+      return null;
+    }
     final transferKey = '${remoteAddress.address}|${remoteMessage.id}';
     var transfer = _incomingAttachmentTransfers[transferKey];
     if (transfer == null || transfer.expectedBytes != attachment.sizeBytes) {
@@ -1711,16 +1798,31 @@ class ChatManager extends ChangeNotifier {
       localHallId,
       localNode,
     );
+    if (await _storage.isMessageDeleted(remoteMessage)) {
+      await ChatLog.write('丢弃本机已删除的聊天消息 id=${remoteMessage.id}');
+      return;
+    }
+    if (remoteMessage.conversationType == ChatConversationType.room) {
+      final roomId = remoteMessage.roomId ?? remoteMessage.conversationId;
+      final joined = _rooms.any(
+        (room) => room.roomId == roomId && room.locallyJoined,
+      );
+      if (!joined) {
+        await ChatLog.write('丢弃未加入房间的消息 room=$roomId');
+        return;
+      }
+    }
 
     final conversationId = remoteMessage.conversationId;
     final existing = await _storage.getConversation(conversationId);
     final now = DateTime.now().millisecondsSinceEpoch;
-    final isOpenDirectConversation = _selectedTab == ChatMainTab.direct &&
+    final isOpenDirectConversation =
+        _selectedTab == ChatMainTab.direct &&
         _selectedConversationId == conversationId;
     final shouldIncrementUnread =
         remoteMessage.conversationType == ChatConversationType.direct &&
-            !isOpenDirectConversation &&
-            remoteMessage.sentAtEpochMs > (existing?.lastReadAtEpochMs ?? 0);
+        !isOpenDirectConversation &&
+        remoteMessage.sentAtEpochMs > (existing?.lastReadAtEpochMs ?? 0);
 
     ChatAttachmentRecord? incomingAttachment = remoteMessage.attachment;
     if (incomingAttachment != null) {
@@ -1761,12 +1863,12 @@ class ChatManager extends ChangeNotifier {
         metadataJson: existing?.metadataJson ?? '{}',
         peerVirtualIp:
             remoteMessage.conversationType == ChatConversationType.direct
-                ? remoteMessage.senderVirtualIp
-                : existing?.peerVirtualIp,
+            ? remoteMessage.senderVirtualIp
+            : existing?.peerVirtualIp,
         peerDisplayName:
             remoteMessage.conversationType == ChatConversationType.direct
-                ? remoteMessage.senderName
-                : existing?.peerDisplayName,
+            ? remoteMessage.senderName
+            : existing?.peerDisplayName,
         roomId: remoteMessage.roomId ?? existing?.roomId,
       ),
     );
@@ -1790,8 +1892,8 @@ class ChatManager extends ChangeNotifier {
       metadataJson: remoteMessage.metadataJson,
       peerVirtualIp:
           remoteMessage.conversationType == ChatConversationType.direct
-              ? remoteMessage.senderVirtualIp
-              : remoteMessage.peerVirtualIp,
+          ? remoteMessage.senderVirtualIp
+          : remoteMessage.peerVirtualIp,
       roomId: remoteMessage.roomId,
       attachmentId: remoteMessage.attachmentId,
       attachment: incomingAttachment,
@@ -1950,8 +2052,9 @@ class ChatManager extends ChangeNotifier {
               hallId: peer.hallId,
               requesterVirtualIp: localNode.hall.localVirtualIp,
               requesterName: localNode.displayName,
-              joinedRoomIds:
-                  localNode.joinedRooms.map((item) => item.roomId).toList(),
+              joinedRoomIds: localNode.joinedRooms
+                  .map((item) => item.roomId)
+                  .toList(),
               summary: summary,
             ),
           ),
@@ -2017,6 +2120,7 @@ class ChatManager extends ChangeNotifier {
           isActive: true,
           lastSeenAtEpochMs: announcement.sentAtEpochMs,
           updatedAtEpochMs: now,
+          metadataJson: room.metadataJson,
         );
         activeRoomIdsByHall.putIfAbsent(room.hallId, () => <String>{});
         activeRoomIdsByHall[room.hallId]!.add(room.roomId);
@@ -2054,9 +2158,7 @@ class ChatManager extends ChangeNotifier {
     );
   }
 
-  void _handlePresenceSnapshot(
-    Map<String, ChatPresenceAnnouncement> snapshot,
-  ) {
+  void _handlePresenceSnapshot(Map<String, ChatPresenceAnnouncement> snapshot) {
     final normalizedSnapshot = <String, ChatPresenceAnnouncement>{};
     for (final announcement in snapshot.values) {
       final localHallId = _resolveLocalHallId(announcement.hallId);
@@ -2074,16 +2176,19 @@ class ChatManager extends ChangeNotifier {
         sentAtEpochMs: announcement.sentAtEpochMs,
       );
       normalizedSnapshot[buildPresencePeerKey(
-        hallId: localHallId,
-        virtualIp: announcement.virtualIp,
-      )] = normalizedAnnouncement;
+            hallId: localHallId,
+            virtualIp: announcement.virtualIp,
+          )] =
+          normalizedAnnouncement;
     }
     _presenceCache = normalizedSnapshot;
     _mergeOnlinePeers();
-    unawaited(_reconcilePresenceAndRooms().then((_) async {
-      await reloadFromStorage(notify: false);
-      notifyListeners();
-    }));
+    unawaited(
+      _reconcilePresenceAndRooms().then((_) async {
+        await reloadFromStorage(notify: false);
+        notifyListeners();
+      }),
+    );
   }
 
   void _mergeOnlinePeers() {
@@ -2132,10 +2237,9 @@ class ChatManager extends ChangeNotifier {
     }
 
     if (conversation.type == ChatConversationType.hall) {
-      return hallPeers(conversation.hallId)
-          .map((peer) => peer.virtualIp)
-          .toSet()
-          .toList(growable: false);
+      return hallPeers(
+        conversation.hallId,
+      ).map((peer) => peer.virtualIp).toSet().toList(growable: false);
     }
 
     final roomId = conversation.roomId ?? conversation.id;
@@ -2254,8 +2358,9 @@ class _IncomingAttachmentStreamSink implements ChatAttachmentStreamSink {
       return;
     }
     final temporaryFile = File(_temporaryPath);
-    _receivedBytes =
-        await temporaryFile.exists() ? await temporaryFile.length() : 0;
+    _receivedBytes = await temporaryFile.exists()
+        ? await temporaryFile.length()
+        : 0;
     if (_receivedBytes > expectedBytes) {
       await temporaryFile.delete();
       _receivedBytes = 0;

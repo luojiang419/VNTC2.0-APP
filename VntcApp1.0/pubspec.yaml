@@ -40,6 +40,7 @@ dependencies:
   cupertino_icons: ^1.0.6
   device_info_plus: ^10.0.0
   shared_preferences: ^2.0.0
+  flutter_secure_storage: 9.2.4
   rust_lib_vnt_app:
     path: rust_builder
   flutter_rust_bridge: 2.1.0
