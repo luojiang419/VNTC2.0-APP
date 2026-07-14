@@ -4,6 +4,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vnt_app/chat/chat_constants.dart';
 import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/chat/chat_security.dart';
 import 'package:vnt_app/chat/chat_transport_service.dart';
@@ -370,6 +371,125 @@ void main() {
     }
   });
 
+  test('附件测速按全部接收方的实际网络字节计算', () {
+    final sample = calculateAttachmentTransferSample(
+      fileBytes: 1024 * 1024,
+      recipientIndex: 2,
+      recipientCount: 5,
+      recipientSentBytes: 512 * 1024,
+      elapsedMilliseconds: 2500,
+    );
+
+    expect(sample.totalBytes, 5 * 1024 * 1024);
+    expect(sample.transferredBytes, 2 * 1024 * 1024 + 512 * 1024);
+    expect(sample.bytesPerSecond, 1024 * 1024);
+  });
+
+  test('附件测速在私聊中保持单连接吞吐', () {
+    final sample = calculateAttachmentTransferSample(
+      fileBytes: 1024 * 1024,
+      recipientIndex: 0,
+      recipientCount: 1,
+      recipientSentBytes: 1024 * 1024,
+      elapsedMilliseconds: 2000,
+    );
+
+    expect(sample.totalBytes, 1024 * 1024);
+    expect(sample.transferredBytes, 1024 * 1024);
+    expect(sample.bytesPerSecond, 512 * 1024);
+  });
+
+  test('附件进度限制刷新频率但不会延迟最终进度', () {
+    expect(
+      shouldPublishAttachmentProgress(
+        sentBytes: 64 * 1024,
+        totalBytes: 1024 * 1024,
+        elapsedMilliseconds: 199,
+        lastPublishedElapsedMilliseconds: 0,
+        minimumInterval: ChatConstants.attachmentProgressUpdateInterval,
+      ),
+      isFalse,
+    );
+    expect(
+      shouldPublishAttachmentProgress(
+        sentBytes: 128 * 1024,
+        totalBytes: 1024 * 1024,
+        elapsedMilliseconds: 200,
+        lastPublishedElapsedMilliseconds: 0,
+        minimumInterval: ChatConstants.attachmentProgressUpdateInterval,
+      ),
+      isTrue,
+    );
+    expect(
+      shouldPublishAttachmentProgress(
+        sentBytes: 1024 * 1024,
+        totalBytes: 1024 * 1024,
+        elapsedMilliseconds: 1,
+        lastPublishedElapsedMilliseconds: 0,
+        minimumInterval: ChatConstants.attachmentProgressUpdateInterval,
+      ),
+      isTrue,
+    );
+  });
+
+  test('大附件在本机TCP链路保持高吞吐', () async {
+    const totalBytes = 8 * 1024 * 1024;
+    const chunkBytes = 256 * 1024;
+    final service = ChatTransportService();
+    final sink = _CountingAttachmentStreamSink();
+    await service.start(
+      onPacket: (packet, remoteAddress) async {},
+      onAttachmentStream: (packet, remoteAddress) async => sink,
+      listenPort: 0,
+    );
+    const packet = ChatTransportPacket(
+      type: 'attachment_stream',
+      message: ChatMessageRecord(
+        id: 'large-throughput-message',
+        conversationId: 'hall:test',
+        hallId: 'hall:test',
+        conversationType: ChatConversationType.hall,
+        senderVirtualIp: '127.0.0.1',
+        senderName: '本机',
+        senderSeq: 4,
+        direction: ChatMessageDirection.outgoing,
+        contentType: ChatMessageContentType.file,
+        status: ChatMessageStatus.sent,
+        text: 'large.bin',
+        isSyncMessage: false,
+        isRead: true,
+        sentAtEpochMs: 1717286404000,
+        createdAtEpochMs: 1717286404000,
+        metadataJson: '{}',
+      ),
+    );
+    final chunk = Uint8List(chunkBytes);
+    final chunks = List<List<int>>.filled(totalBytes ~/ chunkBytes, chunk);
+    final stopwatch = Stopwatch()..start();
+
+    try {
+      await service.sendAttachmentStream(
+        targetIp: InternetAddress.loopbackIPv4.address,
+        packet: packet,
+        sourceFactory: (_) => Stream<List<int>>.fromIterable(chunks),
+        totalBytes: totalBytes,
+        port: service.listeningPort,
+      );
+      stopwatch.stop();
+      final bytesPerSecond =
+          totalBytes * 1000 ~/ stopwatch.elapsedMilliseconds.clamp(1, 1 << 31);
+
+      expect(sink.receivedBytes, totalBytes);
+      expect(
+        bytesPerSecond,
+        greaterThan(1024 * 1024),
+        reason: '本机附件流吞吐过低: $bytesPerSecond B/s',
+      );
+    } finally {
+      await service.stop();
+    }
+  });
+
   test('同一目标和消息的并发附件发送会复用同一个传输任务', () async {
     final service = ChatTransportService();
     var receivedTransferCount = 0;
@@ -544,4 +664,22 @@ class _MemoryAttachmentStreamSink implements ChatAttachmentStreamSink {
 
   @override
   Future<void> close() async => onClose();
+}
+
+class _CountingAttachmentStreamSink implements ChatAttachmentStreamSink {
+  int receivedBytes = 0;
+
+  @override
+  int get resumeOffset => 0;
+
+  @override
+  Future<void> abort() async {}
+
+  @override
+  Future<void> add(List<int> bytes) async {
+    receivedBytes += bytes.length;
+  }
+
+  @override
+  Future<void> close() async {}
 }

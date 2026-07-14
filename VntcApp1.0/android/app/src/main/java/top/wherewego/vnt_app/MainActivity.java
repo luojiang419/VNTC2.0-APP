@@ -293,6 +293,12 @@ public class MainActivity extends FlutterActivity {
                 result.success(hasChatLocalNetworkPermission());
             } else if (call.method.equals("requestLocalNetworkPermission")) {
                 requestChatLocalNetworkPermission(result);
+            } else if (call.method.equals("openAttachment")) {
+                openChatAttachment(
+                        call.argument("filePath"),
+                        call.argument("mimeType"),
+                        result
+                );
             } else {
                 result.notImplemented();
             }
@@ -338,6 +344,43 @@ public class MainActivity extends FlutterActivity {
                 new String[]{getChatLocalNetworkPermission()},
                 CHAT_LOCAL_NETWORK_PERMISSION_REQUEST_CODE
         );
+    }
+
+    private void openChatAttachment(
+            @Nullable String filePath,
+            @Nullable String mimeType,
+            @NonNull MethodChannel.Result result
+    ) {
+        if (TextUtils.isEmpty(filePath)) {
+            result.error("INVALID_ARGUMENT", "filePath is required", null);
+            return;
+        }
+
+        File attachmentFile = new File(filePath);
+        if (!attachmentFile.isFile()) {
+            result.error("ATTACHMENT_NOT_FOUND", "Attachment file not found: " + filePath, null);
+            return;
+        }
+
+        try {
+            Uri attachmentUri = FileProvider.getUriForFile(
+                    this,
+                    getPackageName() + ".fileprovider",
+                    attachmentFile
+            );
+            Intent openIntent = new Intent(Intent.ACTION_VIEW);
+            openIntent.setDataAndType(
+                    attachmentUri,
+                    TextUtils.isEmpty(mimeType) ? "*/*" : mimeType
+            );
+            openIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+            startActivity(openIntent);
+            result.success(true);
+        } catch (android.content.ActivityNotFoundException error) {
+            result.success(false);
+        } catch (Exception error) {
+            result.error("OPEN_ATTACHMENT_FAILED", error.getMessage(), null);
+        }
     }
 
     private void installDownloadedApk(@Nullable String filePath, @NonNull MethodChannel.Result result) {

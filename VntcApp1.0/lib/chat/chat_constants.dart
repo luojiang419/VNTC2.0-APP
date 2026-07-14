@@ -11,6 +11,9 @@ class ChatConstants {
   static const Duration transportReadTimeout = Duration(seconds: 10);
   static const int attachmentTransferMaxAttempts = 3;
   static const Duration attachmentTransferRetryDelay = Duration(seconds: 1);
+  static const Duration attachmentProgressUpdateInterval = Duration(
+    milliseconds: 200,
+  );
   static const Duration refreshInterval = Duration(seconds: 3);
   static const Duration syncInterval = Duration(seconds: 12);
 

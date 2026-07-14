@@ -28,6 +28,80 @@ void main() {
     expect(paths, contains('<external-cache-path'));
   });
 
+  test('Android chat attachments open through FileProvider', () {
+    final manifest =
+        _readProjectFile('android/app/src/main/AndroidManifest.xml');
+    final activity = _readProjectFile(
+      'android/app/src/main/java/top/wherewego/vnt_app/MainActivity.java',
+    );
+    final chatPage = _readProjectFile('lib/pages/chat_page.dart');
+
+    expect(manifest, contains(r'${applicationId}.fileprovider'));
+    expect(activity, contains('call.method.equals("openAttachment")'));
+    expect(activity, contains('FileProvider.getUriForFile('));
+    expect(activity, contains('Intent.FLAG_GRANT_READ_URI_PERMISSION'));
+    expect(activity, contains('openIntent.setDataAndType('));
+    expect(chatPage, contains('ChatAttachmentOpener.openAndroidAttachment('));
+    expect(
+        chatPage, isNot(contains('launchUrl(\n          Uri.file(filePath)')));
+  });
+
+  test('Android chat attachments save through the SAF streaming channel', () {
+    final activity = _readProjectFile(
+      'android/app/src/main/java/top/wherewego/vnt_app/MainActivity.java',
+    );
+    final chatPage = _readProjectFile('lib/pages/chat_page.dart');
+
+    expect(chatPage, contains("import 'package:vnt_app/file_saver.dart';"));
+    expect(
+      RegExp(
+        r'if \(Platform\.isAndroid\) \{[\s\S]*?FileSaver\.copyFile\([\s\S]*?mimeType: attachment\.mimeType,[\s\S]*?return;[\s\S]*?\}\s+final savePath = await FilePicker\.platform\.saveFile',
+      ).hasMatch(chatPage),
+      isTrue,
+    );
+    expect(chatPage, isNot(contains('bytes: await sourceFile.readAsBytes()')));
+    expect(activity, contains('Intent.ACTION_CREATE_DOCUMENT'));
+    expect(activity, contains('copyFileToUri(pendingFilePath, uri)'));
+    expect(
+      activity,
+      contains('while ((length = inputStream.read(buffer)) > 0)'),
+    );
+    expect(activity, contains('outputStream.write(buffer, 0, length)'));
+  });
+
+  test('Windows chat attachments stay on the shared streaming fast path', () {
+    final manager = _readProjectFile('lib/chat/chat_manager.dart');
+    final transport = _readProjectFile(
+      'lib/chat/chat_transport_service.dart',
+    );
+    final chatPage = _readProjectFile('lib/pages/chat_page.dart');
+
+    expect(manager, contains('isWindows: Platform.isWindows'));
+    expect(
+      manager,
+      contains(
+          'sourceFactory: (startOffset) => sourceFile.openRead(startOffset)'),
+    );
+    expect(transport, contains('await socket.addStream(source)'));
+    expect(manager, contains('_sink!.add(bytes)'));
+    expect(manager, isNot(contains('_sink!.flush()')));
+    expect(chatPage, contains('withData: false'));
+    expect(chatPage, contains('await sourceFile.copy(savePath)'));
+    expect(chatPage, isNot(contains('await sourceFile.readAsBytes()')));
+  });
+
+  test('Android dataSync foreground service declares its scoped permission',
+      () {
+    final manifest =
+        _readProjectFile('android/app/src/main/AndroidManifest.xml');
+
+    expect(
+      manifest,
+      contains('android.permission.FOREGROUND_SERVICE_DATA_SYNC'),
+    );
+    expect(manifest, contains('android:foregroundServiceType="dataSync"'));
+  });
+
   test('Android updater resumes APK install after unknown-source approval', () {
     final manifest =
         _readProjectFile('android/app/src/main/AndroidManifest.xml');

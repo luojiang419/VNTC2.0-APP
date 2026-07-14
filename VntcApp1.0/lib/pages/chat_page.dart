@@ -7,10 +7,11 @@ import 'package:flutter/services.dart';
 import 'package:just_audio/just_audio.dart';
 import 'package:path/path.dart' as path;
 import 'package:record/record.dart';
-import 'package:share_plus/share_plus.dart';
+import 'package:vnt_app/chat/chat_attachment_opener.dart';
 import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/chat/chat_security.dart';
+import 'package:vnt_app/file_saver.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
@@ -2565,17 +2566,21 @@ class _ChatPageState extends State<ChatPage>
   Future<void> _openAttachmentFile(ChatAttachmentRecord attachment) async {
     try {
       final filePath = await _manager.resolveAttachmentPath(attachment);
+      if (Platform.isAndroid) {
+        final opened = await ChatAttachmentOpener.openAndroidAttachment(
+          filePath: filePath,
+          mimeType: attachment.mimeType,
+        );
+        if (!opened && mounted) {
+          showTopToast(context, '未找到可打开此附件的应用', isSuccess: false);
+        }
+        return;
+      }
       final opened = await launchUrl(
         Uri.file(filePath),
         mode: LaunchMode.externalApplication,
       );
       if (!opened) {
-        if (Platform.isAndroid) {
-          await Share.shareXFiles([
-            XFile(filePath, name: attachment.fileName),
-          ], text: attachment.fileName);
-          return;
-        }
         if (mounted) {
           showTopToast(context, '系统未能打开该附件', isSuccess: false);
         }
@@ -2599,6 +2604,18 @@ class _ChatPageState extends State<ChatPage>
       final sourceFile = File(sourcePath);
       if (!await sourceFile.exists()) {
         throw StateError('附件缓存文件不存在');
+      }
+
+      if (Platform.isAndroid) {
+        final saved = await FileSaver.copyFile(
+          sourceFilePath: sourcePath,
+          fileName: attachment.fileName,
+          mimeType: attachment.mimeType,
+        );
+        if (saved && mounted) {
+          showTopToast(context, '附件已保存', isSuccess: true);
+        }
+        return;
       }
 
       final savePath = await FilePicker.platform.saveFile(

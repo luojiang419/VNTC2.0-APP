@@ -1563,9 +1563,16 @@ class ChatManager extends ChangeNotifier {
     await _storage.upsertMessage(localMessage, attachment: attachment);
     await loadConversationMessages(conversation.id);
     await reloadFromStorage(notify: false);
+    final initialTransferSample = calculateAttachmentTransferSample(
+      fileBytes: sizeBytes,
+      recipientIndex: 0,
+      recipientCount: recipients.length,
+      recipientSentBytes: 0,
+      elapsedMilliseconds: 0,
+    );
     _startAttachmentTransfer(
       messageId: messageId,
-      totalBytes: sizeBytes,
+      totalBytes: initialTransferSample.totalBytes,
       startedAtEpochMs: now,
     );
 
@@ -1581,18 +1588,28 @@ class ChatManager extends ChangeNotifier {
         type: 'attachment_stream',
         message: localMessage.copyWith(status: ChatMessageStatus.sent),
       );
+      final uploadStopwatch = Stopwatch()..start();
+      var lastProgressUpdateElapsedMs = -1;
       for (
         var recipientIndex = 0;
         recipientIndex < recipients.length;
         recipientIndex += 1
       ) {
         final recipient = recipients[recipientIndex];
+        final recipientStartSample = calculateAttachmentTransferSample(
+          fileBytes: sizeBytes,
+          recipientIndex: recipientIndex,
+          recipientCount: recipients.length,
+          recipientSentBytes: 0,
+          elapsedMilliseconds: uploadStopwatch.elapsedMilliseconds,
+        );
         _updateAttachmentTransfer(
           messageId: messageId,
-          transferredBytes: (sizeBytes * recipientIndex ~/ recipients.length),
-          bytesPerSecond: 0,
+          transferredBytes: recipientStartSample.transferredBytes,
+          bytesPerSecond: recipientStartSample.bytesPerSecond,
           phase: ChatAttachmentTransferPhase.uploading,
         );
+        lastProgressUpdateElapsedMs = uploadStopwatch.elapsedMilliseconds;
         try {
           await _sendAttachmentStreamWithHallCompatibility(
             targetIp: recipient,
@@ -1601,20 +1618,33 @@ class ChatManager extends ChangeNotifier {
             totalBytes: sizeBytes,
             localNode: localNode,
             onProgress: (sentBytes, totalBytes) {
-              final currentRecipientBytes = totalBytes <= 0
-                  ? sizeBytes
-                  : (sizeBytes * sentBytes ~/ totalBytes);
-              final transferredBytes =
-                  ((sizeBytes * recipientIndex) + currentRecipientBytes) ~/
-                  recipients.length;
-              final elapsedMilliseconds =
-                  DateTime.now().millisecondsSinceEpoch - now;
+              final elapsedMilliseconds = uploadStopwatch.elapsedMilliseconds;
+              final shouldUpdate = shouldPublishAttachmentProgress(
+                sentBytes: sentBytes,
+                totalBytes: totalBytes,
+                elapsedMilliseconds: elapsedMilliseconds,
+                lastPublishedElapsedMilliseconds:
+                    lastProgressUpdateElapsedMs,
+                minimumInterval:
+                    ChatConstants.attachmentProgressUpdateInterval,
+              );
+              if (!shouldUpdate) {
+                return;
+              }
+              lastProgressUpdateElapsedMs = elapsedMilliseconds;
+              final sample = calculateAttachmentTransferSample(
+                fileBytes: sizeBytes,
+                recipientIndex: recipientIndex,
+                recipientCount: recipients.length,
+                recipientSentBytes: totalBytes <= 0
+                    ? sizeBytes
+                    : (sizeBytes * sentBytes ~/ totalBytes),
+                elapsedMilliseconds: elapsedMilliseconds,
+              );
               _updateAttachmentTransfer(
                 messageId: messageId,
-                transferredBytes: transferredBytes,
-                bytesPerSecond: elapsedMilliseconds <= 0
-                    ? 0
-                    : (transferredBytes * 1000 ~/ elapsedMilliseconds),
+                transferredBytes: sample.transferredBytes,
+                bytesPerSecond: sample.bytesPerSecond,
                 phase: ChatAttachmentTransferPhase.uploading,
               );
             },

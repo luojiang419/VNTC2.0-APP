@@ -12,6 +12,57 @@ enum ChatAttachmentTransferPhase { preparing, uploading }
 
 enum ChatMainTab { hall, rooms, online, direct }
 
+class ChatAttachmentTransferSample {
+  const ChatAttachmentTransferSample({
+    required this.totalBytes,
+    required this.transferredBytes,
+    required this.bytesPerSecond,
+  });
+
+  final int totalBytes;
+  final int transferredBytes;
+  final int bytesPerSecond;
+}
+
+ChatAttachmentTransferSample calculateAttachmentTransferSample({
+  required int fileBytes,
+  required int recipientIndex,
+  required int recipientCount,
+  required int recipientSentBytes,
+  required int elapsedMilliseconds,
+}) {
+  final safeFileBytes = fileBytes < 0 ? 0 : fileBytes;
+  final safeRecipientCount = recipientCount < 1 ? 1 : recipientCount;
+  final safeRecipientIndex = recipientIndex
+      .clamp(0, safeRecipientCount - 1)
+      .toInt();
+  final safeRecipientSentBytes = recipientSentBytes
+      .clamp(0, safeFileBytes)
+      .toInt();
+  final transferredBytes =
+      safeFileBytes * safeRecipientIndex + safeRecipientSentBytes;
+  return ChatAttachmentTransferSample(
+    totalBytes: safeFileBytes * safeRecipientCount,
+    transferredBytes: transferredBytes,
+    bytesPerSecond: elapsedMilliseconds <= 0
+        ? 0
+        : transferredBytes * 1000 ~/ elapsedMilliseconds,
+  );
+}
+
+bool shouldPublishAttachmentProgress({
+  required int sentBytes,
+  required int totalBytes,
+  required int elapsedMilliseconds,
+  required int lastPublishedElapsedMilliseconds,
+  required Duration minimumInterval,
+}) {
+  return sentBytes >= totalBytes ||
+      lastPublishedElapsedMilliseconds < 0 ||
+      elapsedMilliseconds - lastPublishedElapsedMilliseconds >=
+          minimumInterval.inMilliseconds;
+}
+
 class ChatAttachmentTransferProgress {
   const ChatAttachmentTransferProgress({
     required this.messageId,

@@ -194,12 +194,13 @@ class ChatTransportService {
         throw StateError('附件续传偏移量无效 offset=$startOffset total=$totalBytes');
       }
       var sentBytes = startOffset;
-      await for (final chunk in sourceFactory(startOffset)) {
-        socket.add(chunk);
-        await socket.flush();
+      final source = sourceFactory(startOffset).map((chunk) {
         sentBytes += chunk.length;
         onProgress?.call(sentBytes, totalBytes);
-      }
+        return chunk;
+      });
+      await socket.addStream(source);
+      await socket.flush();
       if (sentBytes != totalBytes) {
         throw StateError('附件流长度不匹配 expected=$totalBytes actual=$sentBytes');
       }

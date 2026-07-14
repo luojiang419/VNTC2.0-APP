@@ -7,7 +7,7 @@ class AppVersion {
   );
   static const String buildVersion = String.fromEnvironment(
     'APP_BUILD_VERSION',
-    defaultValue: '4.8.12',
+    defaultValue: '4.8.15',
   );
   static const String explicitDisplayVersion = String.fromEnvironment(
     'APP_DISPLAY_VERSION',
@@ -24,7 +24,7 @@ class AppVersion {
 
   static String get currentVersion {
     final version = buildVersion.trim();
-    return version.isEmpty || version == '0.0' ? '4.8.12' : version;
+    return version.isEmpty || version == '0.0' ? '4.8.15' : version;
   }
 
   static String get displayVersion => explicitDisplayVersion.isEmpty
