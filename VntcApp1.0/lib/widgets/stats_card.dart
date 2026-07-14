@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/widgets/app_glow_surface.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
 /// 统计数据卡片
@@ -19,22 +20,9 @@ class StatsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-
-    return Container(
+    return AppGlowSurface(
       padding: ResponsiveUtils.padding(context, all: 16),
-      decoration: BoxDecoration(
-        color:
-            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-        borderRadius: BorderRadius.circular(context.radius(16)),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+      borderRadius: BorderRadius.circular(context.radius(16)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -62,8 +50,7 @@ class StatsCard extends StatelessWidget {
             style: TextStyle(
               fontSize: context.fontLarge,
               fontWeight: FontWeight.bold,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+              color: context.textPrimary,
             ),
           ),
           SizedBox(height: context.spacing(4)),
@@ -71,9 +58,7 @@ class StatsCard extends StatelessWidget {
             label,
             style: TextStyle(
               fontSize: context.fontSmall,
-              color: isDark
-                  ? AppTheme.darkTextSecondary
-                  : AppTheme.lightTextSecondary,
+              color: context.textSecondary,
             ),
           ),
         ],

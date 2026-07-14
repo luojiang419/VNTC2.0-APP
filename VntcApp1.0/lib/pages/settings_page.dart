@@ -327,8 +327,7 @@ class _SettingsPageState extends State<SettingsPage> {
     final isWideScreen = screenWidth > 600;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.canvasBackground,
       body: SafeArea(
         child: SingleChildScrollView(
           padding: EdgeInsets.all(context.spacingMedium),
@@ -1345,7 +1344,7 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog>
           maxHeight: maxHeight,
         ),
         decoration: BoxDecoration(
-          color: widget.isDark ? const Color(0xFF2C2C2C) : Colors.white,
+          color: widget.isDark ? AppTheme.darkCardBackground : Colors.white,
           borderRadius: BorderRadius.circular(context.dialogRadius),
         ),
         child: Column(

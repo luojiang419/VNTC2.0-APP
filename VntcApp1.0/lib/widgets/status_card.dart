@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
 /// 连接状态卡片
@@ -17,7 +18,8 @@ class StatusCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final tokens = context.themeTokens;
+    final foregroundColor = isConnected ? Colors.white : tokens.textPrimary;
 
     return Container(
       width: double.infinity,
@@ -30,18 +32,21 @@ class StatusCard extends StatelessWidget {
                 end: Alignment.bottomRight,
               )
             : LinearGradient(
-                colors: isDark
-                    ? [const Color(0xFF2D3748), const Color(0xFF1A202C)]
-                    : [const Color(0xFF718096), const Color(0xFF4A5568)],
+                colors: [tokens.surfaceRaised, tokens.surface],
                 begin: Alignment.topLeft,
                 end: Alignment.bottomRight,
               ),
         borderRadius: BorderRadius.circular(context.radius(20)),
+        border: Border.all(
+          color: isConnected
+              ? AppTheme.successColor.withValues(alpha: 0.45)
+              : tokens.outline,
+        ),
         boxShadow: [
           BoxShadow(
             color: isConnected
                 ? AppTheme.successColor.withValues(alpha: 0.3)
-                : Colors.black.withValues(alpha: 0.1),
+                : tokens.shadow,
             blurRadius: 20,
             offset: const Offset(0, 10),
           ),
@@ -54,12 +59,12 @@ class StatusCard extends StatelessWidget {
             width: context.w(64),
             height: context.w(64),
             decoration: BoxDecoration(
-              color: Colors.white.withValues(alpha: 0.2),
+              color: foregroundColor.withValues(alpha: 0.12),
               borderRadius: BorderRadius.circular(context.radius(16)),
             ),
             child: Icon(
               isConnected ? Icons.wifi : Icons.wifi_off,
-              color: Colors.white,
+              color: foregroundColor,
               size: context.iconLarge,
             ),
           ),
@@ -75,7 +80,7 @@ class StatusCard extends StatelessWidget {
                   style: TextStyle(
                     fontSize: context.fontXLarge,
                     fontWeight: FontWeight.bold,
-                    color: Colors.white,
+                    color: foregroundColor,
                   ),
                 ),
                 SizedBox(height: context.spacing(4)),
@@ -83,7 +88,7 @@ class StatusCard extends StatelessWidget {
                   isConnected ? '$connectionCount 个活动连接' : '点击配置开始连接',
                   style: TextStyle(
                     fontSize: context.fontBody,
-                    color: Colors.white.withValues(alpha: 0.8),
+                    color: foregroundColor.withValues(alpha: 0.78),
                   ),
                 ),
               ],

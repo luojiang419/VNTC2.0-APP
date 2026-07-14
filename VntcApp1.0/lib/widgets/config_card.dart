@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
@@ -26,6 +27,7 @@ class ConfigCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
 
     return InkWell(
       onTap: onTap,
@@ -33,19 +35,24 @@ class ConfigCard extends StatelessWidget {
       child: Container(
         padding: ResponsiveUtils.padding(context, all: 16),
         decoration: BoxDecoration(
-          color: isDark
-              ? AppTheme.darkCardBackground
-              : AppTheme.lightCardBackground,
+          color: tokens.surface,
           borderRadius: BorderRadius.circular(context.radius(16)),
-          border: isConnected
-              ? Border.all(color: AppTheme.successColor, width: 2)
-              : null,
+          border: Border.all(
+            color: isConnected ? AppTheme.successColor : tokens.outline,
+            width: isConnected ? 2 : 1,
+          ),
           boxShadow: [
             BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
+              color: tokens.shadow,
+              blurRadius: 18,
+              offset: const Offset(0, 7),
             ),
+            if (isConnected)
+              BoxShadow(
+                color: AppTheme.successColor.withValues(alpha: 0.18),
+                blurRadius: 24,
+                spreadRadius: -5,
+              ),
           ],
         ),
         child: Column(

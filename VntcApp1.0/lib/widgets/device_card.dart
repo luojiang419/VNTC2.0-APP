@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 
 /// 设备卡片组件 - 用于显示设备列表
@@ -27,18 +28,22 @@ class DeviceCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
 
     return Card(
       margin: EdgeInsets.symmetric(
         horizontal: context.spacing(16),
         vertical: context.spacing(6),
       ),
-      elevation: 2,
+      elevation: 0,
+      color: tokens.surface,
+      surfaceTintColor: Colors.transparent,
+      shadowColor: tokens.shadow,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(context.radius(12)),
         side: isCurrentDevice
             ? BorderSide(color: primaryColor, width: 2)
-            : BorderSide.none,
+            : BorderSide(color: tokens.outline),
       ),
       child: InkWell(
         onTap: onTap,

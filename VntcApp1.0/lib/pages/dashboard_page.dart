@@ -3,6 +3,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/data_persistence.dart';
 import 'package:vnt_app/network_config.dart';
@@ -513,8 +514,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final primaryColor = Theme.of(context).primaryColor;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.canvasBackground,
       body: SafeArea(
         child: RefreshIndicator(
           onRefresh: () async => _updateStats(),
@@ -606,6 +606,8 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Widget _buildConnectionStatusCard(bool isDark, bool hasConnection) {
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
+    final foregroundColor = hasConnection ? Colors.white : tokens.textPrimary;
     return InkWell(
       onTap:
           hasConnection ? () => _showConnectionDialog(isDark) : _handleConnect,
@@ -633,17 +635,28 @@ class _DashboardPageState extends State<DashboardPage> {
                             .withLightness(0.30)
                             .toColor()
                       ])
-                : [const Color(0xFFBDBDBD), const Color(0xFF9E9E9E)],
+                : [tokens.surfaceRaised, tokens.surface],
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
           borderRadius: BorderRadius.circular(context.radius(20)),
+          border: Border.all(
+            color: hasConnection
+                ? primaryColor.withValues(alpha: 0.5)
+                : tokens.outline,
+          ),
           boxShadow: [
             BoxShadow(
-              color: (hasConnection ? primaryColor : Colors.grey)
-                  .withValues(alpha: 0.3),
+              color: tokens.shadow,
               blurRadius: 20,
               offset: const Offset(0, 10),
+            ),
+            BoxShadow(
+              color: hasConnection
+                  ? primaryColor.withValues(alpha: 0.24)
+                  : tokens.glow,
+              blurRadius: 28,
+              spreadRadius: -7,
             ),
           ],
         ),
@@ -653,14 +666,14 @@ class _DashboardPageState extends State<DashboardPage> {
               width: context.w(56),
               height: context.w(56),
               decoration: BoxDecoration(
-                color: Colors.white.withValues(alpha: 0.2),
+                color: foregroundColor.withValues(alpha: 0.12),
                 borderRadius: BorderRadius.circular(context.radius(12)),
               ),
               child: Icon(
                 hasConnection
                     ? Icons.check_circle_outline
                     : Icons.cloud_off_outlined,
-                color: Colors.white,
+                color: foregroundColor,
                 size: context.iconSize(32),
               ),
             ),
@@ -674,7 +687,7 @@ class _DashboardPageState extends State<DashboardPage> {
                     style: TextStyle(
                       fontSize: context.sp(28),
                       fontWeight: FontWeight.bold,
-                      color: Colors.white,
+                      color: foregroundColor,
                     ),
                   ),
                   SizedBox(height: context.spacing(4)),
@@ -686,7 +699,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             : '点击新建配置'),
                     style: TextStyle(
                       fontSize: context.sp(16),
-                      color: Colors.white.withValues(alpha: 0.9),
+                      color: foregroundColor.withValues(alpha: 0.82),
                     ),
                   ),
                   if (hasConnection) ...[
@@ -694,14 +707,14 @@ class _DashboardPageState extends State<DashboardPage> {
                     Row(
                       children: [
                         Icon(Icons.link,
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: foregroundColor.withValues(alpha: 0.82),
                             size: context.iconSize(16)),
                         SizedBox(width: context.spacing(4)),
                         Text(
                           '$_connectionCount 个活动连接',
                           style: TextStyle(
                             fontSize: context.sp(14),
-                            color: Colors.white.withValues(alpha: 0.9),
+                            color: foregroundColor.withValues(alpha: 0.82),
                           ),
                         ),
                       ],
@@ -723,7 +736,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       hasConnection
                           ? Icons.power_settings_new
                           : Icons.play_arrow,
-                      color: Colors.white,
+                      color: foregroundColor,
                       size: context.iconSize(28),
                     ),
                     tooltip: hasConnection ? '断开连接' : '连接',
@@ -737,7 +750,7 @@ class _DashboardPageState extends State<DashboardPage> {
                       onPressed: _handleEditDefaultConfig,
                       icon: Icon(
                         Icons.edit_outlined,
-                        color: Colors.white,
+                        color: foregroundColor,
                         size: context.iconSize(25),
                       ),
                       tooltip: '修改默认配置',
@@ -1610,7 +1623,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -1700,7 +1713,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               padding: EdgeInsets.all(context.spacingMedium),
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF1E1E1E)
+                                    ? AppTheme.darkSurface
                                     : const Color(0xFFF5F5F5),
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -1738,7 +1751,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               padding: EdgeInsets.all(context.spacingMedium),
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF1E1E1E)
+                                    ? AppTheme.darkSurface
                                     : const Color(0xFFF5F5F5),
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -1776,7 +1789,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               padding: EdgeInsets.all(context.spacingMedium),
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF1E1E1E)
+                                    ? AppTheme.darkSurface
                                     : const Color(0xFFF5F5F5),
                                 borderRadius: BorderRadius.circular(12),
                               ),
@@ -1900,7 +1913,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             padding: EdgeInsets.all(context.spacingMedium),
                             decoration: BoxDecoration(
                               color: isDark
-                                  ? const Color(0xFF1E1E1E)
+                                  ? AppTheme.darkSurface
                                   : const Color(0xFFF5F5F5),
                               borderRadius: BorderRadius.circular(12),
                             ),
@@ -2577,7 +2590,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -2667,7 +2680,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               padding: EdgeInsets.all(context.spacingMedium),
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF1E1E1E)
+                                    ? AppTheme.darkSurface
                                     : const Color(0xFFE8F5E9),
                                 borderRadius: BorderRadius.circular(16),
                               ),
@@ -2725,7 +2738,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               padding: EdgeInsets.all(context.spacingMedium),
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF1E1E1E)
+                                    ? AppTheme.darkSurface
                                     : const Color(0xFFE3F2FD),
                                 borderRadius: BorderRadius.circular(16),
                               ),
@@ -2786,7 +2799,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -2930,7 +2943,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -2990,7 +3003,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3200,7 +3213,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -3286,7 +3299,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingLarge),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF1F8E9),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3409,7 +3422,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3515,7 +3528,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3626,7 +3639,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3780,7 +3793,7 @@ class _DashboardPageState extends State<DashboardPage> {
                         padding: EdgeInsets.all(context.spacingMedium),
                         decoration: BoxDecoration(
                           color: isDark
-                              ? const Color(0xFF1E1E1E)
+                              ? AppTheme.darkSurface
                               : const Color(0xFFF5F5F5),
                           borderRadius: BorderRadius.circular(16),
                         ),
@@ -3813,7 +3826,7 @@ class _DashboardPageState extends State<DashboardPage> {
                               height: 60,
                               decoration: BoxDecoration(
                                 color: isDark
-                                    ? const Color(0xFF2C2C2C)
+                                    ? AppTheme.darkCardBackground
                                     : Colors.white,
                                 borderRadius: BorderRadius.circular(8),
                               ),
@@ -3969,7 +3982,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -4164,7 +4177,7 @@ class _DashboardPageState extends State<DashboardPage> {
       margin: const EdgeInsets.only(bottom: 12),
       padding: EdgeInsets.all(context.spacingMedium),
       decoration: BoxDecoration(
-        color: isDark ? const Color(0xFF1E1E1E) : const Color(0xFFF5F5F5),
+        color: isDark ? AppTheme.darkSurface : const Color(0xFFF5F5F5),
         borderRadius: BorderRadius.circular(12),
       ),
       child: Row(
@@ -4224,7 +4237,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -4652,7 +4665,7 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Container(
           constraints: const BoxConstraints(maxWidth: 480),
           decoration: BoxDecoration(
-            color: isDark ? const Color(0xFF2C2C2C) : Colors.white,
+            color: isDark ? AppTheme.darkCardBackground : Colors.white,
             borderRadius: BorderRadius.circular(24),
           ),
           child: Column(
@@ -4856,7 +4869,7 @@ class _DashboardPageState extends State<DashboardPage> {
                                         EdgeInsets.all(context.spacingMedium),
                                     decoration: BoxDecoration(
                                       color: isDark
-                                          ? const Color(0xFF1E1E1E)
+                                          ? AppTheme.darkSurface
                                           : const Color(0xFFF5F5F5),
                                       borderRadius: BorderRadius.circular(12),
                                       border: Border.all(

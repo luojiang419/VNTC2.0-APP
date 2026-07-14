@@ -120,8 +120,7 @@ class _ChatPageState extends State<ChatPage>
     }
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.canvasBackground,
       body: SafeArea(
         child: AnimatedBuilder(
           animation: _manager,

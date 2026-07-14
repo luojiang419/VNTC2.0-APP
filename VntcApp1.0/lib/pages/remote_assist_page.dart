@@ -349,8 +349,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.canvasBackground,
       body: SafeArea(
         child: AnimatedBuilder(
           animation: _manager,

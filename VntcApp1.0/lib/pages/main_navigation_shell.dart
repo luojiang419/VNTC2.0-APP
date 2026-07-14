@@ -2,6 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_config_input_page.dart';
@@ -528,8 +529,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
     return Scaffold(
       extendBody: useCompactBottomDock,
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.themeTokens.canvas,
       body: Column(
         children: [
           // 自定义标题栏（桌面平台）
@@ -598,17 +598,18 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final themeTogglePadding = 8.0 * heightScale;
     final themeToggleVerticalPadding = 12.0 * heightScale;
     final bottomSpacing = 14.0 * heightScale;
+    final tokens = context.themeTokens;
 
     return Container(
       width: sideNavWidth,
       decoration: BoxDecoration(
-        color:
-            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
+        color: tokens.navigation,
+        border: Border(right: BorderSide(color: tokens.outline)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(2, 0),
+            color: tokens.shadow,
+            blurRadius: 20,
+            offset: const Offset(6, 0),
           ),
         ],
       ),
@@ -691,12 +692,21 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                           ),
                           decoration: BoxDecoration(
                             color: isSelected
-                                ? primaryColor.withValues(alpha: 0.1)
+                                ? primaryColor.withValues(alpha: 0.12)
                                 : Colors.transparent,
                             borderRadius: BorderRadius.circular(12),
                             border: isSelected
                                 ? Border.all(
-                                    color: primaryColor.withValues(alpha: 0.3))
+                                    color: primaryColor.withValues(alpha: 0.34))
+                                : null,
+                            boxShadow: isSelected
+                                ? [
+                                    BoxShadow(
+                                      color: tokens.glow,
+                                      blurRadius: 18,
+                                      spreadRadius: -5,
+                                    ),
+                                  ]
                                 : null,
                           ),
                           child: Column(
@@ -758,10 +768,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                       vertical: themeToggleVerticalPadding,
                     ),
                     decoration: BoxDecoration(
-                      color: isDark
-                          ? Colors.white.withValues(alpha: 0.05)
-                          : Colors.black.withValues(alpha: 0.03),
+                      color: tokens.surfaceRaised,
                       borderRadius: BorderRadius.circular(12),
+                      border: Border.all(color: tokens.outline),
                     ),
                     child: Column(
                       mainAxisSize: MainAxisSize.min,
@@ -798,6 +807,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   Widget _buildBottomNavigation(bool isDark) {
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
     final screenWidth = MediaQuery.of(context).size.width;
     final isCompact = screenWidth < 390;
     final dockHorizontalPadding = isCompact ? 10.0 : 14.0;
@@ -823,20 +833,14 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         child: Container(
           padding: EdgeInsets.all(isCompact ? 6.0 : 8.0),
           decoration: BoxDecoration(
-            color: isDark
-                ? AppTheme.darkCardBackground.withValues(alpha: 0.94)
-                : AppTheme.lightCardBackground.withValues(alpha: 0.96),
+            color: tokens.navigation.withValues(alpha: 0.96),
             borderRadius: BorderRadius.circular(dockRadius),
-            border: Border.all(
-              color: isDark
-                  ? Colors.white.withValues(alpha: 0.06)
-                  : Colors.black.withValues(alpha: 0.06),
-            ),
+            border: Border.all(color: tokens.outline),
             boxShadow: [
               BoxShadow(
-                color: Colors.black.withValues(alpha: isDark ? 0.30 : 0.10),
-                blurRadius: 18,
-                offset: const Offset(0, 8),
+                color: tokens.shadow,
+                blurRadius: 26,
+                offset: const Offset(0, 10),
               ),
             ],
           ),

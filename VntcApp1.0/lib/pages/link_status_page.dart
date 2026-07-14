@@ -3,6 +3,8 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
+import 'package:vnt_app/widgets/app_glow_surface.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_models.dart';
@@ -147,8 +149,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     final primaryColor = Theme.of(context).primaryColor;
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.themeTokens.canvas,
       body: SafeArea(
         child: Column(
           children: [
@@ -205,9 +206,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                   unselectedLabelColor: isDark
                       ? AppTheme.darkTextSecondary
                       : AppTheme.lightTextSecondary,
-                  dividerColor: isDark
-                      ? Colors.white.withValues(alpha: 0.05)
-                      : Colors.black.withValues(alpha: 0.05),
+                  dividerColor: context.themeTokens.outline,
                   labelStyle: TextStyle(
                     fontSize: context.buttonFontSize,
                     fontWeight: FontWeight.w600,
@@ -260,99 +259,110 @@ class _LinkStatusPageState extends State<LinkStatusPage>
       }
     }
 
-    return Row(
-      children: [
-        Container(
-          width: context.iconXLarge,
-          height: context.iconXLarge,
-          decoration: BoxDecoration(
-            gradient: LinearGradient(
-              colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
-              begin: Alignment.topLeft,
-              end: Alignment.bottomRight,
+    return AppGlowSurface(
+      active: hasConnection,
+      pulse: hasConnection,
+      raised: true,
+      borderRadius: BorderRadius.circular(context.cardRadius),
+      padding: EdgeInsets.all(
+        isWideScreen ? context.spacingMedium : context.spacingSmall,
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: context.iconXLarge,
+            height: context.iconXLarge,
+            decoration: BoxDecoration(
+              gradient: LinearGradient(
+                colors: [primaryColor, primaryColor.withValues(alpha: 0.7)],
+                begin: Alignment.topLeft,
+                end: Alignment.bottomRight,
+              ),
+              borderRadius: BorderRadius.circular(context.cardRadius),
             ),
-            borderRadius: BorderRadius.circular(context.cardRadius),
+            child: Icon(
+              Icons.link_outlined,
+              color: Colors.white,
+              size: context.iconLarge,
+            ),
           ),
-          child: Icon(
-            Icons.link_outlined,
-            color: Colors.white,
-            size: context.iconLarge,
-          ),
-        ),
-        SizedBox(width: context.spacingMedium),
-        Expanded(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                '链接状态',
-                style: TextStyle(
-                  fontSize: context.fontXLarge,
-                  fontWeight: FontWeight.bold,
-                  color: isDark
-                      ? AppTheme.darkTextPrimary
-                      : AppTheme.lightTextPrimary,
-                ),
-              ),
-              Text(
-                hasConnection
-                    ? (configName != null ? '已连接 $configName' : '已连接网络')
-                    : '未连接',
-                style: TextStyle(
-                  fontSize: context.fontBody,
-                  color: isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary,
-                ),
-              ),
-              if (hasConnection && _p2pDiagnosticLabel().isNotEmpty)
+          SizedBox(width: context.spacingMedium),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
                 Text(
-                  _p2pDiagnosticLabel(),
+                  '链接状态',
                   style: TextStyle(
-                    fontSize: context.fontSmall,
-                    color: _p2pDiagnostics?['state'] == 'p2p_ready'
-                        ? Colors.green
-                        : (isDark
-                            ? AppTheme.darkTextSecondary
-                            : AppTheme.lightTextSecondary),
+                    fontSize: context.fontXLarge,
+                    fontWeight: FontWeight.bold,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
                   ),
                 ),
-            ],
-          ),
-        ),
-        // 顶部图标栏
-        if (hasConnection) ...[
-          // 当前设备信息图标
-          IconButton(
-            onPressed: () => _showCurrentDeviceDialog(),
-            icon: Icon(
-              Icons.computer,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+                Text(
+                  hasConnection
+                      ? (configName != null ? '已连接 $configName' : '已连接网络')
+                      : '未连接',
+                  style: TextStyle(
+                    fontSize: context.fontBody,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+                if (hasConnection && _p2pDiagnosticLabel().isNotEmpty)
+                  Text(
+                    _p2pDiagnosticLabel(),
+                    style: TextStyle(
+                      fontSize: context.fontSmall,
+                      color: _p2pDiagnostics?['state'] == 'p2p_ready'
+                          ? Colors.green
+                          : (isDark
+                              ? AppTheme.darkTextSecondary
+                              : AppTheme.lightTextSecondary),
+                    ),
+                  ),
+              ],
             ),
-            tooltip: '当前设备信息',
           ),
-          // 网络配置详情图标
-          IconButton(
-            onPressed: () => _showConfigDialog(),
-            icon: Icon(
-              Icons.settings,
-              color:
-                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+          // 顶部图标栏
+          if (hasConnection) ...[
+            // 当前设备信息图标
+            IconButton(
+              onPressed: () => _showCurrentDeviceDialog(),
+              icon: Icon(
+                Icons.computer,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+              tooltip: '当前设备信息',
             ),
-            tooltip: '组网配置详情',
-          ),
-          // 断开连接图标
-          IconButton(
-            onPressed: () => _showDisconnectDialog(),
-            icon: Icon(
-              Icons.power_settings_new,
-              color: Colors.red[400],
+            // 网络配置详情图标
+            IconButton(
+              onPressed: () => _showConfigDialog(),
+              icon: Icon(
+                Icons.settings,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+              tooltip: '组网配置详情',
             ),
-            tooltip: '断开连接',
-          ),
+            // 断开连接图标
+            IconButton(
+              onPressed: () => _showDisconnectDialog(),
+              icon: Icon(
+                Icons.power_settings_new,
+                color: Colors.red[400],
+              ),
+              tooltip: '断开连接',
+            ),
+          ],
         ],
-      ],
+      ),
     );
   }
 
@@ -381,19 +391,9 @@ class _LinkStatusPageState extends State<LinkStatusPage>
     final actionIcon =
         health.isAndroid ? Icons.sync : Icons.build_circle_outlined;
 
-    return Container(
-      decoration: BoxDecoration(
-        color:
-            isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground,
-        borderRadius: BorderRadius.circular(context.cardRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.18 : 0.06),
-            blurRadius: 12,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+    return AppGlowSurface(
+      active: health.controllerReady || health.controlledReady,
+      borderRadius: BorderRadius.circular(context.cardRadius),
       child: Column(
         children: [
           InkWell(
@@ -919,14 +919,28 @@ class _LinkStatusPageState extends State<LinkStatusPage>
         InkWell(
           onTap: onToggle,
           borderRadius: BorderRadius.circular(context.spacingXSmall),
-          child: Container(
+          child: AnimatedContainer(
+            duration: const Duration(milliseconds: 220),
+            curve: Curves.easeOutCubic,
             padding: EdgeInsets.symmetric(
               horizontal: context.spacingSmall,
               vertical: context.spacingSmall,
             ),
             decoration: BoxDecoration(
-              color: isDark ? const Color(0xFF2A2A2A) : const Color(0xFFF5F5F5),
+              color: isExpanded
+                  ? context.themeTokens.surfaceRaised
+                  : context.themeTokens.surfaceMuted,
               borderRadius: BorderRadius.circular(context.spacingXSmall),
+              border: Border.all(color: context.themeTokens.outline),
+              boxShadow: isExpanded
+                  ? [
+                      BoxShadow(
+                        color: context.themeTokens.shadow,
+                        blurRadius: 14,
+                        offset: const Offset(0, 5),
+                      ),
+                    ]
+                  : null,
             ),
             child: Row(
               children: [
@@ -1083,6 +1097,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
   Widget _buildDeviceCard(RustPeerClientInfo device, bool isDark) {
     final isOnline = _isDeviceOnline(device.status);
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
 
     // 获取路由信息
     String p2pRelay = '';
@@ -1117,16 +1132,25 @@ class _LinkStatusPageState extends State<LinkStatusPage>
 
     return Container(
       decoration: BoxDecoration(
-        color: isOnline
-            ? (isDark ? AppTheme.darkCardBackground : const Color(0xFFF5F5F5))
-            : (isDark ? const Color(0xFF3A3A3A) : const Color(0xFFE0E0E0)),
+        color: isOnline ? tokens.surface : tokens.surfaceMuted,
         borderRadius: BorderRadius.circular(context.cardRadius),
+        border: Border.all(
+          color: isOnline
+              ? Color.lerp(tokens.outline, primaryColor, 0.18)!
+              : tokens.outline,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: tokens.shadow,
+            blurRadius: 18,
+            offset: const Offset(0, 7),
           ),
+          if (isOnline)
+            BoxShadow(
+              color: tokens.glow,
+              blurRadius: 22,
+              spreadRadius: -7,
+            ),
         ],
       ),
       child: Material(
@@ -1405,17 +1429,23 @@ class _LinkStatusPageState extends State<LinkStatusPage>
   Widget _buildRouteCard(String destination, RustRoute route, bool isDark) {
     final isP2P = route.metric == 1;
     final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
 
     return Container(
       padding: const EdgeInsets.all(16),
       decoration: BoxDecoration(
-        color: isDark ? AppTheme.darkCardBackground : const Color(0xFFF5F5F5),
+        color: tokens.surface,
         borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: isP2P
+              ? Color.lerp(tokens.outline, primaryColor, 0.2)!
+              : tokens.outline,
+        ),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.05),
-            blurRadius: 8,
-            offset: const Offset(0, 2),
+            color: tokens.shadow,
+            blurRadius: 18,
+            offset: const Offset(0, 7),
           ),
         ],
       ),
@@ -1869,9 +1899,10 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                           padding: EdgeInsets.all(
                               isLandscape ? 10 : (isMobile ? 12 : 16)),
                           decoration: BoxDecoration(
-                            color: isDark
-                                ? const Color(0xFF2A2A2A)
-                                : const Color(0xFFF5F5F5),
+                            color: context.themeTokens.surfaceMuted,
+                            border: Border.all(
+                              color: context.themeTokens.outline,
+                            ),
                             borderRadius:
                                 BorderRadius.circular(isLandscape ? 8 : 12),
                           ),
@@ -1887,9 +1918,7 @@ class _LinkStatusPageState extends State<LinkStatusPage>
                                           ? 8
                                           : (isMobile ? 10 : 16)),
                                   decoration: BoxDecoration(
-                                    color: isDark
-                                        ? const Color(0xFF1E1E1E)
-                                        : const Color(0xFFEEEEEE),
+                                    color: context.themeTokens.canvas,
                                     borderRadius: BorderRadius.circular(8),
                                   ),
                                   child: Stack(

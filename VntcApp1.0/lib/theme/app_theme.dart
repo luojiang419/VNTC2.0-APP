@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'color_utils.dart';
+import 'app_theme_tokens.dart';
 import '../utils/responsive_utils.dart';
 
 /// VNT App 主题配置
@@ -19,52 +20,69 @@ class AppTheme {
   static const Color infoColor = Color(0xFF2196F3);
 
   // 日间模式颜色
-  static const Color lightBackground = Color(0xFFF5F7FA);
+  static const Color lightBackground = Color(0xFFF3F6F8);
   static const Color lightSurface = Color(0xFFFFFFFF);
   static const Color lightCardBackground = Color(0xFFFFFFFF);
-  static const Color lightTextPrimary = Color(0xFF1A1A1A);
-  static const Color lightTextSecondary = Color(0xFF666666);
-  static const Color lightDivider = Color(0xFFE0E0E0);
-  static const Color lightNavBackground = Color(0xFFFFFFFF);
+  static const Color lightTextPrimary = Color(0xFF18212B);
+  static const Color lightTextSecondary = Color(0xFF65717E);
+  static const Color lightDivider = Color(0xFFDCE4E9);
+  static const Color lightNavBackground = Color(0xFFFBFCFD);
 
   // 暗黑模式颜色
-  static const Color darkBackground = Color(0xFF121212);
-  static const Color darkSurface = Color(0xFF1E1E1E);
-  static const Color darkCardBackground = Color(0xFF2C2C2C);
-  static const Color darkTextPrimary = Color(0xFFE0E0E0);
-  static const Color darkTextSecondary = Color(0xFF9E9E9E);
-  static const Color darkDivider = Color(0xFF424242);
-  static const Color darkNavBackground = Color(0xFF1E1E1E);
+  static const Color darkBackground = Color(0xFF22272F);
+  static const Color darkSurface = Color(0xFF282F38);
+  static const Color darkCardBackground = Color(0xFF2B323C);
+  static const Color darkTextPrimary = Color(0xFFF1F5F7);
+  static const Color darkTextSecondary = Color(0xFFAAB4BF);
+  static const Color darkDivider = Color(0xFF414B58);
+  static const Color darkNavBackground = Color(0xFF272D36);
 
   /// 创建日间主题（支持自定义主题色）
   static ThemeData createLightTheme(Color primaryColor) {
+    final tokens = AppThemeTokens.light(primaryColor);
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.light,
       primaryColor: primaryColor,
-      scaffoldBackgroundColor: lightBackground,
-      cardColor: lightCardBackground,
-      dividerColor: lightDivider,
+      scaffoldBackgroundColor: tokens.canvas,
+      canvasColor: tokens.canvas,
+      cardColor: tokens.surface,
+      dividerColor: tokens.outline,
+      extensions: [tokens],
       fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
       appBarTheme: AppBarTheme(
-        backgroundColor: primaryColor,
-        foregroundColor: Colors.white,
+        backgroundColor: tokens.navigation,
+        foregroundColor: tokens.textPrimary,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
         titleTextStyle: const TextStyle(
-          color: Colors.white,
+          color: lightTextPrimary,
           fontSize: DesignSystem.fontSizeLarge,
           fontWeight: FontWeight.w600,
         ),
-        iconTheme: const IconThemeData(color: Colors.white),
+        iconTheme: const IconThemeData(color: lightTextPrimary),
       ),
       cardTheme: CardThemeData(
-        color: lightCardBackground,
-        elevation: 2,
-        shadowColor: Colors.black.withValues(alpha: 0.1),
+        color: tokens.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shadowColor: tokens.shadow,
         shape: RoundedRectangleBorder(
+          side: BorderSide(color: tokens.outline),
           borderRadius: BorderRadius.circular(12),
         ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: tokens.shadow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: tokens.surfaceRaised,
+        modalBackgroundColor: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -95,7 +113,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: lightSurface,
+        fillColor: tokens.surfaceRaised,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: lightDivider),
@@ -133,14 +151,14 @@ class AppTheme {
         }),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: lightNavBackground,
+        backgroundColor: tokens.navigation,
         selectedItemColor: primaryColor,
         unselectedItemColor: lightTextSecondary,
         type: BottomNavigationBarType.fixed,
         elevation: 8,
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: lightNavBackground,
+        backgroundColor: tokens.navigation,
         selectedIconTheme: IconThemeData(color: primaryColor),
         unselectedIconTheme: const IconThemeData(color: lightTextSecondary),
         selectedLabelTextStyle:
@@ -150,41 +168,77 @@ class AppTheme {
       colorScheme: ColorScheme.light(
         primary: primaryColor,
         secondary: ColorUtils.lighten(primaryColor, 0.1),
-        surface: lightSurface,
+        surface: tokens.surface,
+        onSurface: tokens.textPrimary,
+        outline: tokens.outline,
         error: errorColor,
+      ),
+      dividerTheme: DividerThemeData(color: tokens.outline, thickness: 1),
+      popupMenuTheme: PopupMenuThemeData(
+        color: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: tokens.shadow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: tokens.surfaceRaised,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: tokens.outline),
+          boxShadow: [BoxShadow(color: tokens.shadow, blurRadius: 14)],
+        ),
+        textStyle: TextStyle(color: tokens.textPrimary),
       ),
     );
   }
 
   /// 创建暗黑主题（支持自定义主题色）
   static ThemeData createDarkTheme(Color primaryColor) {
+    final tokens = AppThemeTokens.dark(primaryColor);
     return ThemeData(
       useMaterial3: true,
       brightness: Brightness.dark,
       primaryColor: primaryColor,
-      scaffoldBackgroundColor: darkBackground,
-      cardColor: darkCardBackground,
-      dividerColor: darkDivider,
+      scaffoldBackgroundColor: tokens.canvas,
+      canvasColor: tokens.canvas,
+      cardColor: tokens.surface,
+      dividerColor: tokens.outline,
+      extensions: [tokens],
       fontFamily: Platform.isWindows ? 'Microsoft YaHei' : null,
-      appBarTheme: const AppBarTheme(
-        backgroundColor: darkSurface,
-        foregroundColor: darkTextPrimary,
+      appBarTheme: AppBarTheme(
+        backgroundColor: tokens.navigation,
+        foregroundColor: tokens.textPrimary,
         elevation: 0,
+        surfaceTintColor: Colors.transparent,
         centerTitle: false,
-        titleTextStyle: TextStyle(
+        titleTextStyle: const TextStyle(
           color: darkTextPrimary,
           fontSize: DesignSystem.fontSizeLarge,
           fontWeight: FontWeight.w600,
         ),
-        iconTheme: IconThemeData(color: darkTextPrimary),
+        iconTheme: IconThemeData(color: tokens.textPrimary),
       ),
       cardTheme: CardThemeData(
-        color: darkCardBackground,
-        elevation: 2,
-        shadowColor: Colors.black.withValues(alpha: 0.3),
+        color: tokens.surface,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        shadowColor: tokens.shadow,
         shape: RoundedRectangleBorder(
+          side: BorderSide(color: tokens.outline),
           borderRadius: BorderRadius.circular(12),
         ),
+      ),
+      dialogTheme: DialogThemeData(
+        backgroundColor: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
+        shadowColor: tokens.shadow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+      ),
+      bottomSheetTheme: BottomSheetThemeData(
+        backgroundColor: tokens.surfaceRaised,
+        modalBackgroundColor: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
       ),
       elevatedButtonTheme: ElevatedButtonThemeData(
         style: ElevatedButton.styleFrom(
@@ -215,7 +269,7 @@ class AppTheme {
       ),
       inputDecorationTheme: InputDecorationTheme(
         filled: true,
-        fillColor: darkSurface,
+        fillColor: tokens.surfaceRaised,
         border: OutlineInputBorder(
           borderRadius: BorderRadius.circular(8),
           borderSide: const BorderSide(color: darkDivider),
@@ -253,14 +307,14 @@ class AppTheme {
         }),
       ),
       bottomNavigationBarTheme: BottomNavigationBarThemeData(
-        backgroundColor: darkNavBackground,
+        backgroundColor: tokens.navigation,
         selectedItemColor: primaryColor,
         unselectedItemColor: darkTextSecondary,
         type: BottomNavigationBarType.fixed,
         elevation: 8,
       ),
       navigationRailTheme: NavigationRailThemeData(
-        backgroundColor: darkNavBackground,
+        backgroundColor: tokens.navigation,
         selectedIconTheme: IconThemeData(color: primaryColor),
         unselectedIconTheme: const IconThemeData(color: darkTextSecondary),
         selectedLabelTextStyle:
@@ -270,8 +324,27 @@ class AppTheme {
       colorScheme: ColorScheme.dark(
         primary: primaryColor,
         secondary: ColorUtils.lighten(primaryColor, 0.1),
-        surface: darkSurface,
+        surface: tokens.surface,
+        onSurface: tokens.textPrimary,
+        outline: tokens.outline,
         error: errorColor,
+      ),
+      dividerTheme: DividerThemeData(color: tokens.outline, thickness: 1),
+      popupMenuTheme: PopupMenuThemeData(
+        color: tokens.surfaceRaised,
+        surfaceTintColor: Colors.transparent,
+        elevation: 8,
+        shadowColor: tokens.shadow,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+      ),
+      tooltipTheme: TooltipThemeData(
+        decoration: BoxDecoration(
+          color: tokens.surfaceRaised,
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: tokens.outline),
+          boxShadow: [BoxShadow(color: tokens.shadow, blurRadius: 14)],
+        ),
+        textStyle: TextStyle(color: tokens.textPrimary),
       ),
     );
   }
@@ -289,22 +362,26 @@ extension ThemeExtension on BuildContext {
   bool get isDarkMode => Theme.of(this).brightness == Brightness.dark;
 
   /// 获取卡片背景色
-  Color get cardBackground =>
-      isDarkMode ? AppTheme.darkCardBackground : AppTheme.lightCardBackground;
+  Color get cardBackground => themeTokens.surface;
+
+  /// 获取浮起模块背景色
+  Color get raisedSurface => themeTokens.surfaceRaised;
+
+  /// 获取弱化模块背景色
+  Color get mutedSurface => themeTokens.surfaceMuted;
+
+  /// 获取页面画布色
+  Color get canvasBackground => themeTokens.canvas;
 
   /// 获取主要文字颜色
-  Color get textPrimary =>
-      isDarkMode ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary;
+  Color get textPrimary => themeTokens.textPrimary;
 
   /// 获取次要文字颜色
-  Color get textSecondary =>
-      isDarkMode ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+  Color get textSecondary => themeTokens.textSecondary;
 
   /// 获取分割线颜色
-  Color get dividerColor =>
-      isDarkMode ? AppTheme.darkDivider : AppTheme.lightDivider;
+  Color get dividerColor => themeTokens.outline;
 
   /// 获取导航栏背景色
-  Color get navBackground =>
-      isDarkMode ? AppTheme.darkNavBackground : AppTheme.lightNavBackground;
+  Color get navBackground => themeTokens.navigation;
 }

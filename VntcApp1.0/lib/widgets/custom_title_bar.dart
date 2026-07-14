@@ -2,7 +2,7 @@ import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:vnt_app/app_version.dart';
 import 'package:window_manager/window_manager.dart';
-import 'package:vnt_app/theme/app_theme.dart';
+import 'package:vnt_app/theme/app_theme_tokens.dart';
 
 /// 检测是否是 Windows 10 或更高版本
 bool _isWindows10OrGreater() {
@@ -89,19 +89,18 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
       return const SizedBox.shrink();
     }
 
-    final isDark = Theme.of(context).brightness == Brightness.dark;
-    final backgroundColor =
-        isDark ? AppTheme.darkCardBackground : AppTheme.lightCardBackground;
+    final tokens = context.themeTokens;
 
     return Container(
       height: 40,
       decoration: BoxDecoration(
-        color: backgroundColor,
+        color: tokens.navigation,
+        border: Border(bottom: BorderSide(color: tokens.outline)),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-            blurRadius: 4,
-            offset: const Offset(0, 2),
+            color: tokens.shadow,
+            blurRadius: 14,
+            offset: const Offset(0, 4),
           ),
         ],
       ),
@@ -147,9 +146,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
                       style: TextStyle(
                         fontSize: 13,
                         fontWeight: FontWeight.w500,
-                        color: isDark
-                            ? AppTheme.darkTextPrimary
-                            : AppTheme.lightTextPrimary,
+                        color: tokens.textPrimary,
                       ),
                     ),
                   ],
@@ -164,7 +161,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
             onPressed: () {
               windowManager.minimize();
             },
-            isDark: isDark,
           ),
           _buildWindowButton(
             icon: _isMaximized ? Icons.fullscreen_exit : Icons.fullscreen,
@@ -195,7 +191,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
                 _checkWindowState();
               }
             },
-            isDark: isDark,
           ),
           _buildWindowButton(
             icon: _isAlwaysOnTop ? Icons.push_pin : Icons.push_pin_outlined,
@@ -204,7 +199,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
               await windowManager.setAlwaysOnTop(!_isAlwaysOnTop);
               _checkWindowState();
             },
-            isDark: isDark,
             isActive: _isAlwaysOnTop,
           ),
           _buildWindowButton(
@@ -213,7 +207,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
             onPressed: () {
               windowManager.close();
             },
-            isDark: isDark,
             isCloseButton: true,
           ),
         ],
@@ -225,7 +218,6 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
     required IconData icon,
     required String tooltip,
     required VoidCallback onPressed,
-    required bool isDark,
     bool isCloseButton = false,
     bool isActive = false,
   }) {
@@ -238,9 +230,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
           onTap: onPressed,
           hoverColor: isCloseButton
               ? Colors.red.withValues(alpha: 0.8)
-              : (isDark
-                  ? Colors.white.withValues(alpha: 0.1)
-                  : Colors.black.withValues(alpha: 0.05)),
+              : context.themeTokens.surfaceRaised,
           child: Container(
             width: 46,
             height: 40,
@@ -250,9 +240,7 @@ class _CustomTitleBarState extends State<CustomTitleBar> with WindowListener {
               size: 16,
               color: isActive
                   ? Theme.of(context).primaryColor
-                  : (isDark
-                      ? AppTheme.darkTextSecondary
-                      : AppTheme.lightTextSecondary),
+                  : context.themeTokens.textSecondary,
             ),
           ),
         ),

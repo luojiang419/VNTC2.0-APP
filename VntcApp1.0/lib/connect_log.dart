@@ -268,8 +268,7 @@ class _LogPageState extends State<LogPage> {
     );
 
     return Scaffold(
-      backgroundColor:
-          isDark ? AppTheme.darkBackground : AppTheme.lightBackground,
+      backgroundColor: context.canvasBackground,
       appBar: AppBar(
         title: Text(
           '日志',
