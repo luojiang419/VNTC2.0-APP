@@ -57,6 +57,10 @@ if not exist "%RELEASE_DIR%" (
   exit /b 1
 )
 
+if not exist "%RELEASE_DIR%\native_assets.json" (
+  >"%RELEASE_DIR%\native_assets.json" echo {"format-version":[1,0,0],"native-assets":{}}
+)
+
 PowerShell -ExecutionPolicy Bypass -File "%PROJECT_DIR%\scripts\prepare_sqlite_runtime.ps1" -ProjectDir "%PROJECT_DIR%" -TargetDir "%RELEASE_DIR%"
 if errorlevel 1 exit /b 1
 

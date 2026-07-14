@@ -246,6 +246,16 @@ void main() {
     expect(windowsBuildScript, contains('tokens=1-4 delims=.'));
   });
 
+  test('Windows clean builds provide the native assets manifest', () {
+    final windowsBuildScript = _readProjectFile('scripts/build_windows.bat');
+
+    expect(windowsBuildScript, contains('native_assets.json'));
+    expect(
+      windowsBuildScript,
+      contains('{"format-version":[1,0,0],"native-assets":{}}'),
+    );
+  });
+
   test('Windows installer preserves user configuration during upgrades', () {
     final installerScript = _readProjectFile(
       'scripts/export_installer_package.ps1',
