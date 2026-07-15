@@ -1,7 +1,17 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <string name="app_name">VNT</string>
-    <string name="widget_small_description">VNT 快捷开关</string>
-    <string name="widget_large_description">VNT 状态面板</string>
-    <string name="remote_assist_accessibility_description">允许通过 VNT 远程协助控制本机触摸和输入操作</string>
+    <string name="app_name">VNTC APP2.0</string>
+    <string name="widget_small_description">VNTC APP2.0 快捷开关</string>
+    <string name="widget_large_description">VNTC APP2.0 状态面板</string>
+    <string name="widget_status_icon_description">VNTC APP2.0 状态图标</string>
+    <string name="notification_icon_description">VNTC APP2.0 图标</string>
+    <string name="remote_assist_accessibility_description">允许通过 VNTC APP2.0 远程协助控制本机触摸和输入操作</string>
+    <string name="remote_assist_input_service_name">VNTC APP2.0 远程协助输入服务</string>
+    <string name="notification_channel_name">VNTC APP2.0 连接状态</string>
+    <string name="notification_channel_description">显示 VNTC APP2.0 连接状态和快速切换按钮</string>
+    <string name="notification_title_format">VNTC APP2.0 - %1$s</string>
+    <string name="remote_assist_running_title">远程协助服务运行中</string>
+    <string name="remote_assist_running_description">本机已准备接受来自 VNTC APP2.0 网络的远程协助请求</string>
+    <string name="remote_assist_channel_name">VNTC APP2.0 远程协助</string>
+    <string name="remote_assist_channel_description">用于保持 VNTC APP2.0 Android 远程协助受控服务存活</string>
 </resources>

@@ -3,16 +3,37 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:vnt_app/update/app_update_config.dart';
+import 'package:vnt_app/update/app_update_preferences.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 
 bool _updateAvailableDialogVisible = false;
 bool _manualUpdateCheckActive = false;
 
+typedef DownloadedUpdateInstaller = Future<void> Function(
+  BuildContext context,
+  AppUpdateDownloadResult result,
+  AppUpdateService service,
+);
+
 Future<void> showUpdateCheckDialog(
   BuildContext context, {
   AppUpdateService? service,
+  AppUpdatePreferences? preferences,
+  DownloadedUpdateInstaller? installer,
 }) async {
+  if (!AppUpdateConfig.updateEnabled) {
+    return;
+  }
+  final updateMode = await (preferences ?? AppUpdatePreferences()).loadMode();
+  if (!context.mounted) {
+    return;
+  }
+  if (!updateMode.checksForUpdates) {
+    showTopToast(context, '更新检测已关闭，请先在设置中更改更新方式', isSuccess: false);
+    return;
+  }
   if (_manualUpdateCheckActive) {
     return;
   }
@@ -62,10 +83,55 @@ Future<void> showUpdateCheckDialog(
       return;
     }
 
+    if (!info.canDownload) {
+      await showUpdateAvailableDialog(
+        context: context,
+        info: info,
+        service: updateService,
+        allowDuringManualCheck: true,
+      );
+      return;
+    }
+
+    AppUpdateDownloadResult download;
+    try {
+      download = await _downloadWithProgressDialog(
+        context: context,
+        info: info,
+        service: updateService,
+      );
+    } catch (error) {
+      if (context.mounted) {
+        showTopToast(context, '下载更新失败: $error', isSuccess: false);
+      }
+      return;
+    }
+
+    if (!context.mounted) {
+      return;
+    }
+    if (updateMode.installsAutomatically) {
+      try {
+        final install = installer ??
+            (context, result, service) => startDownloadedUpdateInstallation(
+                  context: context,
+                  result: result,
+                  service: service,
+                );
+        await install(context, download, updateService);
+      } catch (error) {
+        if (context.mounted) {
+          showTopToast(context, '启动安装失败: $error', isSuccess: false);
+        }
+      }
+      return;
+    }
+
     await showUpdateAvailableDialog(
       context: context,
       info: info,
       service: updateService,
+      downloadResult: download,
       allowDuringManualCheck: true,
     );
   } finally {
@@ -77,9 +143,11 @@ Future<bool> showUpdateAvailableDialog({
   required BuildContext context,
   required AppUpdateInfo info,
   required AppUpdateService service,
+  AppUpdateDownloadResult? downloadResult,
   bool allowDuringManualCheck = false,
 }) async {
-  if (!context.mounted ||
+  if (!AppUpdateConfig.updateEnabled ||
+      !context.mounted ||
       _updateAvailableDialogVisible ||
       (_manualUpdateCheckActive && !allowDuringManualCheck)) {
     return false;
@@ -92,6 +160,7 @@ Future<bool> showUpdateAvailableDialog({
       builder: (_) => _UpdateAvailableDialog(
         info: info,
         service: service,
+        downloadResult: downloadResult,
       ),
     );
     return true;
@@ -100,14 +169,86 @@ Future<bool> showUpdateAvailableDialog({
   }
 }
 
+Future<AppUpdateDownloadResult> _downloadWithProgressDialog({
+  required BuildContext context,
+  required AppUpdateInfo info,
+  required AppUpdateService service,
+}) async {
+  final progress = ValueNotifier<double?>(null);
+  final navigator = Navigator.of(context, rootNavigator: true);
+  var dialogOpen = true;
+  final dialog = showDialog<void>(
+    context: context,
+    barrierDismissible: false,
+    builder: (_) => ValueListenableBuilder<double?>(
+      valueListenable: progress,
+      builder: (context, value, child) => AlertDialog(
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Text('正在自动下载更新包...'),
+            const SizedBox(height: 16),
+            LinearProgressIndicator(value: value),
+            if (value != null) ...[
+              const SizedBox(height: 8),
+              Text('${(value * 100).toStringAsFixed(0)}%'),
+            ],
+          ],
+        ),
+      ),
+    ),
+  ).whenComplete(() => dialogOpen = false);
+
+  try {
+    return await service.downloadUpdate(
+      info,
+      onProgress: (received, total) {
+        progress.value = total <= 0 ? null : (received / total).clamp(0, 1);
+      },
+    );
+  } finally {
+    if (dialogOpen && navigator.mounted && navigator.canPop()) {
+      navigator.pop();
+    }
+    await dialog;
+    progress.dispose();
+  }
+}
+
+Future<void> startDownloadedUpdateInstallation({
+  required BuildContext context,
+  required AppUpdateDownloadResult result,
+  required AppUpdateService service,
+  bool exitAfterWindowsLaunch = true,
+}) async {
+  if (Platform.isWindows) {
+    await service.launchWindowsSilentInstaller(result);
+    if (context.mounted) {
+      showTopToast(context, '更新器已启动，应用即将退出', isSuccess: true);
+    }
+    if (exitAfterWindowsLaunch) {
+      Timer(const Duration(milliseconds: 700), () => exit(0));
+    }
+    return;
+  }
+
+  await service.openDownloadedInstaller(result);
+  if (context.mounted) {
+    showTopToast(context, '安装包已下载，已交给系统处理', isSuccess: true);
+  }
+}
+
 class _UpdateAvailableDialog extends StatefulWidget {
   const _UpdateAvailableDialog({
     required this.info,
     required this.service,
+    this.downloadResult,
   });
 
   final AppUpdateInfo info;
   final AppUpdateService service;
+  final AppUpdateDownloadResult? downloadResult;
 
   @override
   State<_UpdateAvailableDialog> createState() => _UpdateAvailableDialogState();
@@ -117,6 +258,13 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
   bool _downloading = false;
   double _progress = 0;
   String _statusText = '准备下载更新包...';
+  AppUpdateDownloadResult? _downloadResult;
+
+  @override
+  void initState() {
+    super.initState();
+    _downloadResult = widget.downloadResult;
+  }
 
   Future<void> _downloadAndInstall() async {
     setState(() {
@@ -126,55 +274,45 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
     });
 
     try {
-      final result = await widget.service.downloadUpdate(
-        widget.info,
-        onProgress: (received, total) {
-          if (!mounted || total <= 0) {
-            return;
-          }
-          setState(() {
-            _progress = received / total;
-          });
-        },
-      );
-      if (Platform.isWindows) {
-        if (mounted) {
-          setState(() {
-            _statusText = '正在启动静默更新器...';
-          });
-        }
-        await widget.service.launchWindowsSilentInstaller(result);
-        if (!mounted) {
-          return;
-        }
-        showTopToast(context, '更新器已启动，应用即将退出', isSuccess: true);
-        Navigator.of(context).pop();
-        Timer(const Duration(milliseconds: 700), () {
-          exit(0);
-        });
-        return;
-      }
+      final result = _downloadResult ??
+          await widget.service.downloadUpdate(
+            widget.info,
+            onProgress: (received, total) {
+              if (!mounted || total <= 0) {
+                return;
+              }
+              setState(() {
+                _progress = received / total;
+              });
+            },
+          );
+      _downloadResult = result;
 
-      if (mounted) {
-        setState(() {
-          _statusText = Platform.isAndroid
-              ? '正在打开系统安装器...'
-              : '正在打开安装包...';
-        });
-      }
-      await widget.service.openDownloadedInstaller(result);
       if (!mounted) {
         return;
       }
-      showTopToast(context, '安装包已下载，已交给系统处理', isSuccess: true);
+      setState(() {
+        _statusText = Platform.isWindows
+            ? '正在启动静默更新器...'
+            : Platform.isAndroid
+                ? '正在打开系统安装器...'
+                : '正在打开安装包...';
+      });
+      await startDownloadedUpdateInstallation(
+        context: context,
+        result: result,
+        service: widget.service,
+      );
+      if (!mounted) {
+        return;
+      }
       Navigator.of(context).pop();
     } on PlatformException catch (error) {
       if (!mounted) {
         return;
       }
       final message = switch (error.code) {
-        'INSTALL_PERMISSION_DENIED' =>
-          '未授予安装权限，安装包已保留，可授权后重新安装',
+        'INSTALL_PERMISSION_DENIED' => '未授予安装权限，安装包已保留，可授权后重新安装',
         'REQUEST_IN_PROGRESS' => '已有安装授权请求正在处理',
         _ => '下载或打开失败: ${error.message ?? error.code}',
       };
@@ -263,11 +401,13 @@ class _UpdateAvailableDialogState extends State<_UpdateAvailableDialog> {
                   ? _downloadAndInstall
                   : _openReleasePage,
           child: Text(
-            info.canDownload
+            _downloadResult != null
                 ? Platform.isWindows
-                    ? '静默更新'
-                    : '下载并安装'
-                : '打开更新页面',
+                    ? '立即安装'
+                    : '安装更新'
+                : info.canDownload
+                    ? '下载并安装'
+                    : '打开更新页面',
           ),
         ),
       ],

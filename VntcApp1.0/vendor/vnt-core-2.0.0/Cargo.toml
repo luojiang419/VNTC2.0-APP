@@ -2,6 +2,7 @@
 name = "vnt-core"
 version = "2.0.0"
 edition = "2024"
+publish = false
 
 [dependencies]
 
@@ -13,7 +14,8 @@ futures = "0.3"
 tun-rs = { version = "2", features = ["async", "async_framed"] }
 
 rust-p2p-core = { version="0.4" }
-tcp_ip = { git = "https://github.com/rustp2p/tcp_ip", rev = "09c64c81da70a35248dfef4ef42bb9f5e8b6e05e" }
+tcp_ip = { version = "=0.1.10", git = "https://github.com/rustp2p/tcp_ip", rev = "09c64c81da70a35248dfef4ef42bb9f5e8b6e05e" }
+boringtun = { version = "=0.7.1", default-features = false }
 
 anyhow = "1"
 parking_lot = "0.12"

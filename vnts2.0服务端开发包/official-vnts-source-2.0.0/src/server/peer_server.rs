@@ -2,6 +2,7 @@ use crate::protocol::ProtoToBytesMut;
 use crate::protocol::server_message::{Payload, *};
 use crate::server::control_server::db::{self, PeerServerRecord, PeerServerSource};
 use crate::server::network_state_provider::NetworkStateProvider;
+use crate::server::wireguard_bridge::RelayOrigin;
 use anyhow::{Context, Result, bail};
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -233,6 +234,7 @@ impl PeerServerManager {
     async fn run_peer_communication_loop(
         &self,
         peer_info: Arc<PeerServerInfo>,
+        connection: quinn::Connection,
         mut framed_write: FramedWrite<SendStream, LengthDelimitedCodec>,
         mut framed_read: FramedRead<RecvStream, LengthDelimitedCodec>,
         mut rx: tokio::sync::mpsc::Receiver<Bytes>,
@@ -264,6 +266,19 @@ impl PeerServerManager {
                         }
                         Err(e) => {
                             log::warn!("peer recv error: {}", e);
+                            break;
+                        }
+                    }
+                }
+                datagram = connection.read_datagram() => {
+                    match datagram {
+                        Ok(bytes) => {
+                            if let Err(e) = manager.handle_peer_message(&peer_info, &mut network_codes, bytes).await {
+                                log::error!("handle peer datagram error: {:?}", e);
+                            }
+                        }
+                        Err(e) => {
+                            log::warn!("peer datagram receive error: {}", e);
                             break;
                         }
                     }
@@ -352,7 +367,7 @@ impl PeerServerManager {
         let manager = self.clone();
         tokio::spawn(async move {
             manager
-                .run_peer_communication_loop(peer_info, framed_write, framed_read, rx)
+                .run_peer_communication_loop(peer_info, connection, framed_write, framed_read, rx)
                 .await;
         });
 
@@ -462,7 +477,7 @@ impl PeerServerManager {
         peer_info.set_connected(tx, connection.clone());
         self.peer_servers.write().push(peer_info.clone());
 
-        self.run_peer_communication_loop(peer_info, framed_write, framed_read, rx)
+        self.run_peer_communication_loop(peer_info, connection, framed_write, framed_read, rx)
             .await;
 
         Ok(())
@@ -509,8 +524,16 @@ impl PeerServerManager {
             use crate::protocol::ip_packet_protocol::NetPacket;
             if let Ok(packet) = NetPacket::new(forward.data) {
                 let dest = Ipv4Addr::from(packet.dest_id());
-                if let Some(sender) = state.sender_map().get(&dest) {
-                    _ = sender.try_send(Bytes::from(packet.into_buffer()));
+                let origin = if forward.source_is_wireguard {
+                    RelayOrigin::WireGuard
+                } else {
+                    RelayOrigin::Vnt
+                };
+                let data = Bytes::from(packet.into_buffer());
+                if state.try_deliver(dest, data.clone(), origin)
+                    == crate::server::network_state_provider::LocalDeliveryResult::Delivered
+                {
+                    state.record_rx_traffic(dest, data.len());
                     log::debug!("Forwarded data to local client: {}", dest);
                 }
             }
@@ -870,11 +893,13 @@ impl PeerServerManager {
         peer_info: &Arc<PeerServerInfo>,
         network_code: String,
         data: Bytes,
+        origin: RelayOrigin,
     ) -> bool {
         let forward_msg = ServerMessage {
             payload: Some(Payload::ForwardData(ServerForwardData {
                 network_code,
                 data: data.to_vec(),
+                source_is_wireguard: origin == RelayOrigin::WireGuard,
             })),
         };
 
@@ -895,6 +920,7 @@ impl PeerServerManager {
         network_code: &str,
         target_ip: Ipv4Addr,
         data: Bytes,
+        origin: RelayOrigin,
     ) -> bool {
         let local_has_client =
             if let Some(state) = self.network_state_provider.get_network_state(network_code) {
@@ -947,7 +973,7 @@ impl PeerServerManager {
                     remote_latency
                 );
                 return self
-                    .forward_to_peer(&peer_info, network_code.to_string(), data)
+                    .forward_to_peer(&peer_info, network_code.to_string(), data, origin)
                     .await;
             }
         }
@@ -965,6 +991,32 @@ impl Clone for PeerServerManager {
             ip_to_routes: self.ip_to_routes.clone(),
             outbound_tasks: self.outbound_tasks.clone(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn forward_origin_field_is_backward_compatible_and_preserves_wireguard_source() {
+        let legacy = ServerForwardData {
+            network_code: "network-a".to_string(),
+            data: vec![1, 2, 3],
+            source_is_wireguard: false,
+        }
+        .encode_to_vec();
+        let legacy = ServerForwardData::decode(legacy.as_slice()).unwrap();
+        assert!(!legacy.source_is_wireguard);
+
+        let wireguard = ServerForwardData {
+            network_code: "network-a".to_string(),
+            data: vec![4, 5, 6],
+            source_is_wireguard: true,
+        }
+        .encode_to_vec();
+        let wireguard = ServerForwardData::decode(wireguard.as_slice()).unwrap();
+        assert!(wireguard.source_is_wireguard);
     }
 }
 

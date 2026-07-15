@@ -31,6 +31,7 @@ import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/remote_assist/remote_assist_manager.dart';
 import 'package:vnt_app/update/app_updater_page.dart';
+import 'package:vnt_app/update/app_update_preferences.dart';
 import 'package:vnt_app/update/startup_update_coordinator.dart';
 import 'package:vnt_app/update/update_dialog.dart';
 import 'package:vnt_app/update/update_service.dart';
@@ -127,7 +128,7 @@ Future<void> _runUpdateSessionApp(AppUpdateSession session) async {
       titleBarStyle: TitleBarStyle.normal,
     );
     await windowManager.waitUntilReadyToShow(windowOptions, () async {
-      await windowManager.setTitle('VNTC APP2.0 更新');
+      await windowManager.setTitle('${AppVersion.productName} 更新');
       await windowManager.show();
       await windowManager.focus();
     });
@@ -137,6 +138,10 @@ Future<void> _runUpdateSessionApp(AppUpdateSession session) async {
 }
 
 Future<void> main(List<String> args) async {
+  if (Platform.isAndroid) {
+    WidgetsFlutterBinding.ensureInitialized();
+  }
+  await AppVersion.initializeForCurrentPlatform();
   final startupArgs = <String>[
     ...args,
     for (final arg in Platform.executableArguments)
@@ -147,6 +152,11 @@ Future<void> main(List<String> args) async {
   _writeBootTrace('main enter args=${startupArgs.length}');
   final updateSession = AppUpdateSession.tryParse(startupArgs);
   if (updateSession != null) {
+    if (!AppVersion.updateEnabled) {
+      _writeBootTrace(
+          'update session blocked because update feature is removed');
+      exit(0);
+    }
     await _runUpdateSessionApp(updateSession);
     return;
   }
@@ -452,6 +462,7 @@ class _MainAppState extends State<MainApp> with WindowListener {
   bool rememberChoice = false;
   late final Future<bool> _systemTrayInitialization;
   late final AppUpdateService _startupUpdateService;
+  late final AppUpdatePreferences _startupUpdatePreferences;
   late final StartupUpdateCoordinator _startupUpdateCoordinator;
   bool _startupUpdatePromptInProgress = false;
 
@@ -460,8 +471,10 @@ class _MainAppState extends State<MainApp> with WindowListener {
     super.initState();
 
     _startupUpdateService = AppUpdateService();
+    _startupUpdatePreferences = AppUpdatePreferences();
     _startupUpdateCoordinator = StartupUpdateCoordinator(
       checkLatest: _startupUpdateService.checkLatest,
+      downloadUpdate: _startupUpdateService.downloadUpdate,
     );
 
     if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) {
@@ -591,6 +604,10 @@ class _MainAppState extends State<MainApp> with WindowListener {
   }
 
   Future<void> _checkForStartupUpdate() async {
+    if (!AppVersion.updateEnabled) {
+      _writeBootTrace('startup update check skipped for branded package');
+      return;
+    }
     if (!supportsStartupUpdateCheck(resolveCurrentUpdatePlatform())) {
       return;
     }
@@ -601,14 +618,27 @@ class _MainAppState extends State<MainApp> with WindowListener {
     }
 
     try {
-      final update = await _startupUpdateCoordinator.checkOnce();
-      if (update == null) {
+      final updateMode = await _startupUpdatePreferences.loadMode();
+      if (!updateMode.checksForUpdates) {
+        _writeBootTrace('startup update check skipped by user preference');
+        return;
+      }
+
+      final prepared = await _startupUpdateCoordinator.prepareOnce(updateMode);
+      if (prepared == null) {
         _writeBootTrace('startup update check: already latest');
         return;
       }
       _writeBootTrace(
-        'startup update check: ${update.currentVersion} -> ${update.latestVersion}',
+        'startup update prepared: '
+        '${prepared.info.currentVersion} -> ${prepared.info.latestVersion}, '
+        'mode=${prepared.mode.storageValue}, '
+        'downloaded=${prepared.isReadyToInstall}',
       );
+      if (prepared.shouldInstallAutomatically) {
+        await _installPreparedStartupUpdate(prepared);
+        return;
+      }
       await _showPendingStartupUpdateIfReady();
     } catch (error) {
       _writeBootTrace('startup update check failed: $error');
@@ -616,8 +646,35 @@ class _MainAppState extends State<MainApp> with WindowListener {
     }
   }
 
+  Future<void> _installPreparedStartupUpdate(
+    PreparedStartupUpdate prepared,
+  ) async {
+    final download = prepared.download;
+    if (download == null || !mounted) {
+      await _showPendingStartupUpdateIfReady();
+      return;
+    }
+
+    try {
+      await startDownloadedUpdateInstallation(
+        context: context,
+        result: download,
+        service: _startupUpdateService,
+      );
+      _startupUpdateCoordinator.takePendingUpdate();
+      _writeBootTrace(
+        'automatic update installation launched: ${prepared.info.tagName}',
+      );
+    } catch (error) {
+      _writeBootTrace('automatic update installation failed: $error');
+      debugPrint('自动安装更新失败: $error');
+      await _showPendingStartupUpdateIfReady();
+    }
+  }
+
   Future<void> _showPendingStartupUpdateIfReady() async {
-    if (!mounted ||
+    if (!AppVersion.updateEnabled ||
+        !mounted ||
         !_startupUpdateCoordinator.hasPendingUpdate ||
         _startupUpdatePromptInProgress) {
       return;
@@ -631,8 +688,8 @@ class _MainAppState extends State<MainApp> with WindowListener {
       return;
     }
 
-    final update = _startupUpdateCoordinator.pendingUpdate;
-    if (update == null) {
+    final prepared = _startupUpdateCoordinator.pendingUpdate;
+    if (prepared == null) {
       return;
     }
 
@@ -640,8 +697,9 @@ class _MainAppState extends State<MainApp> with WindowListener {
     try {
       final shown = await showUpdateAvailableDialog(
         context: context,
-        info: update,
+        info: prepared.info,
         service: _startupUpdateService,
+        downloadResult: prepared.download,
       );
       if (shown) {
         _startupUpdateCoordinator.takePendingUpdate();

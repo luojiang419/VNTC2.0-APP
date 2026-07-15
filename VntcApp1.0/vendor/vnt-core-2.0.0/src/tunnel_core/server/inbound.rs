@@ -6,6 +6,7 @@ use crate::enhanced_tunnel::inbound::EnhancedInbound;
 use crate::fec::FecDecoder;
 use crate::protocol::client_message::PunchInfo;
 use crate::protocol::control_message::ClientSimpleInfoList;
+use crate::protocol::control_message::proto::WireGuardP2pControl;
 use crate::protocol::ip_packet_protocol::{HEAD_LENGTH, MsgType, NetPacket};
 use crate::protocol::rpc_message::RpcMessageResponse;
 use crate::protocol::transmission::TransmissionBytes;
@@ -21,6 +22,8 @@ use rust_p2p_core::nat::NatInfo;
 use std::net::Ipv4Addr;
 
 pub(crate) struct ServerTurnInboundHandler {
+    allow_wire_guard: bool,
+    wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
     server_id: u32,
     network_addr: Option<NetworkAddr>,
     network_route: NetworkRoute,
@@ -42,6 +45,8 @@ impl ServerTurnInboundHandler {
     ) -> Self {
         let config = *config;
         Self {
+            allow_wire_guard: config.allow_wire_guard,
+            wireguard_p2p: config.wireguard_p2p,
             server_id,
             network_addr: Some(network_addr),
             network_route: config.network_route,
@@ -142,6 +147,19 @@ impl ServerTurnInboundHandler {
                 let response = RpcMessageResponse::decode(net_packet.payload())?;
                 rpc_notifier.notify_response(response);
             }
+            MsgType::WireGuardP2pControl => {
+                if !self.allow_wire_guard
+                    || !net_packet.is_gateway()
+                    || net_packet.ttl() == 0
+                    || src != network_addr.gateway
+                    || Ipv4Addr::from(net_packet.dest_id()) != network_addr.ip
+                {
+                    return Ok(());
+                }
+                if let Some(wireguard_p2p) = &self.wireguard_p2p {
+                    wireguard_p2p.apply_control(WireGuardP2pControl::decode(net_packet.payload())?);
+                }
+            }
             _ => {}
         }
         Ok(())
@@ -156,6 +174,21 @@ impl ServerTurnInboundHandler {
         let msg_type = net_packet.msg_type()?;
         let src = Ipv4Addr::from(net_packet.src_id());
         let dest = Ipv4Addr::from(net_packet.dest_id());
+
+        if msg_type == MsgType::WireGuardRelay {
+            if !self.allow_wire_guard || !self.server_info.is_wireguard_client(&src) {
+                return Ok(());
+            }
+            if crate::wireguard_bridge::validate_relay(&net_packet, network_addr.ip, network_addr)
+                .is_none()
+            {
+                return Ok(());
+            }
+            self.enhanced_inbound
+                .inbound(&network_addr, MsgType::Turn, src, net_packet)
+                .await?;
+            return Ok(());
+        }
 
         if msg_type == MsgType::Quic {
             // QUIC 数据不加密不压缩，但可能有 FEC

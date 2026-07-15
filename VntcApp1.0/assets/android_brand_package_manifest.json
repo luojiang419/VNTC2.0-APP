@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "brandReady": true,
+  "platform": "android",
+  "brandId": "official",
+  "version": "4.8.22",
+  "versionName": "4.8.22",
+  "versionCode": 40822,
+  "applicationId": "top.wherewego.vnt_app",
+  "sourcePackageName": "top.wherewego.vnt_app",
+  "brandingAsset": "assets/flutter_assets/assets/android_branding.json",
+  "capabilities": [
+    "androidRuntimeBrandingV1",
+    "hideAboutPage",
+    "removeUpdateFeature",
+    "launcherIconV1",
+    "applicationIdRewriteV1"
+  ]
+}

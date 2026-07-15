@@ -1,0 +1,26 @@
+name: vnts_console
+description: "VNTS 2.0 Windows enhanced Flutter console."
+publish_to: 'none'
+version: 2.0.0+3
+
+environment:
+  sdk: ^3.11.5
+
+dependencies:
+  file_selector: ^1.1.0
+  flutter:
+    sdk: flutter
+  qr_flutter: ^4.1.0
+  shared_preferences: ^2.5.5
+  tray_manager: ^0.5.3
+  window_manager: ^0.5.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - windows/runner/resources/app_icon.ico

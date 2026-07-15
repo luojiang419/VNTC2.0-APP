@@ -7,8 +7,16 @@ use bytes::BytesMut;
 use prost::Message;
 use std::net::Ipv4Addr;
 
-mod proto {
+#[allow(dead_code)]
+pub(crate) mod proto {
     include!(concat!(env!("OUT_DIR"), "/protocol.control_message.rs"));
+}
+
+pub use proto::NodeType;
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct WireGuardP2pRegistration {
+    pub public_key: [u8; 32],
+    pub port: u16,
 }
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq, Default)]
@@ -45,6 +53,8 @@ pub(crate) struct RegRequestMsg {
     pub ip_variable: bool,
     pub server_id: u32,
     pub registration_mode: RegistrationMode,
+    pub allow_wire_guard: bool,
+    pub wireguard_p2p: Option<WireGuardP2pRegistration>,
 }
 impl RegRequestMsg {
     // pub fn check(&self) -> anyhow::Result<()> {
@@ -100,6 +110,15 @@ impl RegRequestMsg {
     //     })
     // }
     pub fn to(self) -> proto::RegRequestMsg {
+        let (wireguard_p2p_public_key, wireguard_p2p_port) = self
+            .wireguard_p2p
+            .map(|registration| {
+                (
+                    registration.public_key.to_vec(),
+                    u32::from(registration.port),
+                )
+            })
+            .unwrap_or_default();
         proto::RegRequestMsg {
             network_code: self.network_code,
             device_id: self.device_id,
@@ -110,6 +129,9 @@ impl RegRequestMsg {
             ip_variable: self.ip_variable,
             server_id: self.server_id,
             registration_mode: proto::RegistrationMode::from(self.registration_mode).into(),
+            allow_wire_guard: self.allow_wire_guard,
+            wireguard_p2p_public_key,
+            wireguard_p2p_port,
         }
     }
 }
@@ -237,6 +259,7 @@ pub struct ClientSimpleInfo {
     pub ip: Ipv4Addr,
     pub name: String,
     pub online: bool,
+    pub node_type: NodeType,
 }
 impl ClientSimpleInfo {
     pub fn from(msg: proto::ClientSimpleInfo) -> anyhow::Result<Self> {
@@ -244,13 +267,75 @@ impl ClientSimpleInfo {
             ip: msg.ip.into(),
             name: String::new(),
             online: msg.online,
+            node_type: msg.node_type(),
         })
     }
     pub fn to(self) -> proto::ClientSimpleInfo {
         proto::ClientSimpleInfo {
             ip: self.ip.into(),
             online: self.online,
+            node_type: self.node_type as i32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use prost::Message;
+
+    #[test]
+    fn registration_encodes_wireguard_capability_at_field_ten() {
+        let bytes = RegRequestMsg {
+            network_code: "network-a".to_string(),
+            device_id: "device-a".to_string(),
+            ip: None,
+            name: "device-a".to_string(),
+            version: "2.0.0".to_string(),
+            key_sign: None,
+            ip_variable: true,
+            server_id: 0,
+            registration_mode: RegistrationMode::Normal,
+            allow_wire_guard: true,
+            wireguard_p2p: None,
+        }
+        .to()
+        .encode_to_vec();
+        assert!(bytes.windows(2).any(|field| field == [0x50, 0x01]));
+    }
+
+    #[test]
+    fn registration_encodes_wireguard_p2p_at_fields_eleven_and_twelve() {
+        let message = RegRequestMsg {
+            network_code: "network-a".to_string(),
+            device_id: "device-a".to_string(),
+            ip: None,
+            name: "device-a".to_string(),
+            version: "2.0.0".to_string(),
+            key_sign: None,
+            ip_variable: true,
+            server_id: 0,
+            registration_mode: RegistrationMode::Normal,
+            allow_wire_guard: true,
+            wireguard_p2p: Some(WireGuardP2pRegistration {
+                public_key: [0x2a; 32],
+                port: 51_820,
+            }),
+        }
+        .to();
+        assert_eq!(message.wireguard_p2p_public_key, vec![0x2a; 32]);
+        assert_eq!(message.wireguard_p2p_port, 51_820);
+    }
+
+    #[test]
+    fn legacy_node_type_defaults_to_vnt() {
+        let info = ClientSimpleInfo::from(proto::ClientSimpleInfo {
+            ip: Ipv4Addr::new(10, 26, 0, 2).into(),
+            online: true,
+            node_type: 0,
+        })
+        .unwrap();
+        assert_eq!(info.node_type, NodeType::Vnt);
     }
 }
 #[derive(Debug)]

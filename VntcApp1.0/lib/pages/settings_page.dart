@@ -15,6 +15,7 @@ import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/window_close_behavior.dart';
 import 'package:vnt_app/app_version.dart';
+import 'package:vnt_app/update/app_update_preferences.dart';
 import 'package:vnt_app/update/update_dialog.dart';
 import 'package:vnt_app/windows_startup_manager.dart';
 
@@ -40,11 +41,13 @@ class SettingsPage extends StatefulWidget {
 class _SettingsPageState extends State<SettingsPage> {
   final DataPersistence _dataPersistence = DataPersistence();
   final WindowsStartupManager _windowsStartupManager = WindowsStartupManager();
+  final AppUpdatePreferences _updatePreferences = AppUpdatePreferences();
 
   bool _autoStart = false;
   bool _silentStart = false;
   bool _autoConnect = false;
   WindowCloseBehavior _closeBehavior = WindowCloseBehavior.ask;
+  AppUpdateMode _updateMode = AppUpdateMode.manual;
   final List<(String, String)> _configNames = [];
   String _defaultKey = '';
 
@@ -82,6 +85,9 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     _autoConnect = await _dataPersistence.loadAutoConnect() ?? false;
     _closeBehavior = await _dataPersistence.loadWindowCloseBehavior();
+    if (AppVersion.updateEnabled) {
+      _updateMode = await _updatePreferences.loadMode();
+    }
     _defaultKey = await _dataPersistence.loadDefaultKey() ?? '';
 
     var list = await _dataPersistence.loadData();
@@ -719,14 +725,59 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
           ),
           _buildDivider(isDark),
-          _buildSettingItem(
-            isDark,
-            icon: Icons.system_update_alt,
-            title: '软件更新',
-            subtitle: '通过 GitHub Releases 检查并静默升级',
-            onTap: () => showUpdateCheckDialog(context),
-          ),
-          _buildDivider(isDark),
+          if (AppVersion.updateEnabled) ...[
+            _buildSettingItem(
+              isDark,
+              icon: Icons.system_update_alt,
+              title: '更新方式',
+              subtitle: _updateMode.description,
+              trailing: DropdownButton<AppUpdateMode>(
+                key: const ValueKey('app-update-mode-selector'),
+                value: _updateMode,
+                underline: const SizedBox(),
+                dropdownColor: isDark
+                    ? AppTheme.darkCardBackground
+                    : AppTheme.lightCardBackground,
+                borderRadius: BorderRadius.circular(context.cardRadius),
+                onChanged: (mode) async {
+                  if (mode == null || mode == _updateMode) {
+                    return;
+                  }
+                  await _updatePreferences.saveMode(mode);
+                  if (!mounted) {
+                    return;
+                  }
+                  setState(() => _updateMode = mode);
+                  showTopToast(
+                    context,
+                    '更新方式已设置为${mode.label}',
+                    isSuccess: true,
+                  );
+                },
+                items: AppUpdateMode.values
+                    .map(
+                      (mode) => DropdownMenuItem<AppUpdateMode>(
+                        value: mode,
+                        child: Text(mode.label),
+                      ),
+                    )
+                    .toList(),
+              ),
+            ),
+            _buildDivider(isDark),
+            _buildSettingItem(
+              isDark,
+              icon: Icons.refresh,
+              title: '立即检查更新',
+              subtitle: _updateMode.checksForUpdates
+                  ? '立即检查 GitHub Releases 最新版本'
+                  : '更新检测已关闭，请先选择其他更新方式',
+              onTap: _updateMode.checksForUpdates
+                  ? () => showUpdateCheckDialog(context)
+                  : null,
+            ),
+            _buildDivider(isDark),
+          ],
           _buildDefaultConfigSelector(isDark),
           if (Platform.isWindows || Platform.isLinux) ...[
             _buildDivider(isDark),

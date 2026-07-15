@@ -1,0 +1,13 @@
+**/.git
+**/target
+**/node_modules
+**/*.db
+**/*.db-lock
+**/*.db.lock
+**/logs
+backup
+dist
+linux-deploy/vnts2
+windows-deploy
+web-ui-source
+official-vnts-source-2.0.0/web-console

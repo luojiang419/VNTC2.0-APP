@@ -18,6 +18,8 @@ $iconDest = Join-Path $stageDir 'app_icon.ico'
 $languageSource = Join-Path $projectDir 'scripts\inno\ChineseSimplified.isl'
 $localizedTextSource = Join-Path $projectDir 'scripts\inno\installer_zh_cn.json'
 $languageDest = Join-Path $stageDir 'ChineseSimplified.isl'
+$payloadDir = Join-Path $stageDir 'payload'
+$payloadZip = Join-Path $stageDir 'brand_payload.zip'
 $vntcRustDeskMsiSource = Join-Path $projectDir 'third_party\vntcrustdesk\windows\dist\vntcrustdesk.msi'
 $bootstrapScriptSource = Join-Path $projectDir 'scripts\bootstrap_vntcrustdesk.ps1'
 $uninstallScriptSource = Join-Path $projectDir 'scripts\uninstall_vntcrustdesk.ps1'
@@ -197,9 +199,29 @@ if (Test-Path -LiteralPath $shaPath) {
 
 Copy-Item -LiteralPath $iconSource -Destination $iconDest -Force
 Copy-Item -LiteralPath $languageSource -Destination $languageDest -Force
-Copy-Item -LiteralPath $vntcRustDeskMsiSource -Destination $vntcRustDeskMsiDest -Force
-Copy-Item -LiteralPath $bootstrapScriptSource -Destination $bootstrapScriptDest -Force
-Copy-Item -LiteralPath $uninstallScriptSource -Destination $uninstallScriptDest -Force
+
+New-Item -ItemType Directory -Force -Path $payloadDir | Out-Null
+Get-ChildItem -LiteralPath $portablePackageDir -Force | Copy-Item -Destination $payloadDir -Recurse -Force
+$payloadConfigDir = Join-Path $payloadDir 'config'
+if (Test-Path -LiteralPath $payloadConfigDir) {
+    Remove-WithRetry -Path $payloadConfigDir -Recurse
+}
+$payloadManifest = [ordered]@{
+    schemaVersion = 1
+    brandReady = $true
+    version = $currentBuildVersion
+    executableName = 'vnt_app.exe'
+    sourceProductName = 'VNTC APP2.0'
+    capabilities = @('runtimeBrandingV1', 'hideAboutPage', 'removeUpdateFeature')
+}
+$payloadManifest | ConvertTo-Json | Set-Content -LiteralPath (Join-Path $payloadDir 'brand_package_manifest.json') -Encoding UTF8
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+[System.IO.Compression.ZipFile]::CreateFromDirectory(
+    $payloadDir,
+    $payloadZip,
+    [System.IO.Compression.CompressionLevel]::Optimal,
+    $false
+)
 
 $localizedText = Get-Content -LiteralPath $localizedTextSource -Raw -Encoding UTF8 | ConvertFrom-Json
 $desktopShortcutDescription = [string]$localizedText.desktopShortcutDescription
@@ -219,6 +241,7 @@ $issContent = @"
 #define MyAppExeName "vnt_app.exe"
 #define MyAppSourceDir "$sourceDirForIss"
 #define MyAppIcon "$iconPathForIss"
+#define MyBrandPayload "$(Convert-ToInnoPath -Path $payloadZip)"
 
 [Setup]
 AppId={{B2877D56-1F3E-4F72-A53A-6D94C6C1E200}
@@ -232,8 +255,9 @@ AllowNoIcons=yes
 PrivilegesRequired=admin
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
-Compression=lzma2/max
-SolidCompression=yes
+Compression=none
+SolidCompression=no
+ArchiveExtraction=full
 WizardStyle=modern
 SetupIconFile={#MyAppIcon}
 UninstallDisplayIcon={app}\{#MyAppExeName}
@@ -247,6 +271,8 @@ ShowLanguageDialog=no
 CloseApplications=yes
 RestartApplications=no
 RestartIfNeededByRun=no
+VersionInfoDescription=VNT_BRAND_READY_V1
+VersionInfoProductName={#MyAppName}
 
 [Languages]
 Name: "chinesesimplified"; MessagesFile: ".\ChineseSimplified.isl"
@@ -255,21 +281,79 @@ Name: "chinesesimplified"; MessagesFile: ".\ChineseSimplified.isl"
 Name: "desktopicon"; Description: "$desktopShortcutDescription"; GroupDescription: "$additionalShortcutsGroup"; Flags: unchecked
 
 [Files]
-Source: "{#MyAppSourceDir}\*"; DestDir: "{app}"; Excludes: "config\*"; Flags: ignoreversion recursesubdirs createallsubdirs
-Source: ".\vntcrustdesk.msi"; DestDir: "{app}\remote_assist\artifacts"; Flags: ignoreversion
-Source: ".\bootstrap_vntcrustdesk.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
-Source: ".\uninstall_vntcrustdesk.ps1"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "{#MyBrandPayload}"; Flags: dontcopy noencryption
 
 [Icons]
 Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\bootstrap_vntcrustdesk.ps1"" -AppDir ""{app}"" -MsiPath ""{app}\remote_assist\artifacts\vntcrustdesk.msi"""; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\bootstrap_vntcrustdesk.ps1"" -AppDir ""{app}"" -MsiPath ""{app}\remote_assist\artifacts\vntcrustdesk.msi"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "{app}\{#MyAppExeName}"; Description: "$launchAfterInstallDescription"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall_vntcrustdesk.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall_vntcrustdesk.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
+
+[UninstallDelete]
+Type: files; Name: "{app}\*"
+Type: filesandordirs; Name: "{app}\data"
+Type: filesandordirs; Name: "{app}\dlls"
+Type: filesandordirs; Name: "{app}\remote_assist"
+Type: filesandordirs; Name: "{app}\scripts"
+Type: dirifempty; Name: "{app}"
+
+[Code]
+var
+  BrandExportMode: Boolean;
+
+function IsBrandValidationMode: Boolean;
+var
+  Index: Integer;
+begin
+  Result := False;
+  for Index := 1 to ParamCount do
+  begin
+    if CompareText(ParamStr(Index), '/BRAND-VALIDATE-INSTALL') = 0 then
+    begin
+      Result := True;
+      exit;
+    end;
+  end;
+end;
+
+function InitializeSetup: Boolean;
+var
+  ExportPath: String;
+begin
+  ExportPath := ExpandConstant('{param:BRAND-EXPORT|}');
+  BrandExportMode := ExportPath <> '';
+  if BrandExportMode then
+  begin
+    ForceDirectories(ExtractFileDir(ExportPath));
+    ExtractTemporaryFile('brand_payload.zip');
+    if not FileCopy(ExpandConstant('{tmp}\brand_payload.zip'), ExportPath, False) then
+      RaiseException('无法导出品牌母包数据');
+    Result := False;
+    exit;
+  end;
+  Result := True;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+begin
+  if CurStep = ssPostInstall then
+  begin
+    ForceDirectories(ExpandConstant('{app}'));
+    ExtractTemporaryFile('brand_payload.zip');
+    ExtractArchive(
+      ExpandConstant('{tmp}\brand_payload.zip'),
+      ExpandConstant('{app}'),
+      '',
+      True,
+      nil
+    );
+  end;
+end;
 "@
 
 Set-Content -LiteralPath $issPath -Value $issContent -Encoding UTF8

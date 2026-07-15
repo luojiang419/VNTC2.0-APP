@@ -9,6 +9,8 @@ pub mod tls;
 pub(crate) mod tun;
 pub mod tunnel_core;
 pub mod utils;
+pub(crate) mod wireguard_bridge;
+pub(crate) mod wireguard_p2p;
 
 pub mod api;
 pub(crate) mod enhanced_tunnel;

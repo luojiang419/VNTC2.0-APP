@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:flutter/material.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 
 void main() {
@@ -60,6 +61,36 @@ void main() {
     expect(gate.finish('config-a'), isTrue);
     expect(gate.isCreating, isFalse);
     expect(gate.begin('config-a'), isTrue);
+  });
+
+  test('VntConnectionGate 允许不同配置并发创建且状态互不干扰', () {
+    final gate = VntConnectionGate();
+
+    expect(gate.begin('config-a'), isTrue);
+    expect(gate.begin('config-b'), isTrue);
+    expect(gate.isCreatingKey('config-a'), isTrue);
+    expect(gate.isCreatingKey('config-b'), isTrue);
+
+    expect(gate.finish('config-a'), isTrue);
+    expect(gate.isCreatingKey('config-a'), isFalse);
+    expect(gate.isCreatingKey('config-b'), isTrue);
+    expect(gate.finish('config-b'), isTrue);
+    expect(gate.isCreating, isFalse);
+  });
+
+  test('VntManager 对 Android 和 iOS 明确关闭多连接能力', () {
+    expect(
+      VntManager.supportsMultipleForPlatform(TargetPlatform.android),
+      isFalse,
+    );
+    expect(
+      VntManager.supportsMultipleForPlatform(TargetPlatform.iOS),
+      isFalse,
+    );
+    expect(
+      VntManager.supportsMultipleForPlatform(TargetPlatform.windows),
+      isTrue,
+    );
   });
 
   test('VntConnectionGate 会让创建完成前的取消生效', () {

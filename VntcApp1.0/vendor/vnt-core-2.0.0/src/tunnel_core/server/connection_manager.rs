@@ -24,6 +24,8 @@ use std::time::{Duration, Instant};
 use tokio::sync::mpsc::{Receiver, Sender};
 
 pub struct InboundHandlerConfig {
+    pub allow_wire_guard: bool,
+    pub wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
     pub network_route: NetworkRoute,
     pub server_info: ServerInfoCollection,
     pub nat_info: MyNatInfo,

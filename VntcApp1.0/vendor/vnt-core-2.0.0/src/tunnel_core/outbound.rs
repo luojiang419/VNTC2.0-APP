@@ -91,6 +91,17 @@ impl BasicOutbound {
             .await
     }
 
+    /// 仅通过服务器发送原始数据包，不触发 P2P 打洞或回退。
+    pub async fn send_server_raw(
+        &self,
+        dest: Ipv4Addr,
+        packet: NetPacket<TransmissionBytes>,
+    ) -> anyhow::Result<()> {
+        self.server_outbound
+            .send_raw(dest, packet.into_bytes())
+            .await
+    }
+
     /// 广播发送
     pub async fn send_raw_broadcast(
         &self,
@@ -182,6 +193,7 @@ pub(crate) struct HybridOutbound {
     packet_compression: PacketCompression,
     external_route: SubnetExternalRoute,
     fec_encoder: Option<FecEncoder>,
+    wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
 }
 impl HybridOutbound {
     pub fn new(
@@ -192,6 +204,7 @@ impl HybridOutbound {
         packet_compression: PacketCompression,
         external_route: SubnetExternalRoute,
         fec_encoder: Option<FecEncoder>,
+        wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
     ) -> Self {
         Self {
             network,
@@ -201,6 +214,7 @@ impl HybridOutbound {
             packet_compression,
             external_route,
             fec_encoder,
+            wireguard_p2p,
         }
     }
     pub async fn outbound_raw(
@@ -232,6 +246,9 @@ impl HybridOutbound {
         };
         self.ipv4_outbound(net, data).await
     }
+    pub fn is_wireguard_destination(&self, dest: &Ipv4Addr) -> bool {
+        self.server_info.is_wireguard_client(dest)
+    }
     pub async fn ipv4_outbound(
         &self,
         net: NetworkAddr,
@@ -242,6 +259,30 @@ impl HybridOutbound {
         };
         let mut dest = ipv4.get_destination();
         let len = data.len() as u64;
+
+        if net.network().contains(&dest) && self.server_info.is_wireguard_client(&dest) {
+            if crate::wireguard_bridge::validate_inner_ipv4(data.as_ref(), net.ip, Some(dest), net)
+                .is_none()
+            {
+                return Ok(());
+            }
+            if let Some(wireguard_p2p) = &self.wireguard_p2p
+                && wireguard_p2p.send_ipv4(dest, data.as_ref()).await
+            {
+                self.traffic_stats.record_tx(dest, len);
+                return Ok(());
+            }
+            data.retreat_head(HEAD_LENGTH)?;
+            let mut packet = NetPacket::new(data)?;
+            packet.set_msg_type(MsgType::WireGuardRelay);
+            packet.set_src_id(net.ip.into());
+            packet.set_dest_id(dest.into());
+            packet.set_ttl(5);
+            self.basic_outbound.send_server_raw(dest, packet).await?;
+            self.traffic_stats.record_tx(dest, len);
+            return Ok(());
+        }
+
         data.retreat_head(HEAD_LENGTH)?;
         let mut packet = NetPacket::new(data)?;
         packet.set_msg_type(MsgType::Turn);

@@ -1,6 +1,9 @@
 pub mod control_server;
 pub mod network_state_provider;
 pub mod peer_server;
+pub mod wireguard_bridge;
+pub mod wireguard_p2p;
+pub mod wireguard_runtime;
 
 // 传输层
 pub mod quic;

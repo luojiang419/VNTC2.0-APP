@@ -1,14 +1,20 @@
-use anyhow::Context;
+use anyhow::{Context, ensure};
 use futures::TryStreamExt;
 use ipnet::Ipv4Net;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
-use sqlx::{FromRow, Row, SqlitePool, sqlite::SqlitePoolOptions};
+use sqlx_core::{query::query, row::Row};
+use sqlx_sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
+use std::fs::{File, OpenOptions, TryLockError};
 use std::net::Ipv4Addr;
 use std::path::Path;
 
+mod migrations;
+
 static DB_POOL: OnceCell<SqlitePool> = OnceCell::new();
+static DB_PROCESS_LOCK: OnceCell<File> = OnceCell::new();
 const DB_FILE: &str = "network_control.db";
+const DB_LOCK_FILE: &str = "network_control.db.lock";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum NetworkSource {
@@ -61,7 +67,7 @@ impl NetworkSource {
     }
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct NetworkRecord {
     pub network_code: String,
     pub gateway: String,
@@ -79,7 +85,7 @@ impl NetworkRecord {
     }
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct DeviceRecord {
     pub device_id: String,
     pub network_code: String,
@@ -91,14 +97,59 @@ pub struct DeviceRecord {
     pub rx_bytes: i64,
 }
 
-#[derive(Debug, Clone, FromRow)]
+#[derive(Debug, Clone)]
 pub struct PeerServerRecord {
     pub server_addr: String,
     pub source: PeerServerSource,
     pub created_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireGuardPeerIpAllocation {
+    pub peer_id: String,
+    pub ip: Ipv4Addr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireGuardPeerRecord {
+    pub network_code: String,
+    pub peer_id: String,
+    pub public_key: [u8; 32],
+    pub enabled: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireGuardRuntimePeer {
+    pub network_code: String,
+    pub peer_id: String,
+    pub public_key: [u8; 32],
+    pub ip: Ipv4Addr,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct WireGuardPeerDeleteResult {
+    pub peer_removed: bool,
+    pub ip_released: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EncryptedWireGuardIdentity {
+    pub format_version: i64,
+    pub encryption_key_version: i64,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    pub public_key: Vec<u8>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 pub async fn init_db_pool() -> anyhow::Result<()> {
+    if DB_POOL.get().is_some() {
+        return Ok(());
+    }
+    let database_lock = acquire_database_process_lock(Path::new(DB_LOCK_FILE))?;
     if !Path::new(DB_FILE).exists() {
         log::info!("Create database");
         std::fs::File::create(DB_FILE)?;
@@ -111,7 +162,7 @@ pub async fn init_db_pool() -> anyhow::Result<()> {
         .await
         .context("Failed to connect to SQLite database")?;
 
-    sqlx::query(
+    query(
         "CREATE TABLE IF NOT EXISTS networks (
             network_code TEXT PRIMARY KEY,
             gateway TEXT NOT NULL,
@@ -126,11 +177,11 @@ pub async fn init_db_pool() -> anyhow::Result<()> {
     .context("Failed to create networks table")?;
 
     // migration: 旧表可能缺少 source 字段
-    let _ = sqlx::query("ALTER TABLE networks ADD COLUMN source INTEGER NOT NULL DEFAULT 0")
+    let _ = query("ALTER TABLE networks ADD COLUMN source INTEGER NOT NULL DEFAULT 0")
         .execute(&pool)
         .await;
 
-    sqlx::query(
+    query(
         "CREATE TABLE IF NOT EXISTS devices (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             device_id TEXT NOT NULL,
@@ -148,7 +199,7 @@ pub async fn init_db_pool() -> anyhow::Result<()> {
     .await
     .context("Failed to create devices table")?;
 
-    sqlx::query(
+    query(
         "CREATE TABLE IF NOT EXISTS peer_servers (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             server_addr TEXT NOT NULL UNIQUE,
@@ -160,8 +211,163 @@ pub async fn init_db_pool() -> anyhow::Result<()> {
     .await
     .context("Failed to create peer_servers table")?;
 
-    DB_POOL.set(pool).unwrap_or_else(|_| ());
+    migrations::apply(&pool).await?;
+
+    DB_PROCESS_LOCK
+        .set(database_lock)
+        .map_err(|_| anyhow::anyhow!("Database process lock was initialized concurrently"))?;
+    DB_POOL
+        .set(pool)
+        .map_err(|_| anyhow::anyhow!("SQLite database pool was initialized concurrently"))?;
     Ok(())
+}
+
+pub(crate) fn database_exists() -> bool {
+    Path::new(DB_FILE).is_file()
+}
+
+fn acquire_database_process_lock(path: &Path) -> anyhow::Result<File> {
+    let file = OpenOptions::new()
+        .create(true)
+        .truncate(false)
+        .read(true)
+        .write(true)
+        .open(path)
+        .with_context(|| format!("Failed to open database process lock: {}", path.display()))?;
+    match file.try_lock() {
+        Ok(()) => Ok(file),
+        Err(TryLockError::WouldBlock) => anyhow::bail!(
+            "Database is already in use by another VNTS process; stop the service before rotation"
+        ),
+        Err(TryLockError::Error(error)) => Err(error)
+            .with_context(|| format!("Failed to lock database process file: {}", path.display())),
+    }
+}
+
+pub(super) fn db_pool() -> anyhow::Result<&'static SqlitePool> {
+    DB_POOL
+        .get()
+        .context("SQLite database pool is not initialized")
+}
+
+pub(super) async fn load_wireguard_server_identity_with_pool(
+    pool: &SqlitePool,
+) -> anyhow::Result<Option<EncryptedWireGuardIdentity>> {
+    let row = query(
+        "SELECT format_version, encryption_key_version, nonce, ciphertext, public_key,
+                created_at, updated_at
+         FROM wireguard_server_identity WHERE id = 1",
+    )
+    .fetch_optional(pool)
+    .await
+    .context("Failed to load encrypted WireGuard server identity")?;
+
+    row.map(|row| -> anyhow::Result<_> {
+        Ok(EncryptedWireGuardIdentity {
+            format_version: row.try_get("format_version")?,
+            encryption_key_version: row.try_get("encryption_key_version")?,
+            nonce: row.try_get("nonce")?,
+            ciphertext: row.try_get("ciphertext")?,
+            public_key: row.try_get("public_key")?,
+            created_at: row.try_get("created_at")?,
+            updated_at: row.try_get("updated_at")?,
+        })
+    })
+    .transpose()
+    .context("Invalid encrypted WireGuard server identity record")
+}
+
+pub(super) async fn insert_wireguard_server_identity_if_absent_with_pool(
+    pool: &SqlitePool,
+    record: &EncryptedWireGuardIdentity,
+) -> anyhow::Result<bool> {
+    let result = query(
+        "INSERT OR IGNORE INTO wireguard_server_identity (
+            id, format_version, encryption_key_version, nonce, ciphertext, public_key,
+            created_at, updated_at
+         ) VALUES (1, ?, ?, ?, ?, ?, ?, ?)",
+    )
+    .bind(record.format_version)
+    .bind(record.encryption_key_version)
+    .bind(&record.nonce)
+    .bind(&record.ciphertext)
+    .bind(&record.public_key)
+    .bind(record.created_at)
+    .bind(record.updated_at)
+    .execute(pool)
+    .await
+    .context("Failed to persist encrypted WireGuard server identity")?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub(super) async fn replace_wireguard_server_identity_with_pool(
+    pool: &SqlitePool,
+    current: &EncryptedWireGuardIdentity,
+    replacement: &EncryptedWireGuardIdentity,
+) -> anyhow::Result<()> {
+    let result = query(
+        "UPDATE wireguard_server_identity
+         SET format_version = ?, encryption_key_version = ?, nonce = ?, ciphertext = ?,
+             public_key = ?, created_at = ?, updated_at = ?
+         WHERE id = 1
+           AND format_version = ?
+           AND encryption_key_version = ?
+           AND nonce = ?
+           AND ciphertext = ?
+           AND public_key = ?
+           AND created_at = ?
+           AND updated_at = ?",
+    )
+    .bind(replacement.format_version)
+    .bind(replacement.encryption_key_version)
+    .bind(&replacement.nonce)
+    .bind(&replacement.ciphertext)
+    .bind(&replacement.public_key)
+    .bind(replacement.created_at)
+    .bind(replacement.updated_at)
+    .bind(current.format_version)
+    .bind(current.encryption_key_version)
+    .bind(&current.nonce)
+    .bind(&current.ciphertext)
+    .bind(&current.public_key)
+    .bind(current.created_at)
+    .bind(current.updated_at)
+    .execute(pool)
+    .await
+    .context("Failed to atomically replace WireGuard server identity")?;
+    anyhow::ensure!(
+        result.rows_affected() == 1,
+        "WireGuard server identity changed concurrently; rotation was not applied"
+    );
+    Ok(())
+}
+
+#[cfg(test)]
+pub(super) async fn wireguard_identity_test_pool() -> SqlitePool {
+    let pool = SqlitePoolOptions::new()
+        .max_connections(1)
+        .connect("sqlite::memory:")
+        .await
+        .unwrap();
+    query(
+        "CREATE TABLE devices (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            device_id TEXT NOT NULL,
+            network_code TEXT NOT NULL,
+            ip TEXT,
+            device_name TEXT NOT NULL,
+            device_version TEXT NOT NULL,
+            last_connect_time INTEGER NOT NULL,
+            tx_bytes INTEGER NOT NULL DEFAULT 0,
+            rx_bytes INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(device_id, network_code)
+        )",
+    )
+    .execute(&pool)
+    .await
+    .unwrap();
+    migrations::apply(&pool).await.unwrap();
+    pool
 }
 
 pub async fn save_network(record: &NetworkRecord) -> anyhow::Result<()> {
@@ -169,7 +375,7 @@ pub async fn save_network(record: &NetworkRecord) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    sqlx::query(
+    query(
         r#"INSERT OR REPLACE INTO networks (network_code, gateway, netmask, lease_duration, source, created_at)
            VALUES (?, ?, ?, ?, ?, ?)"#,
     )
@@ -191,7 +397,7 @@ pub async fn save_network_if_not_exists(record: &NetworkRecord) -> anyhow::Resul
         return Ok(false);
     };
 
-    let result = sqlx::query(
+    let result = query(
         r#"INSERT OR IGNORE INTO networks (network_code, gateway, netmask, lease_duration, source, created_at)
            VALUES (?, ?, ?, ?, ?, ?)"#,
     )
@@ -218,7 +424,7 @@ pub async fn update_network(
         return Ok(false);
     };
 
-    let result = sqlx::query(
+    let result = query(
         r#"UPDATE networks SET gateway = ?, netmask = ?, lease_duration = ? WHERE network_code = ?"#,
     )
     .bind(gateway)
@@ -237,7 +443,7 @@ pub async fn delete_network(network_code: &str) -> anyhow::Result<bool> {
         return Ok(false);
     };
 
-    let result = sqlx::query(r#"DELETE FROM networks WHERE network_code = ?"#)
+    let result = query(r#"DELETE FROM networks WHERE network_code = ?"#)
         .bind(network_code)
         .execute(pool)
         .await
@@ -252,7 +458,7 @@ pub async fn get_network(network_code: &str) -> anyhow::Result<Option<NetworkRec
         return Ok(None);
     };
 
-    let row_option = sqlx::query(
+    let row_option = query(
         r#"SELECT network_code, gateway, netmask, lease_duration, source, created_at FROM networks WHERE network_code = ?"#,
     )
     .bind(network_code)
@@ -282,7 +488,7 @@ pub async fn load_all_networks() -> anyhow::Result<Vec<NetworkRecord>> {
         return Ok(Vec::new());
     };
 
-    let records: Vec<NetworkRecord> = sqlx::query(
+    let records: Vec<NetworkRecord> = query(
         r#"SELECT network_code, gateway, netmask, lease_duration, source, created_at FROM networks ORDER BY created_at"#,
     )
     .fetch(pool)
@@ -305,19 +511,433 @@ pub async fn load_all_networks() -> anyhow::Result<Vec<NetworkRecord>> {
     Ok(records)
 }
 
-pub async fn network_has_devices(network_code: &str) -> anyhow::Result<bool> {
+async fn network_has_resource_owners_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+) -> anyhow::Result<bool> {
+    let row = query(
+        r#"SELECT (
+               EXISTS(SELECT 1 FROM devices WHERE network_code = ?)
+               OR EXISTS(SELECT 1 FROM ip_allocations WHERE network_code = ?)
+               OR EXISTS(SELECT 1 FROM wireguard_peers WHERE network_code = ?)
+           ) AS occupied"#,
+    )
+    .bind(network_code)
+    .bind(network_code)
+    .bind(network_code)
+    .fetch_one(pool)
+    .await
+    .context("Failed to check network resource owners")?;
+
+    let occupied: bool = row.get("occupied");
+    Ok(occupied)
+}
+
+pub async fn network_has_resource_owners(network_code: &str) -> anyhow::Result<bool> {
     let Some(pool) = DB_POOL.get() else {
         return Ok(false);
     };
+    network_has_resource_owners_with_pool(pool, network_code).await
+}
 
-    let row = sqlx::query(r#"SELECT COUNT(*) as cnt FROM devices WHERE network_code = ?"#)
-        .bind(network_code)
-        .fetch_one(pool)
+fn wireguard_peer_from_row(row: SqliteRow) -> anyhow::Result<WireGuardPeerRecord> {
+    let public_key: Vec<u8> = row.try_get("public_key")?;
+    let public_key: [u8; 32] = public_key
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid WireGuard peer public key length"))?;
+    let enabled: i64 = row.try_get("enabled")?;
+    ensure!(
+        matches!(enabled, 0 | 1),
+        "Invalid WireGuard peer enabled value: {enabled}"
+    );
+    Ok(WireGuardPeerRecord {
+        network_code: row.try_get("network_code")?,
+        peer_id: row.try_get("peer_id")?,
+        public_key,
+        enabled: enabled == 1,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
+}
+
+async fn insert_wireguard_peer_with_pool(
+    pool: &SqlitePool,
+    record: &WireGuardPeerRecord,
+) -> anyhow::Result<()> {
+    ensure!(
+        !record.peer_id.trim().is_empty(),
+        "WireGuard peer ID 不能为空"
+    );
+    let result = query(
+        "INSERT INTO wireguard_peers (
+            network_code, peer_id, public_key, enabled, created_at, updated_at
+         )
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS(SELECT 1 FROM networks WHERE network_code = ?)",
+    )
+    .bind(&record.network_code)
+    .bind(&record.peer_id)
+    .bind(record.public_key.as_slice())
+    .bind(i64::from(record.enabled))
+    .bind(record.created_at)
+    .bind(record.updated_at)
+    .bind(&record.network_code)
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to create WireGuard peer '{}' in network '{}'",
+            record.peer_id, record.network_code
+        )
+    })?;
+    ensure!(
+        result.rows_affected() == 1,
+        "Network '{}' does not exist",
+        record.network_code
+    );
+    Ok(())
+}
+
+pub async fn insert_wireguard_peer(record: &WireGuardPeerRecord) -> anyhow::Result<()> {
+    insert_wireguard_peer_with_pool(db_pool()?, record).await
+}
+
+pub async fn insert_wireguard_peer_with_ip(
+    record: &WireGuardPeerRecord,
+    ip: Ipv4Addr,
+) -> anyhow::Result<()> {
+    ensure!(
+        !record.peer_id.trim().is_empty(),
+        "WireGuard peer ID 不能为空"
+    );
+    let mut transaction = db_pool()?
+        .begin()
         .await
-        .context("Failed to check network devices")?;
+        .context("Failed to start generated WireGuard peer transaction")?;
+    let peer_result = query(
+        "INSERT INTO wireguard_peers (
+            network_code, peer_id, public_key, enabled, created_at, updated_at
+         )
+         SELECT ?, ?, ?, ?, ?, ?
+         WHERE EXISTS(SELECT 1 FROM networks WHERE network_code = ?)",
+    )
+    .bind(&record.network_code)
+    .bind(&record.peer_id)
+    .bind(record.public_key.as_slice())
+    .bind(i64::from(record.enabled))
+    .bind(record.created_at)
+    .bind(record.updated_at)
+    .bind(&record.network_code)
+    .execute(&mut *transaction)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to create generated WireGuard peer '{}' in network '{}'",
+            record.peer_id, record.network_code
+        )
+    })?;
+    ensure!(
+        peer_result.rows_affected() == 1,
+        "Network '{}' does not exist",
+        record.network_code
+    );
+    query(
+        "INSERT INTO ip_allocations (network_code, ip, owner_type, owner_id)
+         VALUES (?, ?, 'wireguard_peer', ?)",
+    )
+    .bind(&record.network_code)
+    .bind(ip.to_string())
+    .bind(&record.peer_id)
+    .execute(&mut *transaction)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to reserve IP {ip} for generated WireGuard peer '{}' in network '{}'",
+            record.peer_id, record.network_code
+        )
+    })?;
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit generated WireGuard peer transaction")?;
+    Ok(())
+}
 
-    let count: i32 = row.get("cnt");
-    Ok(count > 0)
+async fn load_wireguard_peers_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+) -> anyhow::Result<Vec<WireGuardPeerRecord>> {
+    let rows = query(
+        "SELECT network_code, peer_id, public_key, enabled, created_at, updated_at
+         FROM wireguard_peers
+         WHERE network_code = ?
+         ORDER BY peer_id",
+    )
+    .bind(network_code)
+    .fetch_all(pool)
+    .await
+    .context("Failed to load WireGuard peers")?;
+    rows.into_iter().map(wireguard_peer_from_row).collect()
+}
+
+pub async fn load_wireguard_peers(network_code: &str) -> anyhow::Result<Vec<WireGuardPeerRecord>> {
+    load_wireguard_peers_with_pool(db_pool()?, network_code).await
+}
+
+async fn load_wireguard_peer_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<Option<WireGuardPeerRecord>> {
+    query(
+        "SELECT network_code, peer_id, public_key, enabled, created_at, updated_at
+         FROM wireguard_peers
+         WHERE network_code = ? AND peer_id = ?",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .fetch_optional(pool)
+    .await
+    .context("Failed to load WireGuard peer")?
+    .map(wireguard_peer_from_row)
+    .transpose()
+}
+
+pub async fn load_wireguard_peer(
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<Option<WireGuardPeerRecord>> {
+    load_wireguard_peer_with_pool(db_pool()?, network_code, peer_id).await
+}
+
+async fn load_wireguard_peer_by_public_key_with_pool(
+    pool: &SqlitePool,
+    public_key: &[u8; 32],
+) -> anyhow::Result<Option<WireGuardPeerRecord>> {
+    query(
+        "SELECT network_code, peer_id, public_key, enabled, created_at, updated_at
+         FROM wireguard_peers
+         WHERE public_key = ?",
+    )
+    .bind(public_key.as_slice())
+    .fetch_optional(pool)
+    .await
+    .context("Failed to load WireGuard peer by public key")?
+    .map(wireguard_peer_from_row)
+    .transpose()
+}
+
+#[allow(dead_code)]
+pub async fn load_wireguard_peer_by_public_key(
+    public_key: &[u8; 32],
+) -> anyhow::Result<Option<WireGuardPeerRecord>> {
+    load_wireguard_peer_by_public_key_with_pool(db_pool()?, public_key).await
+}
+
+pub async fn load_wireguard_runtime_peer_by_public_key(
+    public_key: &[u8; 32],
+) -> anyhow::Result<Option<WireGuardRuntimePeer>> {
+    let row = query(
+        "SELECT p.network_code, p.peer_id, p.public_key, a.ip
+         FROM wireguard_peers p
+         INNER JOIN ip_allocations a
+           ON a.network_code = p.network_code
+          AND a.owner_type = 'wireguard_peer'
+          AND a.owner_id = p.peer_id
+         WHERE p.public_key = ? AND p.enabled = 1",
+    )
+    .bind(public_key.as_slice())
+    .fetch_optional(db_pool()?)
+    .await
+    .context("Failed to load WireGuard runtime peer")?;
+
+    row.map(|row| -> anyhow::Result<_> {
+        let stored_public_key: Vec<u8> = row.try_get("public_key")?;
+        let stored_public_key = stored_public_key
+            .try_into()
+            .map_err(|_| anyhow::anyhow!("Invalid WireGuard peer public key length"))?;
+        let ip_text: String = row.try_get("ip")?;
+        Ok(WireGuardRuntimePeer {
+            network_code: row.try_get("network_code")?,
+            peer_id: row.try_get("peer_id")?,
+            public_key: stored_public_key,
+            ip: ip_text.parse().with_context(|| {
+                format!("Invalid WireGuard runtime peer IPv4 address: {ip_text}")
+            })?,
+        })
+    })
+    .transpose()
+}
+
+async fn set_wireguard_peer_enabled_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    peer_id: &str,
+    enabled: bool,
+    updated_at: i64,
+) -> anyhow::Result<bool> {
+    let result = query(
+        "UPDATE wireguard_peers
+         SET enabled = ?, updated_at = ?
+         WHERE network_code = ? AND peer_id = ?",
+    )
+    .bind(i64::from(enabled))
+    .bind(updated_at)
+    .bind(network_code)
+    .bind(peer_id)
+    .execute(pool)
+    .await
+    .context("Failed to update WireGuard peer enabled state")?;
+    Ok(result.rows_affected() == 1)
+}
+
+pub async fn set_wireguard_peer_enabled(
+    network_code: &str,
+    peer_id: &str,
+    enabled: bool,
+    updated_at: i64,
+) -> anyhow::Result<bool> {
+    set_wireguard_peer_enabled_with_pool(db_pool()?, network_code, peer_id, enabled, updated_at)
+        .await
+}
+
+async fn delete_wireguard_peer_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<WireGuardPeerDeleteResult> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .context("Failed to start WireGuard peer deletion transaction")?;
+    let peer_result = query(
+        "DELETE FROM wireguard_peers
+         WHERE network_code = ? AND peer_id = ?",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to delete WireGuard peer")?;
+    let ip_result = query(
+        "DELETE FROM ip_allocations
+         WHERE network_code = ? AND owner_type = 'wireguard_peer' AND owner_id = ?",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to release deleted WireGuard peer IP")?;
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit WireGuard peer deletion")?;
+    Ok(WireGuardPeerDeleteResult {
+        peer_removed: peer_result.rows_affected() == 1,
+        ip_released: ip_result.rows_affected() > 0,
+    })
+}
+
+pub async fn delete_wireguard_peer(
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<WireGuardPeerDeleteResult> {
+    delete_wireguard_peer_with_pool(db_pool()?, network_code, peer_id).await
+}
+
+async fn reserve_wireguard_peer_ip_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    peer_id: &str,
+    ip: Ipv4Addr,
+) -> anyhow::Result<()> {
+    query(
+        r#"INSERT INTO ip_allocations (network_code, ip, owner_type, owner_id)
+           VALUES (?, ?, 'wireguard_peer', ?)
+           ON CONFLICT(network_code, owner_type, owner_id) DO UPDATE SET
+               ip = excluded.ip"#,
+    )
+    .bind(network_code)
+    .bind(ip.to_string())
+    .bind(peer_id)
+    .execute(pool)
+    .await
+    .with_context(|| {
+        format!(
+            "Failed to reserve IP {ip} for WireGuard peer '{peer_id}' in network '{network_code}'"
+        )
+    })?;
+    Ok(())
+}
+
+pub async fn reserve_wireguard_peer_ip(
+    network_code: &str,
+    peer_id: &str,
+    ip: Ipv4Addr,
+) -> anyhow::Result<()> {
+    let Some(pool) = DB_POOL.get() else {
+        return Ok(());
+    };
+    reserve_wireguard_peer_ip_with_pool(pool, network_code, peer_id, ip).await
+}
+
+async fn release_wireguard_peer_ip_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<bool> {
+    let result = query(
+        r#"DELETE FROM ip_allocations
+           WHERE network_code = ? AND owner_type = 'wireguard_peer' AND owner_id = ?"#,
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .execute(pool)
+    .await
+    .context("Failed to release WireGuard peer IP")?;
+    Ok(result.rows_affected() > 0)
+}
+
+pub async fn release_wireguard_peer_ip(network_code: &str, peer_id: &str) -> anyhow::Result<bool> {
+    let Some(pool) = DB_POOL.get() else {
+        return Ok(false);
+    };
+    release_wireguard_peer_ip_with_pool(pool, network_code, peer_id).await
+}
+
+async fn load_wireguard_peer_ip_allocations_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+) -> anyhow::Result<Vec<WireGuardPeerIpAllocation>> {
+    let rows = query(
+        r#"SELECT owner_id, ip FROM ip_allocations
+           WHERE network_code = ? AND owner_type = 'wireguard_peer'
+           ORDER BY owner_id"#,
+    )
+    .bind(network_code)
+    .fetch_all(pool)
+    .await
+    .context("Failed to load WireGuard peer IP allocations")?;
+
+    rows.into_iter()
+        .map(|row| {
+            let peer_id: String = row.try_get("owner_id")?;
+            let ip_text: String = row.try_get("ip")?;
+            let ip = ip_text.parse().with_context(|| {
+                format!("Invalid WireGuard peer IP '{ip_text}' for peer '{peer_id}'")
+            })?;
+            Ok(WireGuardPeerIpAllocation { peer_id, ip })
+        })
+        .collect()
+}
+
+pub async fn load_wireguard_peer_ip_allocations(
+    network_code: &str,
+) -> anyhow::Result<Vec<WireGuardPeerIpAllocation>> {
+    let Some(pool) = DB_POOL.get() else {
+        return Ok(Vec::new());
+    };
+    load_wireguard_peer_ip_allocations_with_pool(pool, network_code).await
 }
 
 pub async fn save_or_update_device(device: &DeviceRecord) -> anyhow::Result<()> {
@@ -325,7 +945,7 @@ pub async fn save_or_update_device(device: &DeviceRecord) -> anyhow::Result<()> 
         return Ok(());
     };
 
-    sqlx::query(
+    query(
         r#"INSERT INTO devices (device_id, network_code, ip, device_name, device_version, last_connect_time, tx_bytes, rx_bytes)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
            ON CONFLICT(device_id, network_code) DO UPDATE SET
@@ -357,7 +977,7 @@ pub async fn release_device_ip(network_code: &str, device_id: &str) -> anyhow::R
         return Ok(());
     };
 
-    sqlx::query(r#"UPDATE devices SET ip = NULL WHERE network_code = ? AND device_id = ?"#)
+    query(r#"UPDATE devices SET ip = NULL WHERE network_code = ? AND device_id = ?"#)
         .bind(network_code)
         .bind(device_id)
         .execute(pool)
@@ -376,7 +996,7 @@ pub async fn get_device(
         return Ok(None);
     };
 
-    let row_option = sqlx::query(
+    let row_option = query(
         r#"SELECT device_id, network_code, ip, device_name, device_version, last_connect_time,
            COALESCE(tx_bytes, 0) as tx_bytes, COALESCE(rx_bytes, 0) as rx_bytes
            FROM devices WHERE network_code = ? AND device_id = ?"#,
@@ -407,7 +1027,7 @@ pub async fn load_all_devices(network_code: &str) -> anyhow::Result<Vec<DeviceRe
         return Ok(Vec::new());
     };
 
-    let records: Vec<DeviceRecord> = sqlx::query(
+    let records: Vec<DeviceRecord> = query(
         r#"SELECT device_id, network_code, ip, device_name, device_version, last_connect_time,
            COALESCE(tx_bytes, 0) as tx_bytes, COALESCE(rx_bytes, 0) as rx_bytes
            FROM devices WHERE network_code = ?"#,
@@ -438,7 +1058,7 @@ pub async fn delete_device(network_code: &str, device_id: &str) -> anyhow::Resul
         return Ok(false);
     };
 
-    let result = sqlx::query(r#"DELETE FROM devices WHERE network_code = ? AND device_id = ?"#)
+    let result = query(r#"DELETE FROM devices WHERE network_code = ? AND device_id = ?"#)
         .bind(network_code)
         .bind(device_id)
         .execute(pool)
@@ -454,7 +1074,7 @@ pub async fn delete_devices_by_network(network_code: &str) -> anyhow::Result<u64
         return Ok(0);
     };
 
-    let result = sqlx::query(r#"DELETE FROM devices WHERE network_code = ?"#)
+    let result = query(r#"DELETE FROM devices WHERE network_code = ?"#)
         .bind(network_code)
         .execute(pool)
         .await
@@ -468,7 +1088,7 @@ pub async fn save_peer_server_if_not_exists(record: &PeerServerRecord) -> anyhow
         return Ok(false);
     };
 
-    let result = sqlx::query(
+    let result = query(
         r#"INSERT OR IGNORE INTO peer_servers (server_addr, source, created_at)
            VALUES (?, ?, ?)"#,
     )
@@ -487,7 +1107,7 @@ pub async fn save_peer_server(record: &PeerServerRecord) -> anyhow::Result<()> {
         return Ok(());
     };
 
-    sqlx::query(
+    query(
         r#"INSERT OR REPLACE INTO peer_servers (server_addr, source, created_at)
            VALUES (?, ?, ?)"#,
     )
@@ -506,21 +1126,20 @@ pub async fn load_all_peer_servers() -> anyhow::Result<Vec<PeerServerRecord>> {
         return Ok(Vec::new());
     };
 
-    let records: Vec<PeerServerRecord> = sqlx::query(
-        r#"SELECT server_addr, source, created_at FROM peer_servers ORDER BY created_at"#,
-    )
-    .fetch(pool)
-    .try_filter_map(|row| async move {
-        let source: i32 = row.try_get("source")?;
-        Ok(Some(PeerServerRecord {
-            server_addr: row.try_get("server_addr")?,
-            source: PeerServerSource::from_i32(source),
-            created_at: row.try_get("created_at")?,
-        }))
-    })
-    .try_collect()
-    .await
-    .context("Failed to load all peer servers")?;
+    let records: Vec<PeerServerRecord> =
+        query(r#"SELECT server_addr, source, created_at FROM peer_servers ORDER BY created_at"#)
+            .fetch(pool)
+            .try_filter_map(|row| async move {
+                let source: i32 = row.try_get("source")?;
+                Ok(Some(PeerServerRecord {
+                    server_addr: row.try_get("server_addr")?,
+                    source: PeerServerSource::from_i32(source),
+                    created_at: row.try_get("created_at")?,
+                }))
+            })
+            .try_collect()
+            .await
+            .context("Failed to load all peer servers")?;
 
     Ok(records)
 }
@@ -530,11 +1149,521 @@ pub async fn delete_peer_server(server_addr: &str) -> anyhow::Result<bool> {
         return Ok(false);
     };
 
-    let result = sqlx::query(r#"DELETE FROM peer_servers WHERE server_addr = ?"#)
+    let result = query(r#"DELETE FROM peer_servers WHERE server_addr = ?"#)
         .bind(server_addr)
         .execute(pool)
         .await
         .context("Failed to delete peer server")?;
 
     Ok(result.rows_affected() > 0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    async fn legacy_pool() -> SqlitePool {
+        let pool = SqlitePoolOptions::new()
+            .max_connections(1)
+            .connect("sqlite::memory:")
+            .await
+            .unwrap();
+        query(
+            "CREATE TABLE devices (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                device_id TEXT NOT NULL,
+                network_code TEXT NOT NULL,
+                ip TEXT,
+                device_name TEXT NOT NULL,
+                device_version TEXT NOT NULL,
+                last_connect_time INTEGER NOT NULL,
+                tx_bytes INTEGER NOT NULL DEFAULT 0,
+                rx_bytes INTEGER NOT NULL DEFAULT 0,
+                UNIQUE(device_id, network_code)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        query(
+            "CREATE TABLE networks (
+                network_code TEXT PRIMARY KEY,
+                gateway TEXT NOT NULL,
+                netmask INTEGER NOT NULL,
+                lease_duration INTEGER NOT NULL,
+                source INTEGER NOT NULL DEFAULT 0,
+                created_at INTEGER NOT NULL
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        pool
+    }
+
+    async fn insert_test_network(pool: &SqlitePool, network_code: &str) {
+        query(
+            "INSERT INTO networks (
+                network_code, gateway, netmask, lease_duration, source, created_at
+             ) VALUES (?, '10.26.0.1', 24, 60, 1, 1)",
+        )
+        .bind(network_code)
+        .execute(pool)
+        .await
+        .unwrap();
+    }
+
+    fn wireguard_peer_record(
+        network_code: &str,
+        peer_id: &str,
+        public_key: [u8; 32],
+    ) -> WireGuardPeerRecord {
+        WireGuardPeerRecord {
+            network_code: network_code.to_string(),
+            peer_id: peer_id.to_string(),
+            public_key,
+            enabled: true,
+            created_at: 10,
+            updated_at: 10,
+        }
+    }
+
+    async fn insert_device(
+        pool: &SqlitePool,
+        network_code: &str,
+        device_id: &str,
+        ip: Option<&str>,
+    ) -> anyhow::Result<()> {
+        query(
+            "INSERT INTO devices (
+                device_id, network_code, ip, device_name, device_version,
+                last_connect_time, tx_bytes, rx_bytes
+             ) VALUES (?, ?, ?, ?, 'test', 0, 0, 0)",
+        )
+        .bind(device_id)
+        .bind(network_code)
+        .bind(ip)
+        .bind(device_id)
+        .execute(pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn allocation_count(pool: &SqlitePool, network_code: &str) -> i64 {
+        query("SELECT COUNT(*) AS count FROM ip_allocations WHERE network_code = ?")
+            .bind(network_code)
+            .fetch_one(pool)
+            .await
+            .unwrap()
+            .get("count")
+    }
+
+    #[tokio::test]
+    async fn migration_backfills_legacy_devices_and_is_idempotent() {
+        let pool = legacy_pool().await;
+        insert_device(&pool, "legacy-net", "device-a", Some("10.26.0.2"))
+            .await
+            .unwrap();
+        insert_device(&pool, "legacy-net", "device-without-ip", None)
+            .await
+            .unwrap();
+
+        migrations::apply(&pool).await.unwrap();
+        migrations::apply(&pool).await.unwrap();
+
+        let row =
+            query("SELECT ip, owner_type, owner_id FROM ip_allocations WHERE network_code = ?")
+                .bind("legacy-net")
+                .fetch_one(&pool)
+                .await
+                .unwrap();
+        assert_eq!(row.get::<String, _>("ip"), "10.26.0.2");
+        assert_eq!(row.get::<String, _>("owner_type"), "vnt_device");
+        assert_eq!(row.get::<String, _>("owner_id"), "device-a");
+
+        let version: i64 = query("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(version, migrations::SCHEMA_VERSION);
+    }
+
+    #[tokio::test]
+    async fn migration_rejects_ambiguous_legacy_duplicate_ips() {
+        let pool = legacy_pool().await;
+        insert_device(&pool, "legacy-net", "device-a", Some("10.26.0.2"))
+            .await
+            .unwrap();
+        insert_device(&pool, "legacy-net", "device-b", Some("10.26.0.2"))
+            .await
+            .unwrap();
+
+        let error = migrations::apply(&pool).await.unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Legacy devices contain duplicate or conflicting IP allocations")
+        );
+
+        let version: i64 = query("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(version, 0);
+    }
+
+    #[tokio::test]
+    async fn migration_v3_preserves_existing_wireguard_ip_allocations() {
+        let pool = legacy_pool().await;
+        query(
+            "CREATE TABLE ip_allocations (
+                network_code TEXT NOT NULL,
+                ip TEXT NOT NULL,
+                owner_type TEXT NOT NULL CHECK(owner_type IN ('vnt_device', 'wireguard_peer')),
+                owner_id TEXT NOT NULL CHECK(length(owner_id) > 0),
+                PRIMARY KEY(network_code, owner_type, owner_id),
+                UNIQUE(network_code, ip)
+            )",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        query(
+            "INSERT INTO ip_allocations (network_code, ip, owner_type, owner_id)
+             VALUES ('network-a', '10.26.0.2', 'wireguard_peer', 'legacy-peer')",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        query("PRAGMA user_version = 2")
+            .execute(&pool)
+            .await
+            .unwrap();
+
+        migrations::apply(&pool).await.unwrap();
+        migrations::apply(&pool).await.unwrap();
+
+        let owner_id: String = query(
+            "SELECT owner_id FROM ip_allocations
+             WHERE network_code = 'network-a' AND owner_type = 'wireguard_peer'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("owner_id");
+        assert_eq!(owner_id, "legacy-peer");
+        let peer_count: i64 = query("SELECT COUNT(*) AS count FROM wireguard_peers")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+        assert_eq!(peer_count, 0);
+        let version: i64 = query("PRAGMA user_version")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get(0);
+        assert_eq!(version, 3);
+    }
+
+    #[tokio::test]
+    async fn wireguard_peer_identity_is_network_scoped_with_a_globally_unique_public_key() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        insert_test_network(&pool, "network-a").await;
+        insert_test_network(&pool, "network-b").await;
+
+        let peer_a = wireguard_peer_record("network-a", "shared-name", [0x11; 32]);
+        let peer_b = wireguard_peer_record("network-b", "shared-name", [0x22; 32]);
+        insert_wireguard_peer_with_pool(&pool, &peer_a)
+            .await
+            .unwrap();
+        insert_wireguard_peer_with_pool(&pool, &peer_b)
+            .await
+            .unwrap();
+        insert_wireguard_peer_with_pool(
+            &pool,
+            &wireguard_peer_record("network-a", "peer-a", [0x33; 32]),
+        )
+        .await
+        .unwrap();
+
+        let duplicate_key = wireguard_peer_record("network-b", "different-peer", peer_a.public_key);
+        assert!(
+            insert_wireguard_peer_with_pool(&pool, &duplicate_key)
+                .await
+                .is_err()
+        );
+        let missing_network = wireguard_peer_record("missing-network", "peer-c", [0x44; 32]);
+        assert!(
+            insert_wireguard_peer_with_pool(&pool, &missing_network)
+                .await
+                .unwrap_err()
+                .to_string()
+                .contains("does not exist")
+        );
+
+        let peers = load_wireguard_peers_with_pool(&pool, "network-a")
+            .await
+            .unwrap();
+        assert_eq!(
+            peers
+                .iter()
+                .map(|peer| peer.peer_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["peer-a", "shared-name"]
+        );
+        assert_eq!(
+            load_wireguard_peer_by_public_key_with_pool(&pool, &peer_b.public_key)
+                .await
+                .unwrap(),
+            Some(peer_b)
+        );
+
+        assert!(
+            query(
+                "INSERT INTO wireguard_peers (
+                    network_code, peer_id, public_key, enabled, created_at, updated_at
+                 ) VALUES ('network-a', 'invalid-key', zeroblob(31), 1, 1, 1)",
+            )
+            .execute(&pool)
+            .await
+            .is_err()
+        );
+    }
+
+    #[tokio::test]
+    async fn disabling_preserves_ip_and_hard_delete_releases_it_atomically() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        insert_test_network(&pool, "network-a").await;
+        let peer = wireguard_peer_record("network-a", "peer-a", [0x11; 32]);
+        insert_wireguard_peer_with_pool(&pool, &peer).await.unwrap();
+        assert!(
+            network_has_resource_owners_with_pool(&pool, "network-a")
+                .await
+                .unwrap()
+        );
+        reserve_wireguard_peer_ip_with_pool(
+            &pool,
+            "network-a",
+            "peer-a",
+            "10.26.0.2".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+
+        assert!(
+            set_wireguard_peer_enabled_with_pool(&pool, "network-a", "peer-a", false, 20)
+                .await
+                .unwrap()
+        );
+        let disabled = load_wireguard_peer_by_public_key_with_pool(&pool, &peer.public_key)
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(!disabled.enabled);
+        assert_eq!(disabled.updated_at, 20);
+        assert_eq!(allocation_count(&pool, "network-a").await, 1);
+        assert!(
+            network_has_resource_owners_with_pool(&pool, "network-a")
+                .await
+                .unwrap()
+        );
+
+        let deleted = delete_wireguard_peer_with_pool(&pool, "network-a", "peer-a")
+            .await
+            .unwrap();
+        assert_eq!(
+            deleted,
+            WireGuardPeerDeleteResult {
+                peer_removed: true,
+                ip_released: true,
+            }
+        );
+        assert!(
+            load_wireguard_peers_with_pool(&pool, "network-a")
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(allocation_count(&pool, "network-a").await, 0);
+        assert!(
+            !network_has_resource_owners_with_pool(&pool, "network-a")
+                .await
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_hard_delete_rolls_back_peer_and_ip() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        insert_test_network(&pool, "network-a").await;
+        let peer = wireguard_peer_record("network-a", "peer-a", [0x11; 32]);
+        insert_wireguard_peer_with_pool(&pool, &peer).await.unwrap();
+        reserve_wireguard_peer_ip_with_pool(
+            &pool,
+            "network-a",
+            "peer-a",
+            "10.26.0.2".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        query(
+            "CREATE TRIGGER reject_wireguard_peer_ip_delete
+             BEFORE DELETE ON ip_allocations
+             WHEN OLD.owner_type = 'wireguard_peer' AND OLD.owner_id = 'peer-a'
+             BEGIN
+                 SELECT RAISE(ABORT, 'test rollback');
+             END",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(
+            delete_wireguard_peer_with_pool(&pool, "network-a", "peer-a")
+                .await
+                .is_err()
+        );
+        assert_eq!(
+            load_wireguard_peer_by_public_key_with_pool(&pool, &peer.public_key)
+                .await
+                .unwrap(),
+            Some(peer)
+        );
+        assert_eq!(allocation_count(&pool, "network-a").await, 1);
+    }
+
+    #[tokio::test]
+    async fn vnt_devices_and_wireguard_peers_share_one_ip_uniqueness_rule() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+
+        reserve_wireguard_peer_ip_with_pool(
+            &pool,
+            "network-a",
+            "peer-a",
+            "10.26.0.2".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            insert_device(&pool, "network-a", "device-a", Some("10.26.0.2"))
+                .await
+                .is_err()
+        );
+
+        insert_device(&pool, "network-a", "device-b", Some("10.26.0.3"))
+            .await
+            .unwrap();
+        assert!(
+            reserve_wireguard_peer_ip_with_pool(
+                &pool,
+                "network-a",
+                "peer-b",
+                "10.26.0.3".parse().unwrap(),
+            )
+            .await
+            .is_err()
+        );
+
+        assert!(
+            query("UPDATE devices SET ip = '10.26.0.2' WHERE device_id = 'device-b'")
+                .execute(&pool)
+                .await
+                .is_err()
+        );
+        let device_ip: String = query(
+            "SELECT ip FROM devices WHERE network_code = 'network-a' AND device_id = 'device-b'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("ip");
+        assert_eq!(device_ip, "10.26.0.3");
+
+        insert_device(&pool, "network-b", "device-c", Some("10.26.0.2"))
+            .await
+            .unwrap();
+        assert_eq!(allocation_count(&pool, "network-a").await, 2);
+        assert_eq!(allocation_count(&pool, "network-b").await, 1);
+    }
+
+    #[tokio::test]
+    async fn device_triggers_and_peer_release_keep_allocations_in_sync() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        insert_device(&pool, "network-a", "device-a", Some("10.26.0.2"))
+            .await
+            .unwrap();
+
+        query("UPDATE devices SET ip = '10.26.0.3' WHERE device_id = 'device-a'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        let ip: String = query(
+            "SELECT ip FROM ip_allocations
+             WHERE owner_type = 'vnt_device' AND owner_id = 'device-a'",
+        )
+        .fetch_one(&pool)
+        .await
+        .unwrap()
+        .get("ip");
+        assert_eq!(ip, "10.26.0.3");
+
+        query("UPDATE devices SET ip = NULL WHERE device_id = 'device-a'")
+            .execute(&pool)
+            .await
+            .unwrap();
+        assert_eq!(allocation_count(&pool, "network-a").await, 0);
+
+        reserve_wireguard_peer_ip_with_pool(
+            &pool,
+            "network-a",
+            "peer-a",
+            "10.26.0.4".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        let allocations = load_wireguard_peer_ip_allocations_with_pool(&pool, "network-a")
+            .await
+            .unwrap();
+        assert_eq!(
+            allocations,
+            vec![WireGuardPeerIpAllocation {
+                peer_id: "peer-a".to_string(),
+                ip: "10.26.0.4".parse().unwrap(),
+            }]
+        );
+        assert!(
+            release_wireguard_peer_ip_with_pool(&pool, "network-a", "peer-a")
+                .await
+                .unwrap()
+        );
+        assert_eq!(allocation_count(&pool, "network-a").await, 0);
+    }
+
+    #[test]
+    fn database_process_lock_rejects_a_second_vnts_process() {
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "vnts2-database-process-lock-{}-{unique}.lock",
+            std::process::id()
+        ));
+
+        let first = acquire_database_process_lock(&path).unwrap();
+        let error = acquire_database_process_lock(&path).err().unwrap();
+        assert!(error.to_string().contains("already in use"));
+        drop(first);
+        let second = acquire_database_process_lock(&path).unwrap();
+        drop(second);
+        std::fs::remove_file(path).unwrap();
+    }
 }

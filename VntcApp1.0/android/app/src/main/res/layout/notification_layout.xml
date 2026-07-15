@@ -14,7 +14,7 @@
         android:layout_height="48dp"
         android:layout_gravity="center_vertical"
         android:src="@mipmap/ic_launcher"
-        android:contentDescription="VNT 图标" />
+        android:contentDescription="@string/notification_icon_description" />
 
     <!-- 右侧：内容区域 -->
     <LinearLayout

@@ -3,7 +3,7 @@ import 'dart:convert';
 import 'dart:isolate';
 import 'package:flutter/material.dart';
 import 'package:vnt_app/theme/app_theme.dart';
-import 'package:vnt_app/theme/color_utils.dart';
+import 'package:vnt_app/widgets/config_management_card_surface.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/data_persistence.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
@@ -17,6 +17,7 @@ import 'package:vnt_app/file_saver.dart';
 import 'package:share_plus/share_plus.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/ios_vpn_service.dart';
+import 'package:vnt_app/vnt/virtual_network_adapter_manager.dart';
 
 /// 配置列表页面
 class ConfigListPage extends StatefulWidget {
@@ -37,6 +38,8 @@ class ConfigListPage extends StatefulWidget {
 
 class _ConfigListPageState extends State<ConfigListPage> {
   final DataPersistence _dataPersistence = DataPersistence();
+  final VirtualNetworkAdapterManager _virtualNetworkAdapterManager =
+      VirtualNetworkAdapterManager();
   List<NetworkConfig> _configs = [];
   bool _isLoading = true;
 
@@ -145,7 +148,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
                                   (context, index) => _buildDraggableConfigCard(
                                     _configs[index],
                                     index,
-                                    isDark,
                                   ),
                                   childCount: _configs.length,
                                 ),
@@ -228,7 +230,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
   Widget _buildDraggableConfigCard(
     NetworkConfig config,
     int index,
-    bool isDark,
   ) {
     return DragTarget<int>(
       onWillAcceptWithDetails: (details) => details.data != index,
@@ -244,17 +245,17 @@ class _ConfigListPageState extends State<ConfigListPage> {
             child: SizedBox(
               width: context.w(320),
               height: context.w(230),
-              child: _buildConfigCard(config, index, isDark),
+              child: _buildConfigCard(config, index),
             ),
           ),
           childWhenDragging: Opacity(
             opacity: 0.35,
-            child: _buildConfigCard(config, index, isDark),
+            child: _buildConfigCard(config, index),
           ),
           child: AnimatedScale(
             scale: highlighted ? 1.02 : 1,
             duration: const Duration(milliseconds: 120),
-            child: _buildConfigCard(config, index, isDark),
+            child: _buildConfigCard(config, index),
           ),
         );
       },
@@ -394,30 +395,16 @@ class _ConfigListPageState extends State<ConfigListPage> {
     );
   }
 
-  Widget _buildConfigCard(NetworkConfig config, int index, bool isDark) {
+  Widget _buildConfigCard(NetworkConfig config, int index) {
     final isConnected = vntManager.hasConnectionItem(config.itemKey);
-    final primaryColor = Theme.of(context).primaryColor;
+    final colorScheme = Theme.of(context).colorScheme;
+    final colors = ConfigManagementCardPalette.of(
+      context,
+      isConnected: isConnected,
+    );
 
-    return Container(
-      decoration: BoxDecoration(
-        color: isConnected
-            ? (isDark
-                ? ColorUtils.backgroundForDarkMode(
-                    primaryColor) // 暗黑模式：使用主题色生成的暗色背景
-                : ColorUtils.backgroundForLightMode(
-                    primaryColor)) // 日间模式：使用主题色生成的浅色背景
-            : (isDark
-                ? AppTheme.darkCardBackground
-                : AppTheme.lightCardBackground),
-        borderRadius: BorderRadius.circular(context.cardRadius),
-        boxShadow: [
-          BoxShadow(
-            color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
+    return ConfigManagementCardSurface(
+      isConnected: isConnected,
       child: Padding(
         padding: EdgeInsets.all(context.cardPadding),
         child: Column(
@@ -431,7 +418,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                   width: context.w(12),
                   height: context.w(12),
                   decoration: BoxDecoration(
-                    color: isConnected ? primaryColor : Colors.grey,
+                    color: colors.status,
                     shape: BoxShape.circle,
                   ),
                 ),
@@ -443,11 +430,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                     style: TextStyle(
                       fontSize: context.fontLarge,
                       fontWeight: FontWeight.bold,
-                      color: (isConnected && isDark)
-                          ? Colors.white // 暗黑模式下已连接配置使用白色文字
-                          : (isDark
-                              ? AppTheme.darkTextPrimary
-                              : AppTheme.lightTextPrimary),
+                      color: colors.textPrimary,
                     ),
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -460,7 +443,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                       vertical: context.spacingXSmall / 2,
                     ),
                     decoration: BoxDecoration(
-                      color: primaryColor,
+                      color: colorScheme.primary,
                       borderRadius: BorderRadius.circular(context.cardRadius),
                     ),
                     child: Text(
@@ -468,7 +451,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
                       style: TextStyle(
                         fontSize: context.fontSmall,
                         fontWeight: FontWeight.w500,
-                        color: Colors.white,
+                        color: colors.badgeForeground,
                       ),
                     ),
                   ),
@@ -478,7 +461,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
 
             // 配置信息列表
             _buildConfigInfoRow(
-              isDark,
               isConnected,
               Icons.computer_outlined,
               '设备名称',
@@ -486,7 +468,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
             ),
             SizedBox(height: context.spacingXSmall),
             _buildConfigInfoRow(
-              isDark,
               isConnected,
               Icons.location_on_outlined,
               '虚拟 IP',
@@ -494,7 +475,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
             ),
             SizedBox(height: context.spacingXSmall),
             _buildConfigInfoRow(
-              isDark,
               isConnected,
               Icons.dns_outlined,
               '服务器',
@@ -511,16 +491,18 @@ class _ConfigListPageState extends State<ConfigListPage> {
                     onPressed: () => _toggleConnection(config),
                     style: ElevatedButton.styleFrom(
                       backgroundColor: isConnected
-                          ? Colors.white.withValues(alpha: 0.9)
-                          : (isDark
-                              ? HSLColor.fromColor(primaryColor)
-                                  .withLightness(0.25)
-                                  .toColor()
-                              : HSLColor.fromColor(primaryColor)
-                                  .withLightness(0.35)
-                                  .toColor()),
-                      foregroundColor:
-                          isConnected ? const Color(0xFFE53E3E) : Colors.white,
+                          ? colors.disconnectSurface
+                          : colorScheme.primary,
+                      foregroundColor: isConnected
+                          ? colors.disconnectForeground
+                          : colors.connectForeground,
+                      side: BorderSide(
+                        color: isConnected
+                            ? colors.disconnectForeground.withValues(
+                                alpha: 0.38,
+                              )
+                            : colorScheme.primary,
+                      ),
                       elevation: 0,
                       padding:
                           EdgeInsets.symmetric(vertical: context.spacingSmall),
@@ -545,7 +527,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
                 SizedBox(width: context.spacingXSmall),
                 // 导出按钮（已连接和未连接都显示）
                 _buildIconButton(
-                  isDark,
                   isConnected,
                   Icons.file_upload_outlined,
                   () => _exportSingleConfig(config),
@@ -555,7 +536,6 @@ class _ConfigListPageState extends State<ConfigListPage> {
                   SizedBox(width: context.spacingXSmall),
                   // 编辑按钮
                   _buildIconButton(
-                    isDark,
                     isConnected,
                     Icons.edit_outlined,
                     () => _addOrEditConfig(config, index),
@@ -563,11 +543,10 @@ class _ConfigListPageState extends State<ConfigListPage> {
                   SizedBox(width: context.spacingXSmall),
                   // 删除按钮
                   _buildIconButton(
-                    isDark,
                     isConnected,
                     Icons.delete_outline,
-                    () => _showDeleteDialog(config, index),
-                    color: AppTheme.errorColor,
+                    () => _showDeleteDialog(config),
+                    color: colorScheme.error,
                   ),
                 ],
               ],
@@ -580,34 +559,29 @@ class _ConfigListPageState extends State<ConfigListPage> {
 
   // 配置信息行
   Widget _buildConfigInfoRow(
-    bool isDark,
     bool isConnected,
     IconData icon,
     String label,
     String value,
   ) {
-    // 暗黑模式下已连接配置使用更亮的颜色
-    final textColor = (isConnected && isDark)
-        ? Colors.white.withValues(alpha: 0.7) // 暗黑模式已连接：半透明白色
-        : (isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary);
-
-    final valueColor = (isConnected && isDark)
-        ? Colors.white // 暗黑模式已连接：纯白色
-        : (isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary);
+    final colors = ConfigManagementCardPalette.of(
+      context,
+      isConnected: isConnected,
+    );
 
     return Row(
       children: [
         Icon(
           icon,
           size: context.iconSmall,
-          color: textColor,
+          color: colors.textSecondary,
         ),
         SizedBox(width: context.spacingXSmall),
         Text(
           '$label: ',
           style: TextStyle(
             fontSize: context.fontBody,
-            color: textColor,
+            color: colors.textSecondary,
           ),
         ),
         Expanded(
@@ -616,7 +590,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
             style: TextStyle(
               fontSize: context.fontBody,
               fontWeight: FontWeight.w500,
-              color: valueColor,
+              color: colors.textPrimary,
             ),
             overflow: TextOverflow.ellipsis,
           ),
@@ -626,19 +600,16 @@ class _ConfigListPageState extends State<ConfigListPage> {
   }
 
   Widget _buildIconButton(
-    bool isDark,
     bool isConnected,
     IconData icon,
     VoidCallback onTap, {
     Color? color,
   }) {
-    final primaryColor = Theme.of(context).primaryColor;
-    final buttonColor = color ?? primaryColor;
-    final bgColor = isConnected
-        ? Colors.white.withValues(alpha: 0.9)
-        : (isDark
-            ? Colors.white.withValues(alpha: 0.05)
-            : Colors.black.withValues(alpha: 0.03));
+    final colors = ConfigManagementCardPalette.of(
+      context,
+      isConnected: isConnected,
+    );
+    final buttonColor = color ?? Theme.of(context).colorScheme.primary;
 
     return InkWell(
       onTap: onTap,
@@ -647,7 +618,8 @@ class _ConfigListPageState extends State<ConfigListPage> {
         width: context.w(40),
         height: context.w(40),
         decoration: BoxDecoration(
-          color: bgColor,
+          color: colors.actionSurface,
+          border: Border.all(color: colors.border.withValues(alpha: 0.72)),
           borderRadius: BorderRadius.circular(context.spacingXSmall),
         ),
         child: Icon(icon, size: context.iconSmall, color: buttonColor),
@@ -1170,7 +1142,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
   }
 
   // 显示删除确认对话框
-  void _showDeleteDialog(NetworkConfig config, int index) {
+  void _showDeleteDialog(NetworkConfig config) {
     if (vntManager.hasConnectionItem(config.itemKey)) {
       showTopToast(context, '正在连接中的配置不能删除', isSuccess: false);
       return;
@@ -1209,18 +1181,9 @@ class _ConfigListPageState extends State<ConfigListPage> {
             child: const Text('取消'),
           ),
           ElevatedButton(
-            onPressed: () {
+            onPressed: () async {
               Navigator.pop(context);
-              setState(() {
-                _configs.removeAt(index);
-              });
-              _dataPersistence.saveData(_configs);
-              // 通知设置页面刷新配置列表
-              widget.onDataChanged?.call();
-              // 同步更新通知栏、磁贴、小组件（删除可能影响默认配置）
-              VntAppCall.updateWidgetAndTile(false);
-              // 更新系统托盘（配置列表变化）
-              SystemTrayManager().updateMenu();
+              await _deleteConfig(config);
             },
             style: ElevatedButton.styleFrom(
               backgroundColor: AppTheme.errorColor,
@@ -1231,6 +1194,38 @@ class _ConfigListPageState extends State<ConfigListPage> {
         ],
       ),
     );
+  }
+
+  Future<void> _deleteConfig(NetworkConfig config) async {
+    try {
+      await vntManager.remove(config.itemKey);
+      await _virtualNetworkAdapterManager.deleteForConfig(config);
+
+      final updatedConfigs = List<NetworkConfig>.from(_configs);
+      final currentIndex = updatedConfigs.indexWhere(
+        (item) => item.itemKey == config.itemKey,
+      );
+      if (currentIndex >= 0) {
+        updatedConfigs.removeAt(currentIndex);
+      } else {
+        throw StateError('配置已不存在');
+      }
+      await _dataPersistence.saveData(updatedConfigs);
+
+      if (!mounted) {
+        return;
+      }
+      setState(() => _configs = updatedConfigs);
+      widget.onDataChanged?.call();
+      VntAppCall.updateWidgetAndTile(false);
+      SystemTrayManager().updateMenu();
+      showTopToast(context, '配置“${config.configName}”及其虚拟网卡已删除',
+          isSuccess: true);
+    } catch (error) {
+      if (mounted) {
+        showTopToast(context, '删除失败：$error', isSuccess: false);
+      }
+    }
   }
 
   // 显示断开连接确认对话框

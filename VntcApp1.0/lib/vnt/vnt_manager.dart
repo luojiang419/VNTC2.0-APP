@@ -524,6 +524,10 @@ class VntManager {
     return connecting;
   }
 
+  bool isConnectingItem(String key) {
+    return _connectionGate.isCreatingKey(key);
+  }
+
   bool hasConnection() {
     if (map.isEmpty) {
       return false;
@@ -545,8 +549,19 @@ class VntManager {
     }
   }
 
+  @visibleForTesting
+  static bool supportsMultipleForPlatform(TargetPlatform platform) {
+    return platform != TargetPlatform.android && platform != TargetPlatform.iOS;
+  }
+
   bool supportMultiple() {
-    return !Platform.isAndroid;
+    if (Platform.isAndroid) {
+      return supportsMultipleForPlatform(TargetPlatform.android);
+    }
+    if (Platform.isIOS) {
+      return supportsMultipleForPlatform(TargetPlatform.iOS);
+    }
+    return true;
   }
 
   VntBox? getOne() {

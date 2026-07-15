@@ -3,10 +3,11 @@ import 'package:vnt_app/app_version.dart';
 class AppUpdateConfig {
   AppUpdateConfig._();
 
-  static const appName = 'VNTC APP2.0';
+  static String get appName => AppVersion.productName;
   static const userAgent = 'VNTC-APP-Updater/2.0';
-  static const windowsExecutableName = 'vnt_app.exe';
-  static const windowsInstallerBaseName = 'VNT_App';
+  static String get windowsExecutableName => AppVersion.executableName;
+  static String get windowsInstallerBaseName => AppVersion.installerBaseName;
+  static bool get updateEnabled => AppVersion.updateEnabled;
   static const windowsTrustedPublisherName = String.fromEnvironment(
     'APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER',
     defaultValue: '',

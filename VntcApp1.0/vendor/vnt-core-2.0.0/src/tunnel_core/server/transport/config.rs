@@ -1,4 +1,4 @@
-use crate::protocol::control_message::{RegRequestMsg, RegistrationMode};
+use crate::protocol::control_message::{RegRequestMsg, RegistrationMode, WireGuardP2pRegistration};
 use crate::tls::verifier::CertValidationMode;
 use anyhow::Context;
 use rand::seq::SliceRandom;
@@ -16,6 +16,8 @@ pub(crate) struct ConnectRegConfig {
     pub ip: Option<Ipv4Addr>,
     pub key_sign: Option<String>,
     pub ip_variable: bool,
+    pub allow_wire_guard: bool,
+    pub wireguard_p2p: Option<WireGuardP2pRegistration>,
 }
 #[derive(Debug, Clone)]
 pub(crate) struct ConnectConfig {
@@ -102,6 +104,8 @@ impl ConnectRegConfig {
             ip_variable: self.ip_variable,
             server_id,
             registration_mode,
+            allow_wire_guard: self.allow_wire_guard,
+            wireguard_p2p: self.wireguard_p2p,
         }
     }
     pub async fn to_connect_config(&self) -> anyhow::Result<ConnectConfig> {

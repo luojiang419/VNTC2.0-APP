@@ -1,0 +1,25 @@
+# VNTS 2.0 Linux 安全配置模板。
+# install.sh 会在首次安装时自动加入仅监听 127.0.0.1 的 Web 管理配置和随机强密码。
+
+tcp_bind = "0.0.0.0:29872"
+quic_bind = "0.0.0.0:29872"
+ws_bind = "0.0.0.0:29872"
+network = "10.26.0.0/24"
+white_list = []
+lease_duration = 86400
+persistence = true
+
+# install.sh 首次安装时会生成严格 32 字节的独立主密钥并自动启动 WireGuard。
+wireguard_master_key_file = "/var/lib/vnts2/wireguard-master.key"
+wireguard_bind = "0.0.0.0:51820"
+# 默认会按本机路由自动选择客户端 Endpoint；有公网域名时可显式覆盖。
+# wireguard_public_endpoint = "vpn.example.com:51820"
+wireguard_max_active_peers = 4096
+
+# 多服务器互联示例；不要把真实 token 放入分发包。
+# server_quic_bind = "0.0.0.0:29873"
+# peer_servers = ["server.example.com:29873"]
+# server_token = "请替换为随机强token"
+
+[custom_nets]
+# office = "10.27.0.0/24"

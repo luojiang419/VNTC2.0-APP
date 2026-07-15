@@ -158,6 +158,7 @@ class AppUpdateService {
     String? currentVersion,
     AppUpdatePlatform? platform,
   }) async {
+    _ensureUpdateEnabled();
     final proxy = await _proxyResolver();
     final release = await _fetchJson(
       Uri.parse(latestReleaseApiUrl),
@@ -178,6 +179,7 @@ class AppUpdateService {
     AppUpdateInfo info, {
     AppUpdateProgress? onProgress,
   }) async {
+    _ensureUpdateEnabled();
     final asset = info.asset;
     if (asset == null) {
       throw StateError('当前平台没有可下载的安装包');
@@ -242,6 +244,7 @@ class AppUpdateService {
   }
 
   Future<void> openDownloadedInstaller(AppUpdateDownloadResult result) async {
+    _ensureUpdateEnabled();
     if (Platform.isAndroid) {
       await AndroidUpdateInstaller.installApk(result.filePath);
       return;
@@ -254,6 +257,7 @@ class AppUpdateService {
   }
 
   Future<void> openReleasePage([AppUpdateInfo? info]) async {
+    _ensureUpdateEnabled();
     final uri = info?.releasePageUrl ?? Uri.parse(releasePageUrl);
     final opened = await launchUrl(uri, mode: LaunchMode.externalApplication);
     if (!opened) {
@@ -264,6 +268,7 @@ class AppUpdateService {
   Future<AppUpdateSession> launchWindowsSilentInstaller(
     AppUpdateDownloadResult result,
   ) async {
+    _ensureUpdateEnabled();
     if (!Platform.isWindows) {
       throw StateError('静默升级仅支持 Windows 安装包');
     }
@@ -306,6 +311,7 @@ class AppUpdateService {
     AppUpdateSession session, {
     void Function(String message)? onStep,
   }) async {
+    _ensureUpdateEnabled();
     if (!Platform.isWindows) {
       throw StateError('更新器会话仅支持 Windows');
     }
@@ -364,6 +370,12 @@ class AppUpdateService {
       mode: ProcessStartMode.detached,
     );
     await log('更新完成');
+  }
+
+  static void _ensureUpdateEnabled() {
+    if (!AppUpdateConfig.updateEnabled) {
+      throw StateError('当前品牌已移除升级功能');
+    }
   }
 
   Future<String> _resolveCurrentVersion() async {

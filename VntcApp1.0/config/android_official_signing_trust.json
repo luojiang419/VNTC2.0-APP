@@ -1,0 +1,8 @@
+{
+  "schemaVersion": 1,
+  "keyId": "vnt-official-android-release-v1",
+  "brandId": "official",
+  "applicationId": "top.wherewego.vnt_app",
+  "alias": "vnt_official_android_release_v1",
+  "certificateSha256": "83EF92B147643697EA8EFAF4B73A9D370875EE0FD1CBA10A7AC03E184F44D8C7"
+}

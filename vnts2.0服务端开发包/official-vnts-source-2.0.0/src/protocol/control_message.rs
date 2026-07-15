@@ -9,11 +9,16 @@ use prost::Message;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
 
-mod proto {
+pub(crate) mod proto {
     include!(concat!(env!("OUT_DIR"), "/protocol.control_message.rs"));
 }
 
-pub use proto::RegistrationMode;
+pub use proto::{NodeType, RegistrationMode};
+#[derive(Debug, Clone, Copy, Eq, PartialEq)]
+pub struct WireGuardP2pRegistration {
+    pub public_key: [u8; 32],
+    pub port: u16,
+}
 
 #[derive(Debug, Clone)]
 pub struct RegRequestMsg {
@@ -26,6 +31,8 @@ pub struct RegRequestMsg {
     pub ip_variable: bool,
     pub server_id: u32,
     pub registration_mode: RegistrationMode,
+    pub allow_wire_guard: bool,
+    pub wireguard_p2p: Option<WireGuardP2pRegistration>,
 }
 impl RegRequestMsg {
     pub const MAX_NETWORK_CODE_LEN: usize = 32;
@@ -70,10 +77,25 @@ impl RegRequestMsg {
             ));
         }
 
+        if self.wireguard_p2p.is_some() && !self.allow_wire_guard {
+            bail!("WireGuard P2P requires allow_wire_guard");
+        }
+
         Ok(())
     }
     pub fn from(msg: proto::RegRequestMsg) -> anyhow::Result<Self> {
         let registration_mode = msg.registration_mode();
+        let wireguard_p2p = match (
+            msg.wireguard_p2p_public_key.as_slice(),
+            msg.wireguard_p2p_port,
+        ) {
+            ([], 0) => None,
+            (key, port @ 1..=65_535) if key.len() == 32 => Some(WireGuardP2pRegistration {
+                public_key: key.try_into().expect("length checked above"),
+                port: port as u16,
+            }),
+            _ => bail!("WireGuard P2P requires a 32-byte public key and a non-zero UDP port"),
+        };
         Ok(Self {
             network_code: msg.network_code,
             device_id: msg.device_id,
@@ -84,9 +106,20 @@ impl RegRequestMsg {
             ip_variable: msg.ip_variable,
             server_id: msg.server_id,
             registration_mode,
+            allow_wire_guard: msg.allow_wire_guard,
+            wireguard_p2p,
         })
     }
     pub fn to(self) -> proto::RegRequestMsg {
+        let (wireguard_p2p_public_key, wireguard_p2p_port) = self
+            .wireguard_p2p
+            .map(|registration| {
+                (
+                    registration.public_key.to_vec(),
+                    u32::from(registration.port),
+                )
+            })
+            .unwrap_or_default();
         proto::RegRequestMsg {
             network_code: self.network_code,
             device_id: self.device_id,
@@ -97,6 +130,9 @@ impl RegRequestMsg {
             ip_variable: self.ip_variable,
             server_id: self.server_id,
             registration_mode: self.registration_mode as i32,
+            allow_wire_guard: self.allow_wire_guard,
+            wireguard_p2p_public_key,
+            wireguard_p2p_port,
         }
     }
 }
@@ -238,19 +274,134 @@ impl SelectiveBroadcast {
 pub struct ClientSimpleInfo {
     pub ip: Ipv4Addr,
     pub online: bool,
+    pub node_type: NodeType,
 }
 impl ClientSimpleInfo {
     pub fn from(msg: proto::ClientSimpleInfo) -> anyhow::Result<Self> {
         Ok(Self {
             ip: msg.ip.into(),
             online: msg.online,
+            node_type: msg.node_type(),
         })
     }
     pub fn to(self) -> proto::ClientSimpleInfo {
         proto::ClientSimpleInfo {
             ip: self.ip.into(),
             online: self.online,
+            node_type: self.node_type as i32,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(path: &str) -> Vec<u8> {
+        let value = match path {
+            "reg-request-v2-legacy.hex" => {
+                include_str!("../../tests/fixtures/reg-request-v2-legacy.hex")
+            }
+            "reg-request-v2-wireguard.hex" => {
+                include_str!("../../tests/fixtures/reg-request-v2-wireguard.hex")
+            }
+            "client-list-v2-legacy.hex" => {
+                include_str!("../../tests/fixtures/client-list-v2-legacy.hex")
+            }
+            "client-list-v2-wireguard.hex" => {
+                include_str!("../../tests/fixtures/client-list-v2-wireguard.hex")
+            }
+            _ => panic!("unknown fixture: {path}"),
+        };
+        hex::decode(value.trim()).expect("fixture must be valid hex")
+    }
+
+    #[test]
+    fn legacy_registration_defaults_wireguard_capability_to_false() {
+        let decoded = RequestMessage::from_slice(&fixture("reg-request-v2-legacy.hex"))
+            .expect("legacy registration must remain decodable");
+        let RequestMessage::Reg(registration) = decoded else {
+            panic!("fixture must contain a registration request");
+        };
+
+        assert!(!registration.allow_wire_guard);
+        assert_eq!(registration.wireguard_p2p, None);
+        assert_eq!(
+            RequestMessage::Reg(registration).encode().as_ref(),
+            fixture("reg-request-v2-legacy.hex")
+        );
+    }
+
+    #[test]
+    fn wireguard_registration_uses_frozen_field_ten() {
+        let decoded = RequestMessage::from_slice(&fixture("reg-request-v2-wireguard.hex"))
+            .expect("wireguard registration must decode");
+        let RequestMessage::Reg(registration) = decoded else {
+            panic!("fixture must contain a registration request");
+        };
+
+        assert!(registration.allow_wire_guard);
+        assert_eq!(registration.wireguard_p2p, None);
+        assert_eq!(
+            RequestMessage::Reg(registration).encode().as_ref(),
+            fixture("reg-request-v2-wireguard.hex")
+        );
+    }
+
+    #[test]
+    fn wireguard_p2p_registration_requires_capability_key_and_port() {
+        let registration = RegRequestMsg::from(proto::RegRequestMsg {
+            network_code: "network-a".to_string(),
+            device_id: "device-a".to_string(),
+            allow_wire_guard: true,
+            wireguard_p2p_public_key: vec![0x2a; 32],
+            wireguard_p2p_port: 51_820,
+            ..Default::default()
+        })
+        .unwrap();
+        assert_eq!(
+            registration.wireguard_p2p,
+            Some(WireGuardP2pRegistration {
+                public_key: [0x2a; 32],
+                port: 51_820,
+            })
+        );
+
+        let invalid_key = RegRequestMsg::from(proto::RegRequestMsg {
+            allow_wire_guard: true,
+            wireguard_p2p_public_key: vec![0x2a; 31],
+            wireguard_p2p_port: 51_820,
+            ..Default::default()
+        });
+        assert!(invalid_key.is_err());
+
+        let disabled = RegRequestMsg {
+            wireguard_p2p: registration.wireguard_p2p,
+            allow_wire_guard: false,
+            ..registration
+        };
+        assert!(disabled.check().is_err());
+    }
+
+    #[test]
+    fn legacy_client_list_defaults_node_type_to_vnt() {
+        let list = ClientSimpleInfoList::from_slice(&fixture("client-list-v2-legacy.hex"))
+            .expect("legacy client list must remain decodable");
+
+        assert_eq!(list.list[0].node_type, NodeType::Vnt);
+        assert_eq!(list.encode().as_ref(), fixture("client-list-v2-legacy.hex"));
+    }
+
+    #[test]
+    fn wireguard_client_list_uses_frozen_node_type_value() {
+        let list = ClientSimpleInfoList::from_slice(&fixture("client-list-v2-wireguard.hex"))
+            .expect("wireguard client list must decode");
+
+        assert_eq!(list.list[0].node_type, NodeType::Wireguard);
+        assert_eq!(
+            list.encode().as_ref(),
+            fixture("client-list-v2-wireguard.hex")
+        );
     }
 }
 #[derive(Debug)]

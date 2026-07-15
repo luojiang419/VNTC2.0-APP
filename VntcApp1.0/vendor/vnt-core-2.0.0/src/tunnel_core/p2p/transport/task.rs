@@ -329,6 +329,7 @@ async fn sync_online_client_list(
                     .map(
                         |client| crate::protocol::control_message::ClientSimpleInfo {
                             ip: client.ip.into(),
+                            node_type: client.node_type(),
                             name: client.name,
                             online: client.online,
                         },

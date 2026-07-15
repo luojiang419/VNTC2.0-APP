@@ -7,6 +7,7 @@ import 'dart:io';
 import 'config_manager.dart';
 import 'package:synchronized/synchronized.dart';
 import 'window_close_behavior.dart';
+import 'vnt/virtual_network_adapter_manager.dart';
 
 class DataPersistence {
   static const String dataKey = 'data-key';
@@ -52,6 +53,7 @@ class DataPersistence {
   }
 
   Future<void> _saveDataUnlocked(List<NetworkConfig> configs) async {
+    VirtualNetworkAdapterIdentity.normalizeConfigs(configs);
     final values = _buildConfigDataValues(configs);
 
     if (Platform.isWindows) {
@@ -93,9 +95,13 @@ class DataPersistence {
     }
 
     if (jsonDataList != null) {
-      return jsonDataList
+      final configs = jsonDataList
           .map((jsonData) => NetworkConfig.fromJson(jsonDecode(jsonData)))
           .toList();
+      if (VirtualNetworkAdapterIdentity.normalizeConfigs(configs)) {
+        await _saveDataUnlocked(configs);
+      }
+      return configs;
     } else {
       return [];
     }

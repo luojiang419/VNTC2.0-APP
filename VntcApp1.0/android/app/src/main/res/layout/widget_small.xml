@@ -12,7 +12,7 @@
     <TextView
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
-        android:text="VNT"
+        android:text="@string/app_name"
         android:textSize="8sp"
         android:textColor="#FFFFFF"
         android:textStyle="bold" />
@@ -23,7 +23,7 @@
         android:layout_height="24dp"
         android:layout_marginTop="2dp"
         android:src="@android:drawable/presence_offline"
-        android:contentDescription="VNT状态图标" />
+        android:contentDescription="@string/widget_status_icon_description" />
 
     <TextView
         android:id="@+id/widget_status"

@@ -128,10 +128,10 @@ public class VntNotificationService extends Service {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "VNT 连接状态",
+                getString(R.string.notification_channel_name),
                 NotificationManager.IMPORTANCE_LOW // 低重要性，不会发出声音
             );
-            channel.setDescription("显示 VNT 连接状态和快速切换按钮");
+            channel.setDescription(getString(R.string.notification_channel_description));
             channel.setShowBadge(false); // 不显示角标
             channel.enableLights(false); // 不显示指示灯
             channel.enableVibration(false); // 不振动
@@ -231,7 +231,7 @@ public class VntNotificationService extends Service {
             if (notification == null) {
                 NotificationCompat.Builder builder = new NotificationCompat.Builder(this, CHANNEL_ID)
                     .setSmallIcon(android.R.drawable.ic_dialog_info) // 使用系统图标作为后备
-                    .setContentTitle("VNT - " + statusText)
+                    .setContentTitle(getString(R.string.notification_title_format, statusText))
                     .setContentText(description)
                     .setContentIntent(contentIntent)
                     .setOngoing(true)

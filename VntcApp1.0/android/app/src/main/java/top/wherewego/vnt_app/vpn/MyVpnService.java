@@ -111,7 +111,7 @@ public class MyVpnService extends VpnService {
             }
         }
         try {
-            vpnInterface = builder.setSession("VNT")
+            vpnInterface = builder.setSession(getString(top.wherewego.vnt_app.R.string.app_name))
                     .establish();
             if (vpnInterface == null) {
                 // establish() 返回 null 说明有其他 VPN 正在运行

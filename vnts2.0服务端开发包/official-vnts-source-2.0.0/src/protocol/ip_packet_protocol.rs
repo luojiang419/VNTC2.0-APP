@@ -105,6 +105,8 @@ pub enum MsgType {
     RpcRes = 15,
 
     Quic = 17,
+    WireGuardRelay = 18,
+    WireGuardP2pControl = 20,
 }
 
 impl Into<u8> for MsgType {
@@ -139,6 +141,8 @@ impl TryFrom<u8> for MsgType {
             15 => MsgType::RpcRes,
 
             17 => MsgType::Quic,
+            18 => MsgType::WireGuardRelay,
+            20 => MsgType::WireGuardP2pControl,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -276,5 +280,29 @@ impl NetPacket<BytesMut> {
         NetPacket {
             buffer: self.buffer.freeze(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wireguard_relay_message_type_is_frozen_at_eighteen() {
+        let wireguard_relay: u8 = MsgType::WireGuardRelay.into();
+        assert_eq!(wireguard_relay, 18);
+        assert_eq!(MsgType::try_from(18).unwrap(), MsgType::WireGuardRelay);
+
+        let mut bytes = vec![0; HEAD_LENGTH];
+        let mut packet = NetPacket::new(bytes.as_mut_slice()).unwrap();
+        packet.set_msg_type(MsgType::WireGuardRelay);
+        assert_eq!(packet.source_buf_mut()[0], 0x80 | 18);
+    }
+
+    #[test]
+    fn wireguard_p2p_control_message_type_is_frozen_at_twenty() {
+        let value: u8 = MsgType::WireGuardP2pControl.into();
+        assert_eq!(value, 20);
+        assert_eq!(MsgType::try_from(20).unwrap(), MsgType::WireGuardP2pControl);
     }
 }

@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package protocol.rpc;
 
+import "control_message.proto";
+
 message RpcMessageRequest{
   uint64 id = 1;
   oneof rpc_req_payload{
@@ -30,6 +32,7 @@ message ClientInfo{
   bool online = 5;
   int64 last_connected_time = 6;
   string id = 7;
+  protocol.control_message.NodeType node_type = 8;
 }
 
 message ClientListResponse{

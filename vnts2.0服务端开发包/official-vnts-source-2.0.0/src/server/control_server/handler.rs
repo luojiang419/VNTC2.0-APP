@@ -7,6 +7,8 @@ use crate::protocol::rpc_message::rpc_message_request::RpcReqPayload;
 use crate::protocol::rpc_message::rpc_message_response::RpcResPayload;
 use crate::protocol::rpc_message::{ClientListResponse, RpcMessageRequest, RpcMessageResponse};
 use crate::server::control_server::service::{ControlService, RegistrationStatus, Session};
+use crate::server::network_state_provider::LocalDeliveryResult;
+use crate::server::wireguard_bridge::{RelayOrigin, validate_vnt_relay};
 use anyhow::bail;
 use bytes::{Bytes, BytesMut};
 use pnet_packet::Packet;
@@ -53,7 +55,11 @@ impl ControlHandler {
             bail!("Sender is already dropped");
         };
         let registration_mode = reg.registration_mode;
-        let session = match self.control_service.register(reg, sender.clone()).await {
+        let session = match self
+            .control_service
+            .register(reg, sender.clone(), self.addr)
+            .await
+        {
             Ok(session) => session,
             Err(e) => {
                 let msg_response = ErrorResponseMsg {
@@ -102,7 +108,12 @@ impl ControlHandler {
 
         if let Err(e) = session
             .network_state
-            .confirm_registration(&session.network_code, &session.device_id)
+            .confirm_registration(
+                &session.network_code,
+                &session.device_id,
+                session.ip,
+                session.random_id,
+            )
             .await
         {
             log::error!("Failed to save confirmed device: {:?}", e);
@@ -159,10 +170,11 @@ impl ControlHandler {
                     return Ok(());
                 }
                 let data_version = u64::from_be_bytes(packet.payload()[8..].try_into()?);
-                if let Some(mut list) = session
-                    .network_state
-                    .changed_client_simple_list(session.ip, data_version)
-                {
+                if let Some(mut list) = session.network_state.changed_client_simple_list(
+                    session.ip,
+                    data_version,
+                    session.allow_wire_guard,
+                ) {
                     list.time = i64::from_be_bytes(packet.payload()[..8].try_into()?);
                     if let Some(buf) = Self::push_client_ips(list) {
                         _ = sender.try_send(buf);
@@ -247,37 +259,61 @@ impl ControlHandler {
                     let data = buf.freeze();
 
                     let forwarded = peer_manager
-                        .forward_with_best_route(&network_code, dest, data.clone())
+                        .forward_with_best_route(
+                            &network_code,
+                            dest,
+                            data.clone(),
+                            RelayOrigin::Vnt,
+                        )
                         .await;
 
-                    if !forwarded {
-                        if let Some(sender) = session.network_state.sender_map().get(&dest) {
-                            session.network_state.record_rx_traffic(dest, data.len());
-                            _ = sender.try_send(data);
-                        }
+                    if !forwarded
+                        && session
+                            .network_state
+                            .try_deliver(dest, data.clone(), RelayOrigin::Vnt)
+                            == LocalDeliveryResult::Delivered
+                    {
+                        session.network_state.record_rx_traffic(dest, data.len());
                     }
                 } else {
-                    let option = session
+                    let data = buf.freeze();
+                    if session
                         .network_state
-                        .sender_map()
-                        .get(&dest)
-                        .map(|v| v.clone());
-                    if let Some(sender) = option {
-                        let data = buf.freeze();
+                        .try_deliver(dest, data.clone(), RelayOrigin::Vnt)
+                        == LocalDeliveryResult::Delivered
+                    {
                         session.network_state.record_rx_traffic(dest, data.len());
-                        _ = sender.try_send(data);
                     }
                 }
+            }
+            MsgType::WireGuardRelay => {
+                if !session.allow_wire_guard
+                    || validate_vnt_relay(
+                        &packet,
+                        session.ip,
+                        *session.network_state.network(),
+                        session.network_state.gateway(),
+                    )
+                    .is_err()
+                    || !packet.decr_ttl()
+                {
+                    return Ok(());
+                }
+                let data = buf.freeze();
+                self.control_service
+                    .route_wireguard_relay(&session.network_code, dest, data, RelayOrigin::Vnt)
+                    .await;
             }
             MsgType::Broadcast => {
                 if !packet.decr_ttl() {
                     return Ok(());
                 }
-                let list: Vec<Sender<Bytes>> = session
+                let list: Vec<_> = session
                     .network_state
                     .sender_map()
                     .iter()
                     .filter(|v| v.key() != &src)
+                    .filter(|v| !session.network_state.is_wireguard_endpoint(*v.key()))
                     .map(|v| v.clone())
                     .collect();
                 let buf = buf.freeze();
@@ -294,12 +330,13 @@ impl ControlHandler {
                     return Ok(());
                 }
                 let buf = Bytes::from(packet.into_buffer());
-                let list: Vec<Sender<Bytes>> = session
+                let list: Vec<_> = session
                     .network_state
                     .sender_map()
                     .iter()
                     .filter(|v| !broadcast_packet.ips.contains(v.key()))
                     .filter(|v| v.key() != &src)
+                    .filter(|v| !session.network_state.is_wireguard_endpoint(*v.key()))
                     .map(|v| v.clone())
                     .collect();
 
@@ -314,12 +351,13 @@ impl ControlHandler {
                     return Ok(());
                 }
                 let buf = Bytes::from(packet.into_buffer());
-                let list: Vec<Sender<Bytes>> = session
+                let list: Vec<_> = session
                     .network_state
                     .sender_map()
                     .iter()
                     .filter(|v| broadcast_packet.ips.contains(v.key()))
                     .filter(|v| v.key() != &src)
+                    .filter(|v| !session.network_state.is_wireguard_endpoint(*v.key()))
                     .map(|v| v.clone())
                     .collect();
 
@@ -340,7 +378,9 @@ impl ControlHandler {
         let Some(RpcReqPayload::ClientListReq(_)) = req.rpc_req_payload else {
             return Ok(());
         };
-        let list = session.network_state.client_info_list(session.ip);
+        let list = session
+            .network_state
+            .client_info_list(session.ip, session.allow_wire_guard);
         let response = RpcMessageResponse {
             id: req.id,
             rpc_res_payload: Some(RpcResPayload::ClientListRes(ClientListResponse { list })),

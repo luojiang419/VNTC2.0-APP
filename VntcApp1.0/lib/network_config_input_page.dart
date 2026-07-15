@@ -8,6 +8,7 @@ import 'utils/ip_utils.dart';
 import 'utils/toast_utils.dart';
 import 'utils/responsive_utils.dart';
 import 'theme/app_theme.dart';
+import 'vnt/virtual_network_adapter_manager.dart';
 
 String allowWgToRadioValue(bool allowWg) {
   return allowWg ? 'TRUE' : 'FALSE';
@@ -48,6 +49,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
   final _portGroupControllers = <TextEditingController>[];
   final _simulatedPacketLossRateController = TextEditingController();
   final _simulatedLatencyController = TextEditingController();
+  late final String _itemKey;
 
   String _isServerEncrypted = 'CLOSE';
   bool _isPasswordVisible = false;
@@ -71,12 +73,21 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
   @override
   void initState() {
     super.initState();
+    final existingItemKey = widget.config?.itemKey.trim() ?? '';
+    _itemKey = existingItemKey.isEmpty
+        ? VirtualNetworkAdapterIdentity.createItemKey()
+        : existingItemKey;
     getDeviceUniqueId();
     if (widget.config != null) {
       _loadConfig(widget.config!);
     } else {
       _loadDefault();
     }
+    final existingAdapterName =
+        widget.config?.virtualNetworkCardName.trim() ?? '';
+    _virtualNetworkCardNameController.text = existingAdapterName.isEmpty
+        ? VirtualNetworkAdapterIdentity.automaticNameForItemKey(_itemKey)
+        : existingAdapterName;
     if (_stunServers.isEmpty) {
       _stunServers.add(TextEditingController());
     }
@@ -189,8 +200,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
         }
       }
       NetworkConfig config = NetworkConfig(
-        itemKey: widget.config?.itemKey ??
-            DateTime.now().millisecondsSinceEpoch.toString(),
+        itemKey: _itemKey,
         configName: name,
         token: _groupNumberController.text,
         deviceName: _deviceNameController.text,
@@ -218,8 +228,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
         dataFingerprintVerification: _dataFingerprintVerification == 'OPEN',
         encryptionAlgorithm: _encryptionAlgorithm,
         deviceID: _deviceIDController.text,
-        virtualNetworkCardName:
-            Platform.isAndroid ? '' : _virtualNetworkCardNameController.text,
+        virtualNetworkCardName: _virtualNetworkCardNameController.text,
         mtu: int.tryParse(_mtuController.text) ?? 1410,
         ports: _portGroupControllers
             .map((controller) => controller.text)
@@ -670,8 +679,11 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
                       if (!Platform.isAndroid)
                         _buildTextFormField(
                           _virtualNetworkCardNameController,
-                          '虚拟网卡名称',
-                          10,
+                          '虚拟网卡名称（自动生成）',
+                          64,
+                          null,
+                          null,
+                          false,
                         ),
                       _buildTextFormField(
                         _mtuController,

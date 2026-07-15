@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/update/update_service.dart';
 import 'package:vnt_app/update/update_session.dart';
 
@@ -116,7 +117,7 @@ class _AppUpdaterPageState extends State<AppUpdaterPage> {
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
-                        'VNTC APP2.0 更新',
+                        '${AppVersion.productName} 更新',
                         style: theme.textTheme.titleLarge,
                       ),
                     ),

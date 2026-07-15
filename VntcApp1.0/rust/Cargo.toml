@@ -2,6 +2,7 @@
 name = "rust_lib_vnt_app"
 version = "0.1.0"
 edition = "2021"
+publish = false
 
 [lib]
 crate-type = ["staticlib", "cdylib", "rlib"]
@@ -10,7 +11,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 serde = { version = "1.0", features = ["derive"] }
 flutter_rust_bridge = "=2.1.0"
-vnt-core = { path = "../vendor/vnt-core-2.0.0" }
+vnt-core = { version = "=2.0.0", path = "../vendor/vnt-core-2.0.0" }
 anyhow = "1.0.82"
 tokio = { version = "1.37.0", features = ["full"] }
 rust-p2p-core = "0.4"

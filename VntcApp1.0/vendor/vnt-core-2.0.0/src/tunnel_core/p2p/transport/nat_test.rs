@@ -473,7 +473,7 @@ async fn stun_tcp_read(tcp_stream: &mut TcpStream) -> io::Result<SocketAddr> {
     }
 }
 
-fn default_udp_stun() -> Vec<String> {
+pub(crate) fn default_udp_stun() -> Vec<String> {
     vec![
         "stun.miwifi.com:3478".to_string(),
         "stun.chat.bilibili.com:3478".to_string(),

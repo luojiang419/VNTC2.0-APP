@@ -3,15 +3,15 @@ use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use anyhow::{Context, anyhow};
+use anyhow::{anyhow, Context};
 use flutter_rust_bridge::DartFnFuture;
 use ipnet::Ipv4Net;
 use rust_p2p_core::nat::NatInfo;
 use serde::Deserialize;
 use tokio::runtime::{Handle, Runtime};
 use vnt_core::api::VntApi as CoreVntApi;
+use vnt_core::context::config::{Config as CoreConfig, WIREGUARD_MAX_MTU};
 use vnt_core::context::NetworkAddr;
-use vnt_core::context::config::Config as CoreConfig;
 use vnt_core::core::{NetworkManager, RegisterResponse};
 use vnt_core::nat::NetInput;
 use vnt_core::port_mapping::PortMapping;
@@ -37,10 +37,10 @@ pub fn init_app() {
 #[flutter_rust_bridge::frb(sync)]
 pub fn init_log_with_path(log_dir: String, config_path: String) -> anyhow::Result<()> {
     use log::LevelFilter;
-    use log4rs::append::rolling_file::RollingFileAppender;
-    use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
     use log4rs::append::rolling_file::policy::compound::roll::fixed_window::FixedWindowRoller;
     use log4rs::append::rolling_file::policy::compound::trigger::size::SizeTrigger;
+    use log4rs::append::rolling_file::policy::compound::CompoundPolicy;
+    use log4rs::append::rolling_file::RollingFileAppender;
     use log4rs::config::{Appender, Config, Root};
     use log4rs::encode::pattern::PatternEncoder;
     use std::path::PathBuf;
@@ -593,17 +593,28 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
             output,
             no_nat: vnt_config.no_proxy,
             no_tun: bridge_options.no_tun,
-            mtu: vnt_config
-                .mtu
-                .map(|value| value.min(u16::MAX as u32) as u16),
+            mtu: normalize_requested_mtu(vnt_config.mtu, vnt_config.allow_wire_guard),
             port_mapping,
             allow_port_mapping: bridge_options.allow_mapping,
+            allow_wire_guard: vnt_config.allow_wire_guard,
+            wireguard_p2p: None,
             udp_stun,
             tcp_stun,
             tunnel_port: bridge_options.tunnel_port,
         },
         connect_targets,
     ))
+}
+
+fn normalize_requested_mtu(mtu: Option<u32>, allow_wire_guard: bool) -> Option<u16> {
+    mtu.map(|value| {
+        let value = value.min(u16::MAX as u32) as u16;
+        if allow_wire_guard {
+            value.min(WIREGUARD_MAX_MTU)
+        } else {
+            value
+        }
+    })
 }
 
 fn parse_server_addresses(raw: &str) -> anyhow::Result<Vec<ProtocolAddress>> {
@@ -932,9 +943,9 @@ impl VntApiCallback {
         register_fn: impl Fn(RustRegisterInfo) -> DartFnFuture<bool> + Send + Sync + 'static,
         generate_tun_fn: impl Fn(RustDeviceConfig) -> DartFnFuture<u32> + Send + Sync + 'static,
         peer_client_list_fn: impl Fn(Vec<RustPeerClientInfo>) -> DartFnFuture<()>
-        + Send
-        + Sync
-        + 'static,
+            + Send
+            + Sync
+            + 'static,
         error_fn: impl Fn(RustErrorInfo) -> DartFnFuture<()> + Send + Sync + 'static,
         stop_fn: impl Fn() -> DartFnFuture<()> + Send + Sync + 'static,
     ) -> VntApiCallback {
@@ -1170,7 +1181,19 @@ impl From<NatInfo> for RustNatInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::p2p_diagnostic_state;
+    use super::{normalize_requested_mtu, p2p_diagnostic_state};
+    use vnt_core::context::config::WIREGUARD_MAX_MTU;
+
+    #[test]
+    fn wireguard_mtu_is_capped_without_changing_ordinary_vnt() {
+        assert_eq!(normalize_requested_mtu(None, true), None);
+        assert_eq!(normalize_requested_mtu(Some(1380), true), Some(1380));
+        assert_eq!(
+            normalize_requested_mtu(Some(1500), true),
+            Some(WIREGUARD_MAX_MTU)
+        );
+        assert_eq!(normalize_requested_mtu(Some(1500), false), Some(1500));
+    }
 
     #[test]
     fn p2p_diagnostics_prioritizes_server_and_nat_readiness() {

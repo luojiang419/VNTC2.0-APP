@@ -1,0 +1,29 @@
+# VNTS 2.0 Windows 安全配置模板。
+# 复制为 config.toml 后再安装服务；本模板不包含真实密码、token、密钥或证书路径。
+
+tcp_bind = "0.0.0.0:29872"
+quic_bind = "0.0.0.0:29872"
+ws_bind = "0.0.0.0:29872"
+network = "10.26.0.0/24"
+white_list = []
+lease_duration = 86400
+persistence = true
+
+# 启用 Web 管理端前，取消以下三行注释并设置非空密码。
+# web_bind = "127.0.0.1:29871"
+# username = "admin"
+# password = "请替换为非空密码"
+
+# 轻量版首次初始化时会在自身 data 中自动创建 32 字节主密钥并启用以下默认参数。
+# wireguard_master_key_file = "wireguard-master.key"
+# wireguard_bind = "0.0.0.0:41194"
+# GUI 会优先填入本机有效 IPv4；公网/NAT 场景请改为外部设备实际可访问的域名或公网 IP。
+# wireguard_public_endpoint = "vpn.example.com:41194"
+wireguard_max_active_peers = 4096
+
+# 多服务器互联示例；不要在发布包中保存真实 token。
+# server_quic_bind = "0.0.0.0:29873"
+# peer_servers = ["server.example.com:29873"]
+# server_token = "请替换为随机强token"
+
+[custom_nets]

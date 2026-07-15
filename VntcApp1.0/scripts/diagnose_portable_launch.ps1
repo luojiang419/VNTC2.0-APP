@@ -6,6 +6,22 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+function Resolve-AppExecutableName([string]$Directory) {
+  $brandingPath = Join-Path $Directory "branding.json"
+  if (Test-Path -LiteralPath $brandingPath) {
+    try {
+      $branding = Get-Content -LiteralPath $brandingPath -Raw -Encoding UTF8 | ConvertFrom-Json
+      $candidateName = [string]$branding.executableName
+      if (-not [string]::IsNullOrWhiteSpace($candidateName) -and
+          (Test-Path -LiteralPath (Join-Path $Directory $candidateName))) {
+        return $candidateName
+      }
+    } catch {
+    }
+  }
+  return "vnt_app.exe"
+}
+
 function Resolve-AppDir {
   param([string]$Provided)
 
@@ -22,7 +38,8 @@ function Resolve-AppDir {
   foreach ($candidate in $candidates) {
     try {
       $resolved = (Resolve-Path -LiteralPath $candidate -ErrorAction Stop).Path
-      if (Test-Path -LiteralPath (Join-Path $resolved "vnt_app.exe")) {
+      $executableName = Resolve-AppExecutableName -Directory $resolved
+      if (Test-Path -LiteralPath (Join-Path $resolved $executableName)) {
         return $resolved
       }
     } catch {
@@ -30,7 +47,7 @@ function Resolve-AppDir {
     }
   }
 
-  throw "未找到包含 vnt_app.exe 的目录，请显式传入 -AppDir"
+  throw "未找到主程序目录，请显式传入 -AppDir"
 }
 
 function Ensure-Directory([string]$Path) {
@@ -64,12 +81,13 @@ function Get-ConfigContent([string]$Path) {
 }
 
 function Stop-AppProcesses([string]$ExeDir) {
+  $mainExecutableName = Resolve-AppExecutableName -Directory $ExeDir
   $targets = @(
-    (Join-Path $ExeDir "vnt_app.exe"),
+    (Join-Path $ExeDir $mainExecutableName),
     (Join-Path $ExeDir "vnt_app_runner.exe")
   ) | ForEach-Object { $_.ToLowerInvariant() }
 
-  $processes = Get-CimInstance Win32_Process -Filter "Name='vnt_app.exe' OR Name='vnt_app_runner.exe'" -ErrorAction SilentlyContinue
+  $processes = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue
   foreach ($process in $processes) {
     $path = if ($null -ne $process.ExecutablePath) {
       $process.ExecutablePath.ToLowerInvariant()
@@ -170,9 +188,10 @@ function Test-WindowVisibleOnScreens($Window, $Screens) {
 }
 
 $resolvedAppDir = Resolve-AppDir -Provided $AppDir
+$mainExecutableName = Resolve-AppExecutableName -Directory $resolvedAppDir
 $logsDir = Join-Path $resolvedAppDir "logs"
 $configPath = Join-Path $resolvedAppDir "config\config.json"
-$exePath = Join-Path $resolvedAppDir "vnt_app.exe"
+$exePath = Join-Path $resolvedAppDir $mainExecutableName
 $runnerPath = Join-Path $resolvedAppDir "vnt_app_runner.exe"
 $stamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $reportPath = Join-Path $logsDir "portable_launch_diag_$stamp.md"
@@ -195,7 +214,11 @@ foreach ($screen in $screens) {
 $process = Start-Process -FilePath $exePath -WorkingDirectory $resolvedAppDir -PassThru
 Start-Sleep -Seconds $WaitSeconds
 
-$processSnapshot = Get-CimInstance Win32_Process -Filter "Name='vnt_app.exe' OR Name='vnt_app_runner.exe'" -ErrorAction SilentlyContinue |
+$processSnapshot = Get-CimInstance Win32_Process -ErrorAction SilentlyContinue |
+  Where-Object {
+    $path = if ($null -ne $_.ExecutablePath) { $_.ExecutablePath.ToLowerInvariant() } else { "" }
+    $path -eq $exePath.ToLowerInvariant() -or $path -eq $runnerPath.ToLowerInvariant()
+  } |
   Select-Object ProcessId, Name, ExecutablePath, CommandLine
 
 $runnerProc = $processSnapshot | Where-Object {
@@ -204,7 +227,8 @@ $runnerProc = $processSnapshot | Where-Object {
   } else {
     ""
   }
-  $exePathLower -eq $runnerPath.ToLowerInvariant()
+  $exePathLower -eq $runnerPath.ToLowerInvariant() -or
+    $exePathLower -eq $exePath.ToLowerInvariant()
 } | Select-Object -First 1
 
 $windowInfo = @()

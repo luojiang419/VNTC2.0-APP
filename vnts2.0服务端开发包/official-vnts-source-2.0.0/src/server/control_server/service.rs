@@ -1,9 +1,12 @@
 use crate::protocol::control_message::{RegRequestMsg, RegistrationMode};
 use crate::server::control_server::db;
-use crate::server::control_server::db::{NetworkRecord, NetworkSource};
-use crate::server::network_state_provider::{
-    NetworkState, NetworkStateProvider, i64_to_system_time,
+use crate::server::control_server::db::{
+    NetworkRecord, NetworkSource, WireGuardPeerDeleteResult, WireGuardPeerRecord,
 };
+use crate::server::network_state_provider::{
+    LocalDeliveryResult, NetworkState, NetworkStateProvider, i64_to_system_time, system_time_to_i64,
+};
+use crate::server::wireguard_bridge::RelayOrigin;
 use anyhow::{Context, bail};
 use bytes::Bytes;
 use dashmap::DashMap;
@@ -12,7 +15,7 @@ use parking_lot::RwLock;
 use rand::RngCore;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::net::Ipv4Addr;
+use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
 use std::time::SystemTime;
 use time::OffsetDateTime;
@@ -41,6 +44,37 @@ pub struct ControlService {
     network_state_provider: NetworkStateProvider,
     network_init_locks: Arc<DashMap<String, Arc<tokio::sync::Mutex<()>>>>,
     peer_manager: Arc<RwLock<Option<Arc<crate::server::peer_server::PeerServerManager>>>>,
+    wireguard_runtime:
+        Arc<RwLock<Option<crate::server::wireguard_runtime::WireGuardRuntimeHandle>>>,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct WireGuardPeerIpVO {
+    pub peer_id: String,
+    pub ip: Ipv4Addr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireGuardPeerVO {
+    pub network_code: String,
+    pub peer_id: String,
+    pub public_key: [u8; 32],
+    pub enabled: bool,
+    pub ip: Option<Ipv4Addr>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+fn wireguard_peer_vo(record: WireGuardPeerRecord, ip: Option<Ipv4Addr>) -> WireGuardPeerVO {
+    WireGuardPeerVO {
+        network_code: record.network_code,
+        peer_id: record.peer_id,
+        public_key: record.public_key,
+        enabled: record.enabled,
+        ip,
+        created_at: record.created_at,
+        updated_at: record.updated_at,
+    }
 }
 
 impl ControlService {
@@ -61,6 +95,7 @@ impl ControlService {
             network_state_provider: NetworkStateProvider::new(network_states),
             network_init_locks: Arc::new(DashMap::new()),
             peer_manager: Arc::new(RwLock::new(None)),
+            wireguard_runtime: Arc::new(RwLock::new(None)),
         };
 
         let cleanup_interval = Duration::from_secs(30 * 60);
@@ -129,10 +164,20 @@ impl ControlService {
         &self,
         reg_req: RegRequestMsg,
         sender: Sender<Bytes>,
+        remote_addr: SocketAddr,
     ) -> anyhow::Result<Session> {
         reg_req.check()?;
         let network_code = reg_req.network_code.clone();
         let registration_mode = reg_req.registration_mode;
+        let allow_wire_guard = reg_req.allow_wire_guard;
+        let wireguard_p2p = reg_req.wireguard_p2p.and_then(|registration| {
+            remote_addr.is_ipv4().then(|| {
+                crate::server::network_state_provider::WireGuardP2pEndpoint {
+                    public_key: registration.public_key,
+                    endpoint: SocketAddr::new(remote_addr.ip(), registration.port),
+                }
+            })
+        });
 
         let is_new_network = !self.db_nets.read().contains_key(&reg_req.network_code);
         let config = self.network_config(&reg_req.network_code, reg_req.ip);
@@ -152,7 +197,7 @@ impl ControlService {
             let device_id = reg_req.device_id.clone();
 
             let (ip, _old_ip, entry) =
-                match state.allocate_ip_and_get_entry(reg_req, random_id, sender) {
+                match state.allocate_ip_and_get_entry(reg_req, random_id, sender, wireguard_p2p) {
                     Ok(rs) => rs,
                     Err(e) => {
                         log::warn!("network_code={network_code},device_id={device_id},e={e:?}");
@@ -171,6 +216,7 @@ impl ControlService {
                         RegistrationMode::Normal => RegistrationStatus::Confirmed,
                         RegistrationMode::PreRegister => RegistrationStatus::PendingConfirmation,
                     },
+                    allow_wire_guard,
                     control_service: self.clone(),
                 },
                 entry,
@@ -359,7 +405,10 @@ impl ControlService {
                     .as_millis() as u64;
 
                 for entry in state.sender_map().iter() {
-                    let _ip = *entry.key();
+                    let ip = *entry.key();
+                    if state.is_wireguard_endpoint(ip) {
+                        continue;
+                    }
                     let sender = entry.value().clone();
 
                     let mut buf = BytesMut::zeroed(HEAD_LENGTH + 8);
@@ -435,8 +484,8 @@ impl ControlService {
             .map(|c| c.source)
             .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
 
-        if db::network_has_devices(network_code).await? {
-            bail!("网络下存在设备，无法编辑");
+        if db::network_has_resource_owners(network_code).await? {
+            bail!("网络下存在设备或 WireGuard peer，无法编辑");
         }
 
         if let Some(state) = self.network_state_provider.get(network_code) {
@@ -475,8 +524,8 @@ impl ControlService {
             bail!("网络编号 '{}' 不存在", network_code);
         }
 
-        if db::network_has_devices(network_code).await? {
-            bail!("网络下存在设备，无法删除");
+        if db::network_has_resource_owners(network_code).await? {
+            bail!("网络下存在设备或 WireGuard peer，无法删除");
         }
 
         if let Some(state) = self.network_state_provider.get(network_code) {
@@ -506,6 +555,211 @@ impl ControlService {
 
         Ok(())
     }
+
+    pub(crate) async fn create_wireguard_peer(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+        public_key: [u8; 32],
+        enabled: bool,
+    ) -> anyhow::Result<WireGuardPeerVO> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        let now = system_time_to_i64(SystemTime::now());
+        let record = WireGuardPeerRecord {
+            network_code: network_code.to_string(),
+            peer_id: peer_id.to_string(),
+            public_key,
+            enabled,
+            created_at: now,
+            updated_at: now,
+        };
+        let ip = state.create_wireguard_peer(&record).await?;
+        Ok(wireguard_peer_vo(record, ip))
+    }
+
+    pub(crate) async fn create_wireguard_peer_with_automatic_ip(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+        public_key: [u8; 32],
+        enabled: bool,
+    ) -> anyhow::Result<(WireGuardPeerVO, ipnet::Ipv4Net)> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        let now = system_time_to_i64(SystemTime::now());
+        let record = WireGuardPeerRecord {
+            network_code: network_code.to_string(),
+            peer_id: peer_id.to_string(),
+            public_key,
+            enabled,
+            created_at: now,
+            updated_at: now,
+        };
+        let ip = state
+            .create_wireguard_peer_with_automatic_ip(&record)
+            .await?;
+        Ok((wireguard_peer_vo(record, Some(ip)), config.net))
+    }
+
+    pub(crate) async fn list_wireguard_peers(
+        &self,
+        network_code: &str,
+    ) -> anyhow::Result<Vec<WireGuardPeerVO>> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        Ok(state
+            .list_wireguard_peers()
+            .await?
+            .into_iter()
+            .map(|(record, ip)| wireguard_peer_vo(record, ip))
+            .collect())
+    }
+
+    pub(crate) async fn set_wireguard_peer_enabled(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+        enabled: bool,
+    ) -> anyhow::Result<WireGuardPeerVO> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        let updated = state
+            .set_wireguard_peer_enabled(
+                peer_id,
+                enabled,
+                system_time_to_i64(SystemTime::now()),
+                self.revoke_wireguard_peer(network_code, peer_id),
+            )
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!(
+                    "WireGuard peer '{}' 在网络 '{}' 中不存在",
+                    peer_id,
+                    network_code
+                )
+            })?;
+        Ok(wireguard_peer_vo(updated.0, updated.1))
+    }
+
+    pub(crate) async fn delete_wireguard_peer(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+    ) -> anyhow::Result<WireGuardPeerDeleteResult> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        state
+            .delete_wireguard_peer(peer_id, self.revoke_wireguard_peer(network_code, peer_id))
+            .await
+    }
+
+    async fn revoke_wireguard_peer(&self, network_code: &str, peer_id: &str) -> anyhow::Result<()> {
+        let runtime = self.wireguard_runtime.read().clone();
+        if let Some(runtime) = runtime {
+            runtime.revoke_peer(network_code, peer_id).await?;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn list_wireguard_peer_ips(
+        &self,
+        network_code: &str,
+    ) -> anyhow::Result<Vec<WireGuardPeerIpVO>> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        Ok(state
+            .list_wireguard_peer_ips()
+            .await
+            .into_iter()
+            .map(|(peer_id, ip)| WireGuardPeerIpVO { peer_id, ip })
+            .collect())
+    }
+
+    pub(crate) async fn reserve_wireguard_peer_ip(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+        ip: Ipv4Addr,
+    ) -> anyhow::Result<()> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        state
+            .reserve_wireguard_peer_ip(
+                peer_id,
+                ip,
+                self.revoke_wireguard_peer(network_code, peer_id),
+            )
+            .await
+    }
+
+    pub(crate) async fn release_wireguard_peer_ip(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+    ) -> anyhow::Result<bool> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        let state = self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await;
+        state
+            .release_wireguard_peer_ip(peer_id, self.revoke_wireguard_peer(network_code, peer_id))
+            .await
+    }
 }
 
 impl ControlService {
@@ -519,12 +773,97 @@ impl ControlService {
             .map(|s| s.clone())
     }
 
+    pub(crate) async fn wireguard_network_state(
+        &self,
+        network_code: &str,
+    ) -> anyhow::Result<Arc<NetworkState>> {
+        let config = self
+            .db_nets
+            .read()
+            .get(network_code)
+            .copied()
+            .ok_or_else(|| anyhow::anyhow!("网络编号 '{}' 不存在", network_code))?;
+        Ok(self
+            .get_or_create_network_state(network_code.to_string(), config)
+            .await)
+    }
+
     pub fn set_peer_manager(&self, manager: Arc<crate::server::peer_server::PeerServerManager>) {
         *self.peer_manager.write() = Some(manager);
     }
 
     pub fn get_peer_manager(&self) -> Option<Arc<crate::server::peer_server::PeerServerManager>> {
         self.peer_manager.read().clone()
+    }
+
+    pub(crate) async fn route_wireguard_relay(
+        &self,
+        network_code: &str,
+        destination: Ipv4Addr,
+        data: Bytes,
+        origin: RelayOrigin,
+    ) -> LocalDeliveryResult {
+        let Some(state) = self.get_network_state(network_code) else {
+            return LocalDeliveryResult::NotFound;
+        };
+
+        let local = state.try_deliver(destination, data.clone(), origin);
+        if local != LocalDeliveryResult::NotFound {
+            if local == LocalDeliveryResult::Delivered {
+                state.record_rx_traffic(destination, data.len());
+            }
+            return local;
+        }
+
+        if let Some(peer_manager) = self.get_peer_manager()
+            && peer_manager
+                .forward_with_best_route(network_code, destination, data, origin)
+                .await
+        {
+            return LocalDeliveryResult::Delivered;
+        }
+        LocalDeliveryResult::NotFound
+    }
+
+    pub(crate) fn set_wireguard_runtime(
+        &self,
+        runtime: crate::server::wireguard_runtime::WireGuardRuntimeHandle,
+    ) {
+        *self.wireguard_runtime.write() = Some(runtime);
+    }
+
+    pub(crate) fn clear_wireguard_runtime_if(
+        &self,
+        expected_addr: SocketAddr,
+        expected_public_key: [u8; 32],
+    ) {
+        let mut runtime = self.wireguard_runtime.write();
+        let matches = runtime.as_ref().is_some_and(|runtime| {
+            runtime.local_addr() == expected_addr && runtime.public_key() == expected_public_key
+        });
+        if matches {
+            *runtime = None;
+        }
+    }
+
+    pub(crate) fn wireguard_runtime_status(&self) -> Option<(SocketAddr, [u8; 32], usize)> {
+        let runtime = self.wireguard_runtime.read();
+        let runtime = runtime.as_ref()?;
+        let local_addr = runtime.local_addr();
+        let public_key = runtime.public_key();
+        let active_peers = self
+            .network_state_provider
+            .iter()
+            .map(|network| {
+                let state = network.value();
+                state
+                    .sender_map()
+                    .iter()
+                    .filter(|sender| state.is_wireguard_endpoint(*sender.key()))
+                    .count()
+            })
+            .sum();
+        Some((local_addr, public_key, active_peers))
     }
 
     pub fn get_network_state_provider(&self) -> &NetworkStateProvider {
@@ -557,42 +896,38 @@ impl ControlService {
             .collect()
     }
 
-    pub async fn get_device_info(&self, network_code: &str) -> Option<Vec<DeviceInfoVO>> {
+    pub async fn get_device_info(
+        &self,
+        network_code: &str,
+    ) -> anyhow::Result<Option<Vec<DeviceInfoVO>>> {
+        if !self.db_nets.read().contains_key(network_code) {
+            return Ok(None);
+        }
         let mut devices = if let Some(state) = self.network_state_provider.get(network_code) {
             state.get_device_infos()
         } else {
-            match db::load_all_devices(network_code).await {
-                Ok(records) => {
-                    let format =
-                        format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
-                    records
-                        .into_iter()
-                        .map(|r| {
-                            let last_connect_time: OffsetDateTime =
-                                i64_to_system_time(r.last_connect_time).into();
-                            DeviceInfoVO {
-                                device_id: r.device_id,
-                                device_name: r.device_name,
-                                device_version: r.device_version,
-                                ip: r.ip.as_ref().and_then(|s| s.parse().ok()),
-                                status: "Offline".to_string(),
-                                last_connect_time: last_connect_time
-                                    .format(&format)
-                                    .unwrap_or_default(),
-                                disconnect_time: None,
-                                latency_ms: None,
-                                server_addr: None,
-                                tx_bytes: r.tx_bytes as u64,
-                                rx_bytes: r.rx_bytes as u64,
-                            }
-                        })
-                        .collect()
-                }
-                Err(e) => {
-                    log::error!("Failed to load devices from DB: {}", e);
-                    return None;
-                }
-            }
+            let records = db::load_all_devices(network_code).await?;
+            let format = format_description!("[year]-[month]-[day] [hour]:[minute]:[second]");
+            records
+                .into_iter()
+                .map(|r| {
+                    let last_connect_time: OffsetDateTime =
+                        i64_to_system_time(r.last_connect_time).into();
+                    DeviceInfoVO {
+                        device_id: r.device_id,
+                        device_name: r.device_name,
+                        device_version: r.device_version,
+                        ip: r.ip.as_ref().and_then(|s| s.parse().ok()),
+                        status: "Offline".to_string(),
+                        last_connect_time: last_connect_time.format(&format).unwrap_or_default(),
+                        disconnect_time: None,
+                        latency_ms: None,
+                        server_addr: None,
+                        tx_bytes: r.tx_bytes as u64,
+                        rx_bytes: r.rx_bytes as u64,
+                    }
+                })
+                .collect()
         };
 
         if let Some(peer_manager) = self.peer_manager.read().as_ref() {
@@ -615,7 +950,7 @@ impl ControlService {
             }
         }
 
-        Some(devices)
+        Ok(Some(devices))
     }
 }
 
@@ -626,6 +961,7 @@ pub struct Session {
     pub random_id: u64,
     pub network_state: Arc<NetworkState>,
     pub registration_status: RegistrationStatus,
+    pub allow_wire_guard: bool,
     pub control_service: ControlService,
 }
 

@@ -36,6 +36,8 @@ struct RegistrationContext {
     packet_compression: PacketCompression,
     enhanced_inbound: EnhancedInbound,
     fec_decoder: FecDecoder,
+    wireguard_p2p_prepared: Option<crate::wireguard_p2p::PreparedWireGuardP2p>,
+    wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
 }
 
 pub struct NetworkManager {
@@ -55,14 +57,26 @@ pub enum RegisterResponse {
 
 impl NetworkManager {
     pub async fn create_network(
-        config: Box<Config>,
+        mut config: Box<Config>,
         task_group: TaskGroup,
     ) -> anyhow::Result<NetworkManager> {
         let app_state = AppState::default();
+        config.clamp_wireguard_mtu();
         config.check()?;
         let mtu = config.mtu.unwrap_or(DEFAULT_MTU);
         let packet_crypto = PacketCrypto::new_from_str(config.password.as_deref());
         let packet_compression = PacketCompression::new(config.compress);
+        let wireguard_p2p_prepared = if config.allow_wire_guard {
+            crate::wireguard_p2p::prepare(&config.udp_stun).await?
+        } else {
+            None
+        };
+        let wireguard_p2p = wireguard_p2p_prepared
+            .as_ref()
+            .map(crate::wireguard_p2p::PreparedWireGuardP2p::handle);
+        config.wireguard_p2p = wireguard_p2p_prepared
+            .as_ref()
+            .map(crate::wireguard_p2p::PreparedWireGuardP2p::registration);
         let (server_manager_list, tunnel_to_server, server_rpc) =
             create_server_tunnel(app_state.clone(), &config, packet_crypto.clone());
         let device_io_manager = DeviceIOManager::new(task_group.clone());
@@ -112,6 +126,7 @@ impl NetworkManager {
             packet_compression.clone(),
             subnet_external_route.clone(),
             fec_encoder,
+            wireguard_p2p.clone(),
         );
         let port_mapping_manager = PortMappingManager::new(
             config.no_tun,
@@ -191,6 +206,8 @@ impl NetworkManager {
             packet_compression,
             enhanced_inbound,
             fec_decoder,
+            wireguard_p2p_prepared,
+            wireguard_p2p,
         });
 
         app_state.set_config(config.clone());
@@ -254,6 +271,10 @@ impl NetworkManager {
         };
         self.app_state.network.set(network_addr);
 
+        if let Some(prepared) = ctx.wireguard_p2p_prepared.take() {
+            prepared.start(&self.task_group, network_addr, ctx.enhanced_inbound.clone());
+        }
+
         // 保存服务器版本信息
         if !reg_response.server_version.is_empty() {
             for (index, _) in ctx.server_managers.iter().enumerate() {
@@ -266,6 +287,8 @@ impl NetworkManager {
         // Start data handling tasks for all servers
         for turn_manager in ctx.server_managers {
             let handler_config = Box::new(InboundHandlerConfig {
+                allow_wire_guard: self.config.allow_wire_guard,
+                wireguard_p2p: ctx.wireguard_p2p.clone(),
                 network_route: NetworkRoute::new(
                     self.app_state.network.clone(),
                     ctx.subnet_external_route.clone(),

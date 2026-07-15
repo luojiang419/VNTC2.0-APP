@@ -30,6 +30,24 @@ function Ensure-Directory {
     }
 }
 
+function Resolve-HostExecutable {
+    $brandingPath = Join-Path $AppDir 'branding.json'
+    if (Test-Path -LiteralPath $brandingPath) {
+        try {
+            $branding = Get-Content -LiteralPath $brandingPath -Raw -Encoding UTF8 | ConvertFrom-Json
+            $candidateName = [string]$branding.executableName
+            if (-not [string]::IsNullOrWhiteSpace($candidateName)) {
+                $candidate = Join-Path $AppDir $candidateName
+                if (Test-Path -LiteralPath $candidate) {
+                    return $candidate
+                }
+            }
+        } catch {
+        }
+    }
+    return Join-Path $AppDir 'vnt_app.exe'
+}
+
 function Get-UninstallEntry {
     $registryPaths = @(
         'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
@@ -433,7 +451,7 @@ try {
 } catch {
 }
 
-$hostExecutable = Join-Path $AppDir 'vnt_app.exe'
+$hostExecutable = Resolve-HostExecutable
 if (Test-Path -LiteralPath $hostExecutable) {
     Ensure-FirewallRule -DisplayName $udpRuleName -ProgramPath $hostExecutable -Protocol 'UDP' -LocalPort 49998
 }

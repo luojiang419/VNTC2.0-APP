@@ -10,23 +10,39 @@ import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_quality/packet_loss_sample.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
+import 'package:vnt_app/widgets/dashboard_config_panel.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 /// 仪表盘页面
 class DashboardPage extends StatefulWidget {
   final VoidCallback? onNavigateToConfig;
   final Future<void> Function()? onEditDefaultConfig;
+  final Future<NetworkConfig?> Function(NetworkConfig config)? onEditConfig;
   final VoidCallback? onNavigateToSettings;
   final VoidCallback? onDisconnect;
   final VoidCallback? onConnect;
+  final DashboardConfigAction? onConnectConfig;
+  final DashboardConfigAction? onDisconnectConfig;
+  final bool Function(NetworkConfig config)? isConfigConnected;
+  final Future<DashboardBatchConnectResult> Function(
+      List<NetworkConfig> configs)? onConnectAll;
+  final VoidCallback? onConfigsChanged;
+  final int configRevision;
 
   const DashboardPage({
     super.key,
     this.onNavigateToConfig,
     this.onEditDefaultConfig,
+    this.onEditConfig,
     this.onNavigateToSettings,
     this.onDisconnect,
     this.onConnect,
+    this.onConnectConfig,
+    this.onDisconnectConfig,
+    this.isConfigConnected,
+    this.onConnectAll,
+    this.onConfigsChanged,
+    this.configRevision = 0,
   });
 
   @override
@@ -58,6 +74,8 @@ class _DashboardPageState extends State<DashboardPage> {
   String _defaultConfigName = '';
   String? _lastPersistedDefaultKey; // 上次从持久化存储读取的defaultKey，用于检测变化
   String _activeConnectionFingerprint = '';
+  List<NetworkConfig> _configs = <NetworkConfig>[];
+  bool _isBatchConnecting = false;
   final DataPersistence _dataPersistence = DataPersistence();
 
   // 网络速度数据
@@ -110,6 +128,7 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    vntManager.addConnectionListener(_handleConnectionChanged);
     _loadDefaultConfig();
     _updateStats();
     // 每2秒更新一次数据
@@ -121,9 +140,48 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   @override
+  void didUpdateWidget(covariant DashboardPage oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.configRevision != widget.configRevision) {
+      _loadDefaultConfig();
+    }
+  }
+
+  @override
   void dispose() {
     _timer?.cancel();
+    vntManager.removeConnectionListener(_handleConnectionChanged);
     super.dispose();
+  }
+
+  void _handleConnectionChanged() {
+    if (mounted) {
+      _updateStats();
+    }
+  }
+
+  bool _isConfigConnected(NetworkConfig config) {
+    return widget.isConfigConnected?.call(config) ??
+        vntManager.hasConnectionItem(config.itemKey);
+  }
+
+  List<NetworkConfig> get _connectedConfigs =>
+      _configs.where(_isConfigConnected).toList(growable: false);
+
+  int get _visibleConnectionCount {
+    final configCount = _connectedConfigs.length;
+    return _connectionCount > configCount ? _connectionCount : configCount;
+  }
+
+  String get _visibleConfigName {
+    if (_configName.isNotEmpty) {
+      return _configName;
+    }
+    final connected = _connectedConfigs;
+    if (connected.length > 1) {
+      return '${connected.first.configName} 等 ${connected.length} 个配置';
+    }
+    return connected.firstOrNull?.configName ?? '';
   }
 
   // 判断设备是否在线 - 不区分大小写，去掉空格和换行
@@ -163,22 +221,13 @@ class _DashboardPageState extends State<DashboardPage> {
       _lastPersistedDefaultKey = defaultKey;
     }
 
-    // 根据最终的defaultKey查找配置名称
-    if (defaultKey.isNotEmpty) {
-      final config = configs.where((c) => c.itemKey == defaultKey).firstOrNull;
-      if (config != null) {
-        setState(() {
-          _defaultConfigKey = defaultKey;
-          _defaultConfigName = config.configName;
-        });
-        return;
-      }
-    }
-
-    // 如果没有找到有效的默认配置，清空状态
+    final defaultConfig = defaultKey.isEmpty
+        ? null
+        : configs.where((config) => config.itemKey == defaultKey).firstOrNull;
     setState(() {
-      _defaultConfigKey = '';
-      _defaultConfigName = '';
+      _configs = List<NetworkConfig>.from(configs);
+      _defaultConfigKey = defaultConfig?.itemKey ?? '';
+      _defaultConfigName = defaultConfig?.configName ?? '';
     });
   }
 
@@ -222,6 +271,152 @@ class _DashboardPageState extends State<DashboardPage> {
     }
   }
 
+  Future<void> _handleConnectAll() async {
+    if (_configs.isEmpty) {
+      widget.onNavigateToConfig?.call();
+      return;
+    }
+    if (_isBatchConnecting) {
+      return;
+    }
+
+    final connectAll = widget.onConnectAll;
+    if (connectAll == null) {
+      await _handleConnect();
+      return;
+    }
+
+    setState(() => _isBatchConnecting = true);
+    DashboardBatchConnectResult result;
+    try {
+      result = await connectAll(List<NetworkConfig>.unmodifiable(_configs));
+    } catch (error) {
+      result = DashboardBatchConnectResult(
+        requestedCount: _configs.length,
+        startedCount: 0,
+        alreadyConnectedCount: 0,
+        failures: {'批量连接': error.toString()},
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isBatchConnecting = false);
+      }
+    }
+    if (!mounted) {
+      return;
+    }
+    _updateStats();
+    if (result.hasFailures || result.platformLimited) {
+      await _showBatchConnectResult(result);
+    } else {
+      showTopToast(context, result.summary, isSuccess: true);
+    }
+  }
+
+  Future<void> _showBatchConnectResult(
+    DashboardBatchConnectResult result,
+  ) async {
+    final tokens = context.themeTokens;
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        backgroundColor: tokens.surfaceRaised,
+        title: const Text('批量连接结果'),
+        content: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 460),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(result.summary),
+              if (result.platformLimited) ...[
+                SizedBox(height: context.spacingSmall),
+                const Text(
+                  'Android / iOS 受系统单 VPN 通道限制，本次只处理一个配置。',
+                ),
+              ],
+              if (result.failures.isNotEmpty) ...[
+                SizedBox(height: context.spacingMedium),
+                ...result.failures.entries.map(
+                  (entry) => Padding(
+                    padding: EdgeInsets.only(bottom: context.spacingXSmall),
+                    child: Text(
+                      '${entry.key}：${entry.value}',
+                      style: const TextStyle(color: AppTheme.errorColor),
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('知道了'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _persistConfigOrder(List<NetworkConfig> configs) async {
+    await _dataPersistence.saveData(configs);
+    if (!mounted) {
+      return;
+    }
+    setState(() => _configs = List<NetworkConfig>.from(configs));
+    widget.onConfigsChanged?.call();
+  }
+
+  Future<NetworkConfig?> _editConfig(NetworkConfig config) async {
+    final editConfig = widget.onEditConfig;
+    if (editConfig != null) {
+      final result = await editConfig(config);
+      if (result != null && mounted) {
+        await _loadDefaultConfig();
+      }
+      return result;
+    }
+
+    if (config.itemKey == _defaultConfigKey &&
+        widget.onEditDefaultConfig != null) {
+      await widget.onEditDefaultConfig!.call();
+      if (!mounted) {
+        return null;
+      }
+      await _loadDefaultConfig();
+      return _configs
+          .where((item) => item.itemKey == config.itemKey)
+          .firstOrNull;
+    }
+    return null;
+  }
+
+  Future<void> _showConfigPanel() async {
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => DashboardConfigPanel(
+        configs: _configs,
+        supportsMultipleConnections: vntManager.supportMultiple(),
+        onConnect: widget.onConnectConfig ??
+            (config) async => const DashboardConfigActionResult.failure(
+                  '当前页面未提供连接处理器',
+                ),
+        onDisconnect: widget.onDisconnectConfig ??
+            (config) async => const DashboardConfigActionResult.failure(
+                  '当前页面未提供断开处理器',
+                ),
+        onEdit: _editConfig,
+        onReorder: _persistConfigOrder,
+        isConnected: _isConfigConnected,
+      ),
+    );
+    if (mounted) {
+      await _loadDefaultConfig();
+    }
+  }
+
   void _updateStats() {
     if (!mounted) return;
 
@@ -240,6 +435,7 @@ class _DashboardPageState extends State<DashboardPage> {
     bool isEncrypted = false;
     String encryptionAlgorithm = '';
     String natType = ''; // NAT类型
+    final activeConfigNames = <String>[];
 
     // 速率数据（直接使用状态变量，不创建新列表）
     String currentUpSpeed = '0 B/s';
@@ -347,6 +543,7 @@ class _DashboardPageState extends State<DashboardPage> {
       final config = vntBox.getNetConfig();
       if (config != null) {
         configName = config.configName;
+        activeConfigNames.add(config.configName);
         isEncrypted = config.groupPassword.isNotEmpty;
 
         // 获取加密算法
@@ -410,6 +607,11 @@ class _DashboardPageState extends State<DashboardPage> {
           _pingHistory.removeAt(0);
         }
       }
+    }
+
+    if (activeConfigNames.length > 1) {
+      configName =
+          '${activeConfigNames.first} 等 ${activeConfigNames.length} 个配置';
     }
 
     int avgLatency =
@@ -510,7 +712,7 @@ class _DashboardPageState extends State<DashboardPage> {
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 600;
-    final hasConnection = _connectionCount > 0;
+    final hasConnection = _visibleConnectionCount > 0;
     final primaryColor = Theme.of(context).primaryColor;
 
     return Scaffold(
@@ -591,13 +793,28 @@ class _DashboardPageState extends State<DashboardPage> {
           ),
         ),
         SizedBox(width: context.spacing(16)),
-        Text(
-          '仪表盘',
-          style: TextStyle(
-            fontSize: context.sp(28),
-            fontWeight: FontWeight.bold,
-            color:
-                isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+        Expanded(
+          child: Text(
+            '仪表盘',
+            style: TextStyle(
+              fontSize: context.sp(28),
+              fontWeight: FontWeight.bold,
+              color:
+                  isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+            ),
+          ),
+        ),
+        OutlinedButton.icon(
+          key: const ValueKey('dashboard-configs-button'),
+          onPressed: _showConfigPanel,
+          icon: const Icon(Icons.layers_outlined),
+          label: Text('${_configs.length} 个配置'),
+          style: OutlinedButton.styleFrom(
+            foregroundColor: primaryColor,
+            padding: EdgeInsets.symmetric(
+              horizontal: context.spacingSmall,
+              vertical: context.spacingXSmall,
+            ),
           ),
         ),
       ],
@@ -608,6 +825,11 @@ class _DashboardPageState extends State<DashboardPage> {
     final primaryColor = Theme.of(context).primaryColor;
     final tokens = context.themeTokens;
     final foregroundColor = hasConnection ? Colors.white : tokens.textPrimary;
+    final hasConfigsToConnect = _configs.any(
+      (config) =>
+          !_isConfigConnected(config) &&
+          !vntManager.isConnectingItem(config.itemKey),
+    );
     return InkWell(
       onTap:
           hasConnection ? () => _showConnectionDialog(isDark) : _handleConnect,
@@ -693,9 +915,11 @@ class _DashboardPageState extends State<DashboardPage> {
                   SizedBox(height: context.spacing(4)),
                   Text(
                     hasConnection
-                        ? (_configName.isNotEmpty ? _configName : '未知配置名')
-                        : (_defaultConfigName.isNotEmpty
-                            ? '$_defaultConfigName (点击连接)'
+                        ? (_visibleConfigName.isNotEmpty
+                            ? _visibleConfigName
+                            : '未知配置名')
+                        : (_configs.isNotEmpty
+                            ? '已添加 ${_configs.length} 个配置，可一键连接全部'
                             : '点击新建配置'),
                     style: TextStyle(
                       fontSize: context.sp(16),
@@ -711,7 +935,7 @@ class _DashboardPageState extends State<DashboardPage> {
                             size: context.iconSize(16)),
                         SizedBox(width: context.spacing(4)),
                         Text(
-                          '$_connectionCount 个活动连接',
+                          '$_visibleConnectionCount 个活动连接',
                           style: TextStyle(
                             fontSize: context.sp(14),
                             color: foregroundColor.withValues(alpha: 0.82),
@@ -729,17 +953,31 @@ class _DashboardPageState extends State<DashboardPage> {
                 GestureDetector(
                   onTap: () {},
                   child: IconButton(
-                    onPressed: hasConnection
-                        ? () => _showConnectionDialog(isDark)
-                        : _handleConnect,
-                    icon: Icon(
-                      hasConnection
-                          ? Icons.power_settings_new
-                          : Icons.play_arrow,
-                      color: foregroundColor,
-                      size: context.iconSize(28),
-                    ),
-                    tooltip: hasConnection ? '断开连接' : '连接',
+                    key: const ValueKey('dashboard-connect-all-button'),
+                    onPressed: _isBatchConnecting
+                        ? null
+                        : hasConfigsToConnect || !hasConnection
+                            ? _handleConnectAll
+                            : () => _showConnectionDialog(isDark),
+                    icon: _isBatchConnecting
+                        ? SizedBox(
+                            width: context.iconSize(24),
+                            height: context.iconSize(24),
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2.5,
+                              color: foregroundColor,
+                            ),
+                          )
+                        : Icon(
+                            hasConfigsToConnect || !hasConnection
+                                ? Icons.playlist_play
+                                : Icons.power_settings_new,
+                            color: foregroundColor,
+                            size: context.iconSize(28),
+                          ),
+                    tooltip: hasConfigsToConnect || !hasConnection
+                        ? '连接全部配置'
+                        : '断开全部连接',
                   ),
                 ),
                 if (_defaultConfigKey.isNotEmpty) ...[

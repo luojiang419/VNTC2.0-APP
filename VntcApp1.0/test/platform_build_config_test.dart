@@ -261,6 +261,10 @@ void main() {
       'scripts/export_installer_package.ps1',
     );
 
-    expect(installerScript, contains('Excludes: "config\\*"'));
+    expect(installerScript, contains("Join-Path \$payloadDir 'config'"));
+    expect(installerScript,
+        contains('Remove-WithRetry -Path \$payloadConfigDir -Recurse'));
+    expect(installerScript, contains('Source: "{#MyBrandPayload}"'));
+    expect(installerScript, contains("ExtractArchive("));
   });
 }

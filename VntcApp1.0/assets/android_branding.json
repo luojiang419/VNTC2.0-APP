@@ -1,0 +1,12 @@
+{
+  "schemaVersion": 1,
+  "brandId": "official",
+  "productName": "VNTC APP2.0",
+  "windowTitle": "VNTC APP2.0",
+  "trayTooltip": "VNTC APP2.0 - Virtual Network Tool",
+  "executableName": "vnt_app.exe",
+  "installerBaseName": "VNT_App",
+  "updateEnabled": true,
+  "hideAboutPage": false,
+  "androidPackageName": "top.wherewego.vnt_app"
+}

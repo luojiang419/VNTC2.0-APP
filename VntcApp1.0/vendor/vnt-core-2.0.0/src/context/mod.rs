@@ -2,7 +2,7 @@ use crate::context::config::Config;
 use crate::context::nat::{MyNatInfo, PunchBackoff};
 use crate::nat::SubnetExternalRoute;
 use crate::protocol::client_message::PunchInfo;
-use crate::protocol::control_message::{ClientSimpleInfo, ClientSimpleInfoList};
+use crate::protocol::control_message::{ClientSimpleInfo, ClientSimpleInfoList, NodeType};
 use crate::tunnel_core::p2p::route_table::RouteTable;
 use crate::tunnel_core::server::transport::config::ProtocolAddress;
 use ipnet::Ipv4Net;
@@ -409,7 +409,7 @@ impl ServerInfoCollection {
                     (
                         v.client_map
                             .iter()
-                            .filter(|(_, v)| v.online)
+                            .filter(|(_, v)| v.online && v.node_type == NodeType::Vnt)
                             .map(|(k, _)| *k)
                             .collect(),
                         v.rtt.unwrap_or(500),
@@ -482,9 +482,18 @@ impl ServerInfoCollection {
         self.client_simple_list
             .read()
             .iter()
-            .filter(|v| v.online)
+            .filter(|v| v.online && v.node_type == NodeType::Vnt)
             .map(|c| c.ip)
             .collect()
+    }
+    pub fn is_wireguard_client(&self, ip: &Ipv4Addr) -> bool {
+        self.server_node_map.read().values().any(|server| {
+            server.connected
+                && server
+                    .client_map
+                    .get(ip)
+                    .is_some_and(|client| client.online && client.node_type == NodeType::Wireguard)
+        })
     }
     pub fn client_ips(&self) -> Vec<ClientSimpleInfo> {
         self.client_simple_list.read().clone()
@@ -557,6 +566,9 @@ impl ServerInfoCollection {
                     }
                     if v.name.is_empty() && !x.name.is_empty() {
                         v.name.clone_from(&x.name);
+                    }
+                    if x.node_type == NodeType::Wireguard {
+                        v.node_type = NodeType::Wireguard;
                     }
                 } else {
                     client_simple_map.insert(x.ip, x.clone());
@@ -745,11 +757,13 @@ mod tests {
                     ip: self_ip,
                     name: "self".to_string(),
                     online: true,
+                    node_type: NodeType::Vnt,
                 },
                 ClientSimpleInfo {
                     ip: first_peer,
                     name: "first-peer".to_string(),
                     online: true,
+                    node_type: NodeType::Vnt,
                 },
             ],
         );
@@ -760,6 +774,7 @@ mod tests {
                 ip: second_peer,
                 name: "second-peer".to_string(),
                 online: true,
+                node_type: NodeType::Vnt,
             }],
         );
         collection.update_client_simple_list(
@@ -771,6 +786,7 @@ mod tests {
                     ip: first_peer,
                     name: String::new(),
                     online: false,
+                    node_type: NodeType::Vnt,
                 }],
                 is_all: true,
                 time: 0,
@@ -796,6 +812,49 @@ mod tests {
                 .map(|client| client.name.as_str()),
             Some("second-peer")
         );
+    }
+
+    #[test]
+    fn wireguard_clients_are_server_only_and_excluded_from_vnt_peer_candidates() {
+        let collection = ServerInfoCollection::default();
+        let self_ip = Ipv4Addr::new(10, 0, 0, 1);
+        let vnt_peer = Ipv4Addr::new(10, 0, 0, 2);
+        let wireguard_peer = Ipv4Addr::new(10, 0, 0, 3);
+
+        collection.update_server(vec![(0, ProtocolAddress::default())]);
+        collection.set_server_connected(0, true);
+        collection.replace_client_list_from_rpc(
+            0,
+            self_ip,
+            vec![
+                ClientSimpleInfo {
+                    ip: vnt_peer,
+                    name: "vnt".to_string(),
+                    online: true,
+                    node_type: NodeType::Vnt,
+                },
+                ClientSimpleInfo {
+                    ip: wireguard_peer,
+                    name: "wireguard".to_string(),
+                    online: true,
+                    node_type: NodeType::Wireguard,
+                },
+            ],
+        );
+
+        assert_eq!(collection.client_online_ips(), vec![vnt_peer]);
+        assert_eq!(
+            collection
+                .server_client_ip_map()
+                .get(&0)
+                .map(|value| &value.0),
+            Some(&vec![vnt_peer])
+        );
+        assert!(!collection.is_wireguard_client(&vnt_peer));
+        assert!(collection.is_wireguard_client(&wireguard_peer));
+
+        collection.set_server_connected(0, false);
+        assert!(!collection.is_wireguard_client(&wireguard_peer));
     }
 }
 impl AppState {

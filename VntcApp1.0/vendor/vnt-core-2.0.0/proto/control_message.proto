@@ -7,6 +7,11 @@ enum RegistrationMode {
   PRE_REGISTER = 1;
 }
 
+enum NodeType {
+  VNT = 0;
+  WIREGUARD = 1;
+}
+
 message RegRequestMsg {
   string network_code = 1;
   string device_id = 2;
@@ -17,6 +22,9 @@ message RegRequestMsg {
   bool ip_variable = 7;
   fixed32 server_id = 8;
   RegistrationMode registration_mode = 9;
+  bool allow_wire_guard = 10;
+  bytes wireguard_p2p_public_key = 11;
+  uint32 wireguard_p2p_port = 12;
 }
 
 
@@ -61,6 +69,7 @@ message SelectiveBroadcast {
 message ClientSimpleInfo{
   fixed32 ip = 1;
   bool online = 2;
+  NodeType node_type = 3;
 }
 
 message ClientSimpleInfoList{
@@ -70,3 +79,44 @@ message ClientSimpleInfoList{
   int64 time = 4;
 }
 
+enum WireGuardP2pStatus {
+  WIREGUARD_P2P_OK = 0;
+  WIREGUARD_P2P_NOT_FOUND = 1;
+  WIREGUARD_P2P_NOT_CAPABLE = 2;
+  WIREGUARD_P2P_REJECTED = 3;
+  WIREGUARD_P2P_BUSY = 4;
+}
+
+message WireGuardP2pAgentRequest {
+  fixed32 target_ip = 1;
+  uint64 request_id = 2;
+}
+
+message WireGuardP2pAgentResponse {
+  uint64 request_id = 1;
+  WireGuardP2pStatus status = 2;
+  fixed32 target_ip = 3;
+  bytes target_public_key = 4;
+  string target_endpoint = 5;
+  uint64 lease_id = 6;
+  uint64 expires_at_unix_ms = 7;
+}
+
+message WireGuardP2pOffer {
+  uint64 lease_id = 1;
+  uint64 expires_at_unix_ms = 2;
+  fixed32 peer_ip = 3;
+  bytes peer_public_key = 4;
+  string peer_endpoint = 5;
+}
+
+message WireGuardP2pRevoke {
+  uint64 lease_id = 1;
+}
+
+message WireGuardP2pControl {
+  oneof payload {
+    WireGuardP2pOffer offer = 1;
+    WireGuardP2pRevoke revoke = 2;
+  }
+}

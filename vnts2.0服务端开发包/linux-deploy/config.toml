@@ -1,10 +1,13 @@
-tcp_bind = "0.0.0.0:2222"
-quic_bind = "0.0.0.0:2222"
-ws_bind = "0.0.0.0:2222"
+# VNTS 2.0 Linux 安全配置示例（兼容旧部署目录）。
+# 正式部署请运行 install.sh；安装器会从 config.example.toml 生成实际配置。
+
+tcp_bind = "0.0.0.0:29872"
+quic_bind = "0.0.0.0:29872"
+ws_bind = "0.0.0.0:29872"
 network = "10.26.0.0/24"
-white_list = ["game"]
+white_list = []
 lease_duration = 86400
 persistence = true
-server_quic_bind = "115.231.35.105:29873"
+wireguard_max_active_peers = 4096
 
 [custom_nets]

@@ -50,8 +50,8 @@ public class RemoteAssistControlledService extends Service {
     private Notification buildNotification() {
         return new NotificationCompat.Builder(this, CHANNEL_ID)
                 .setSmallIcon(R.drawable.ic_stat_icon)
-                .setContentTitle("远程协助服务运行中")
-                .setContentText("本机已准备接受来自 VNT 网络的远程协助请求")
+                .setContentTitle(getString(R.string.remote_assist_running_title))
+                .setContentText(getString(R.string.remote_assist_running_description))
                 .setOngoing(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
                 .build();
@@ -67,10 +67,10 @@ public class RemoteAssistControlledService extends Service {
         }
         NotificationChannel channel = new NotificationChannel(
                 CHANNEL_ID,
-                "VNT 远程协助",
+                getString(R.string.remote_assist_channel_name),
                 NotificationManager.IMPORTANCE_LOW
         );
-        channel.setDescription("用于保持 Android 远程协助受控服务存活");
+        channel.setDescription(getString(R.string.remote_assist_channel_description));
         manager.createNotificationChannel(channel);
     }
 }

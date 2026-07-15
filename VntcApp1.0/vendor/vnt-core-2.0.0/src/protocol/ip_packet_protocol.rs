@@ -105,9 +105,11 @@ pub enum MsgType {
     RpcReq = 14,
     RpcRes = 15,
 
+    RelayProbe = 16,
     Quic = 17,
-    RelayProbe = 18,
+    WireGuardRelay = 18,
     RelayProbeReply = 19,
+    WireGuardP2pControl = 20,
 }
 impl From<MsgType> for u8 {
     fn from(val: MsgType) -> Self {
@@ -142,7 +144,9 @@ impl TryFrom<u8> for MsgType {
 
             16 => MsgType::RelayProbe,
             17 => MsgType::Quic,
-            18 => MsgType::RelayProbeReply,
+            18 => MsgType::WireGuardRelay,
+            19 => MsgType::RelayProbeReply,
+            20 => MsgType::WireGuardP2pControl,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -302,5 +306,20 @@ impl NetPacket<TransmissionBytes> {
         NetPacket {
             buffer: self.buffer.into_bytes().freeze(),
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn wireguard_relay_and_probe_types_use_frozen_values() {
+        assert_eq!(u8::from(MsgType::RelayProbe), 16);
+        assert_eq!(u8::from(MsgType::WireGuardRelay), 18);
+        assert_eq!(u8::from(MsgType::RelayProbeReply), 19);
+        assert_eq!(MsgType::try_from(18).unwrap(), MsgType::WireGuardRelay);
+        assert_eq!(u8::from(MsgType::WireGuardP2pControl), 20);
+        assert_eq!(MsgType::try_from(20).unwrap(), MsgType::WireGuardP2pControl);
     }
 }

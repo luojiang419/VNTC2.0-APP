@@ -4,8 +4,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/app_version.dart';
 
 void main() {
-  const expectedVersion = '4.8.16';
-  const expectedBuildNumber = '40816';
+  const expectedVersion = '4.8.22';
+  const expectedBuildNumber = '40822';
 
   test('应用默认版本与 Flutter 包版本保持一致', () {
     final pubspec = File('pubspec.yaml').readAsStringSync();

@@ -54,10 +54,11 @@ impl EnhancedOutbound {
                 .ipv4_broadcast_outbound(net, data)
                 .await;
         }
-        if self
-            .enhanced_quic_outbound
-            .outbound(&net, data.as_ref())
-            .await
+        if !self.hybrid_outbound.is_wireguard_destination(&dest)
+            && self
+                .enhanced_quic_outbound
+                .outbound(&net, data.as_ref())
+                .await
         {
             // 使用quic 通道传输
             return Ok(());

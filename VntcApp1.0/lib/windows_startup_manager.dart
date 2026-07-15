@@ -1,5 +1,7 @@
 import 'dart:io';
 
+import 'package:vnt_app/app_version.dart';
+
 typedef StartupProcessRunner = Future<ProcessResult> Function(
   String executable,
   List<String> arguments,
@@ -11,7 +13,7 @@ class WindowsStartupManager {
 
   static const String registryPath =
       r'HKCU\Software\Microsoft\Windows\CurrentVersion\Run';
-  static const String registryValueName = 'VNT App 2.0';
+  static String get registryValueName => AppVersion.productName;
   static const String legacyTaskName = 'VNTAppStartup';
 
   final StartupProcessRunner _processRunner;

@@ -41,8 +41,10 @@ class _AboutPageState extends State<AboutPage> {
               SizedBox(height: context.spacingMedium),
 
               // 软件更新卡片
-              _buildUpdateCard(isDark),
-              SizedBox(height: context.spacingMedium),
+              if (AppVersion.updateEnabled) ...[
+                _buildUpdateCard(isDark),
+                SizedBox(height: context.spacingMedium),
+              ],
 
               // 基于开源项目卡片
               _buildOpenSourceCard(isDark),
@@ -168,7 +170,7 @@ class _AboutPageState extends State<AboutPage> {
 
           // 应用名称
           Text(
-            'VNT APP',
+            AppVersion.productName,
             style: TextStyle(
               fontSize: context.fontXLarge,
               fontWeight: FontWeight.bold,
@@ -180,7 +182,9 @@ class _AboutPageState extends State<AboutPage> {
 
           // 版本号 - 可点击检查更新
           InkWell(
-            onTap: () => showUpdateCheckDialog(context),
+            onTap: AppVersion.updateEnabled
+                ? () => showUpdateCheckDialog(context)
+                : null,
             borderRadius: BorderRadius.circular(context.cardRadius),
             child: Container(
               padding: EdgeInsets.symmetric(

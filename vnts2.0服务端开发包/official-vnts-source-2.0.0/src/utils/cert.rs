@@ -1,8 +1,8 @@
 use anyhow::{Context, anyhow};
 use rcgen::generate_simple_self_signed;
 use rustls::pki_types;
+use rustls::pki_types::pem::PemObject;
 use std::fs::File;
-use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 pub fn get_cert_and_key(
@@ -54,24 +54,16 @@ pub fn get_cert_and_key(
 
 fn load_certs(path: &Path) -> anyhow::Result<Vec<pki_types::CertificateDer<'static>>> {
     let file = File::open(path).context("无法打开证书文件")?;
-    let mut reader = BufReader::new(file);
-    rustls_pemfile::certs(&mut reader)
+    pki_types::CertificateDer::pem_reader_iter(file)
         .collect::<anyhow::Result<Vec<_>, _>>()
         .context("证书解析错误")
 }
 
 fn load_private_key(path: &Path) -> anyhow::Result<pki_types::PrivateKeyDer<'static>> {
     let file = File::open(path).context("无法打开私钥文件")?;
-    let mut reader = BufReader::new(file);
-
-    loop {
-        match rustls_pemfile::read_one(&mut reader).context("私钥解析错误")? {
-            Some(rustls_pemfile::Item::Pkcs1Key(key)) => return Ok(key.into()),
-            Some(rustls_pemfile::Item::Pkcs8Key(key)) => return Ok(key.into()),
-            Some(rustls_pemfile::Item::Sec1Key(key)) => return Ok(key.into()),
-            None => break,
-            _ => {}
-        }
+    match pki_types::PrivateKeyDer::from_pem_reader(file) {
+        Ok(key) => Ok(key),
+        Err(pki_types::pem::Error::NoItemsFound) => Err(anyhow!("未找到有效私钥")),
+        Err(error) => Err(error).context("私钥解析错误"),
     }
-    Err(anyhow::anyhow!("未找到有效私钥"))
 }

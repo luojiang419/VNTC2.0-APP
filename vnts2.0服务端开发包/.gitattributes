@@ -1,0 +1,5 @@
+linux-deploy/*.sh text eol=lf
+linux-deploy/tests/*.sh text eol=lf
+linux-deploy/*.service text eol=lf
+docker/*.sh text eol=lf
+docker/tests/*.sh text eol=lf

@@ -72,3 +72,11 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+# Android signing secrets must stay outside the repository.
+*.jks
+*.keystore
+*.p12
+*.pfx
+*.pkcs12
+**/android-official-signing/**

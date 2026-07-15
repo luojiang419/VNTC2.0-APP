@@ -1,0 +1,28 @@
+name: vnts2
+
+services:
+  server:
+    image: vnts2:2.0.0
+    container_name: vnts2
+    network_mode: host
+    restart: unless-stopped
+    read_only: true
+    user: "10001:10001"
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    volumes:
+      - vnts2-data:/data
+    healthcheck:
+      test: ["CMD", "curl", "--fail", "--silent", "--show-error", "http://127.0.0.1:29871/"]
+      interval: 10s
+      timeout: 3s
+      start_period: 10s
+      retries: 6
+
+volumes:
+  vnts2-data:
+    name: vnts2-data

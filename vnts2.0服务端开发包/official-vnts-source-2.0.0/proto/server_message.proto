@@ -19,6 +19,7 @@ message ServerMessage {
 message ServerForwardData {
   string network_code = 1; // 网络编号
   bytes data = 2;           // 原始数据包
+  bool source_is_wireguard = 3; // WireGuardRelay 的源节点类型；旧服务端默认 false
 }
 
 // 服务端认证请求

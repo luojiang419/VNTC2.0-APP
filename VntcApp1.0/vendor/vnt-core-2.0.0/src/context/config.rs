@@ -1,12 +1,15 @@
 use crate::crypto::PacketCrypto;
 use crate::nat::NetInput;
 use crate::port_mapping::PortMapping;
+use crate::protocol::control_message::WireGuardP2pRegistration;
 use crate::tls::verifier::CertValidationMode;
 use crate::tunnel_core::server::transport::config::{ConnectRegConfig, ProtocolAddress};
 use anyhow::bail;
 use ipnet::Ipv4Net;
 use std::collections::HashSet;
 use std::net::Ipv4Addr;
+
+pub const WIREGUARD_MAX_MTU: u16 = 1420;
 
 pub const MAX_NETWORK_CODE_LEN: usize = 32;
 pub const MAX_DEVICE_ID_LEN: usize = 64;
@@ -35,11 +38,19 @@ pub struct Config {
     pub mtu: Option<u16>,
     pub port_mapping: Vec<PortMapping>,
     pub allow_port_mapping: bool,
+    pub allow_wire_guard: bool,
+    pub wireguard_p2p: Option<WireGuardP2pRegistration>,
     pub udp_stun: Vec<String>,
     pub tcp_stun: Vec<String>,
     pub tunnel_port: Option<u16>,
 }
 impl Config {
+    pub(crate) fn clamp_wireguard_mtu(&mut self) {
+        if self.allow_wire_guard {
+            self.mtu = self.mtu.map(|mtu| mtu.min(WIREGUARD_MAX_MTU));
+        }
+    }
+
     pub fn check(&self) -> anyhow::Result<()> {
         if self.server_addr.is_empty() {
             bail!("服务器地址不能为空");
@@ -97,6 +108,33 @@ impl Config {
             ip: self.ip,
             key_sign: self.key_sign(),
             ip_variable: self.ip.is_none(),
+            allow_wire_guard: self.allow_wire_guard,
+            wireguard_p2p: self.wireguard_p2p,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn clamp_wireguard_mtu_preserves_smaller_and_ordinary_values() {
+        let mut config = Config {
+            allow_wire_guard: true,
+            mtu: Some(1500),
+            ..Default::default()
+        };
+        config.clamp_wireguard_mtu();
+        assert_eq!(config.mtu, Some(WIREGUARD_MAX_MTU));
+
+        config.mtu = Some(1380);
+        config.clamp_wireguard_mtu();
+        assert_eq!(config.mtu, Some(1380));
+
+        config.allow_wire_guard = false;
+        config.mtu = Some(1500);
+        config.clamp_wireguard_mtu();
+        assert_eq!(config.mtu, Some(1500));
     }
 }

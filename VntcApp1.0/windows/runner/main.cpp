@@ -4,6 +4,8 @@
 
 #include <algorithm>
 #include <array>
+#include <fstream>
+#include <iterator>
 #include <string>
 #include <vector>
 
@@ -27,6 +29,81 @@
 #endif
 
 namespace {
+
+std::wstring Utf8ToWide(const std::string& value) {
+  if (value.empty()) {
+    return {};
+  }
+  const int length = ::MultiByteToWideChar(
+      CP_UTF8, MB_ERR_INVALID_CHARS, value.data(), static_cast<int>(value.size()),
+      nullptr, 0);
+  if (length <= 0) {
+    return {};
+  }
+  std::wstring result(length, L'\0');
+  ::MultiByteToWideChar(CP_UTF8, MB_ERR_INVALID_CHARS, value.data(),
+                        static_cast<int>(value.size()), result.data(), length);
+  return result;
+}
+
+std::wstring ReadRuntimeWindowTitle() {
+  std::array<wchar_t, 32768> module_path{};
+  const DWORD path_length = ::GetModuleFileNameW(
+      nullptr, module_path.data(), static_cast<DWORD>(module_path.size()));
+  if (path_length == 0 || path_length >= module_path.size()) {
+    return VNT_APP_WINDOW_TITLE;
+  }
+
+  std::wstring branding_path(module_path.data(), path_length);
+  const auto separator = branding_path.find_last_of(L"\\/");
+  if (separator == std::wstring::npos) {
+    return VNT_APP_WINDOW_TITLE;
+  }
+  branding_path.resize(separator + 1);
+  branding_path.append(L"branding.json");
+
+  std::ifstream input(branding_path, std::ios::binary);
+  if (!input) {
+    return VNT_APP_WINDOW_TITLE;
+  }
+  const std::string json((std::istreambuf_iterator<char>(input)),
+                         std::istreambuf_iterator<char>());
+  const std::string key = "\"windowTitle\"";
+  const auto key_position = json.find(key);
+  if (key_position == std::string::npos) {
+    return VNT_APP_WINDOW_TITLE;
+  }
+  const auto colon = json.find(':', key_position + key.size());
+  const auto quote = colon == std::string::npos ? std::string::npos
+                                                 : json.find('"', colon + 1);
+  if (quote == std::string::npos) {
+    return VNT_APP_WINDOW_TITLE;
+  }
+
+  std::string utf8_title;
+  bool escaped = false;
+  for (size_t index = quote + 1; index < json.size(); ++index) {
+    const char current = json[index];
+    if (escaped) {
+      if (current == '"' || current == '\\' || current == '/') {
+        utf8_title.push_back(current);
+      }
+      escaped = false;
+      continue;
+    }
+    if (current == '\\') {
+      escaped = true;
+      continue;
+    }
+    if (current == '"') {
+      break;
+    }
+    utf8_title.push_back(current);
+  }
+
+  const auto title = Utf8ToWide(utf8_title);
+  return title.empty() ? VNT_APP_WINDOW_TITLE : title;
+}
 
 bool HasNonEmptyArgument(const std::vector<std::string>& arguments,
                          const std::string& prefix) {
@@ -79,8 +156,8 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   HANDLE single_instance_mutex = nullptr;
   if (!IsCompleteUpdateSession(command_line_arguments)) {
     ::SetLastError(ERROR_SUCCESS);
-    single_instance_mutex =
-        ::CreateMutexW(nullptr, TRUE, kVntSingleInstanceMutexName);
+    single_instance_mutex = ::CreateMutexW(
+        nullptr, TRUE, GetVntSingleInstanceMutexName().c_str());
     if (single_instance_mutex == nullptr) {
       return EXIT_FAILURE;
     }
@@ -104,7 +181,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
   FlutterWindow window(project, start_hidden);
   Win32Window::Point origin(10, 10);
   Win32Window::Size size(1280, 720);
-  if (!window.Create(VNT_APP_WINDOW_TITLE, origin, size)) {
+  if (!window.Create(ReadRuntimeWindowTitle(), origin, size)) {
     if (single_instance_mutex != nullptr) {
       ::ReleaseMutex(single_instance_mutex);
       ::CloseHandle(single_instance_mutex);

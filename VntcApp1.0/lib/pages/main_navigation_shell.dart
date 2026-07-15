@@ -4,6 +4,7 @@ import 'package:flutter/services.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
+import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_config_input_page.dart';
 import 'package:vnt_app/data_persistence.dart';
@@ -21,6 +22,7 @@ import 'package:vnt_app/utils/responsive_utils.dart';
 import 'dart:isolate';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/widgets/custom_title_bar.dart';
+import 'package:vnt_app/widgets/dashboard_config_panel.dart';
 import 'package:vnt_app/system_tray_manager.dart';
 import 'package:vnt_app/ios_vpn_service.dart';
 
@@ -42,10 +44,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   NetworkConfig? _selectedConfig;
   VoidCallback? _refreshConfigList;
   VoidCallback? _refreshSettings;
+  int _configRevision = 0;
 
   bool get _showChatPage => true;
   bool get _showRemoteAssistPage =>
       !Platform.isAndroid || RemoteAssistConstants.androidRemoteAssistEnabled;
+  bool get _showAboutPage => AppVersion.showAboutPage;
 
   List<_NavItem> get _navItems => [
         const _NavItem(
@@ -76,8 +80,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             icon: Icons.settings_outlined,
             activeIcon: Icons.settings,
             label: '设置'),
-        const _NavItem(
-            icon: Icons.info_outline, activeIcon: Icons.info, label: '关于'),
+        if (_showAboutPage)
+          const _NavItem(
+              icon: Icons.info_outline, activeIcon: Icons.info, label: '关于'),
       ];
 
   int get _configIndex {
@@ -167,21 +172,38 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final dataPersistence = DataPersistence();
     final defaultKey = await dataPersistence.loadDefaultKey();
     final configs = await dataPersistence.loadData();
-    final configIndex = configs.indexWhere(
-      (config) => config.itemKey == defaultKey,
-    );
+    final config =
+        configs.where((item) => item.itemKey == defaultKey).firstOrNull;
     if (!mounted) {
       return;
     }
-    if (configIndex < 0) {
+    if (config == null) {
       setState(() => _selectedIndex = _configIndex);
       showTopToast(context, '默认配置不存在，请在配置页面重新选择', isSuccess: false);
       return;
     }
-    final config = configs[configIndex];
+    await _editConfigFromDashboard(config);
+  }
+
+  Future<NetworkConfig?> _editConfigFromDashboard(
+    NetworkConfig config,
+  ) async {
     if (vntManager.hasConnectionItem(config.itemKey)) {
       showTopToast(context, '连接中的配置不能修改，请先断开连接', isSuccess: false);
-      return;
+      return null;
+    }
+
+    final dataPersistence = DataPersistence();
+    final configs = await dataPersistence.loadData();
+    final configIndex = configs.indexWhere(
+      (item) => item.itemKey == config.itemKey,
+    );
+    if (!mounted) {
+      return null;
+    }
+    if (configIndex < 0) {
+      showTopToast(context, '配置不存在，请刷新后重试', isSuccess: false);
+      return null;
     }
 
     final isDark = Theme.of(context).brightness == Brightness.dark;
@@ -208,44 +230,73 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       ),
     );
     if (result == null || !mounted) {
-      return;
+      return null;
     }
 
     configs[configIndex] = result;
     await dataPersistence.saveData(configs);
     if (!mounted) {
-      return;
+      return null;
     }
-    _refreshConfigList?.call();
-    _refreshSettings?.call();
+    _notifyConfigDataChanged();
     VntAppCall.updateWidgetAndTile(false);
     await SystemTrayManager().updateMenu();
     if (!mounted) {
-      return;
+      return null;
     }
     showTopToast(context, '配置“${result.configName}”已更新', isSuccess: true);
+    return result;
+  }
+
+  void _notifyConfigDataChanged() {
+    if (mounted) {
+      setState(() => _configRevision += 1);
+    }
+    _refreshConfigList?.call();
+    _refreshSettings?.call();
   }
 
   /// 直接连接到指定配置（不跳转页面）
-  Future<void> _connectToConfigDirectly(NetworkConfig config) async {
+  Future<DashboardConfigActionResult> _connectToConfigDirectly(
+    NetworkConfig config, {
+    bool showProgressDialog = true,
+    bool showImmediateResult = true,
+  }) async {
     if (vntManager.hasConnectionItem(config.itemKey)) {
-      if (mounted) {
+      if (mounted && showImmediateResult) {
         showTopToast(context, '[${config.configName}] 已连接', isSuccess: true);
       }
-      return;
+      return DashboardConfigActionResult.success(
+        '[${config.configName}] 已连接',
+      );
     }
 
-    if (vntManager.isConnecting()) {
-      if (mounted) {
-        showTopToast(context, '正在连接中，请稍后再试', isSuccess: false);
+    if (vntManager.isConnectingItem(config.itemKey)) {
+      final message = '[${config.configName}] 正在连接中';
+      if (mounted && showImmediateResult) {
+        showTopToast(context, message, isSuccess: false);
       }
-      return;
+      return DashboardConfigActionResult.failure(message);
+    }
+
+    final activeConfig =
+        Platform.isIOS ? _selectedConfig : vntManager.getOne()?.networkConfig;
+    if (!vntManager.supportMultiple() &&
+        activeConfig != null &&
+        activeConfig.itemKey != config.itemKey) {
+      final message = '移动端受系统单 VPN 通道限制，请先断开“${activeConfig.configName}”';
+      if (mounted && showImmediateResult) {
+        showTopToast(context, message, isSuccess: false);
+      }
+      return DashboardConfigActionResult.failure(message);
     }
 
     // iOS使用VPN连接
     if (Platform.isIOS) {
-      await _connectViaIOSVPN(config);
-      return;
+      return _connectViaIOSVPN(
+        config,
+        showImmediateResult: showImmediateResult,
+      );
     }
 
     // 其他平台使用Rust直接连接
@@ -268,7 +319,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       }
     }
 
-    if (mounted) {
+    if (mounted && showProgressDialog) {
       final isDark = Theme.of(context).brightness == Brightness.dark;
       final primaryColor = Theme.of(context).primaryColor;
       dialogOpen = true;
@@ -332,8 +383,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             setState(() {
               _selectedConfig = config;
             });
-            showTopToast(context, '[${config.configName}] 连接成功',
-                isSuccess: true);
+            if (showImmediateResult) {
+              showTopToast(context, '[${config.configName}] 连接成功',
+                  isSuccess: true);
+            }
             // 连接成功，更新磁贴和小组件状态
             if (Platform.isAndroid) {
               VntAppCall.updateWidgetAndTile(true);
@@ -411,12 +464,18 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       await vntManager.create(config, receivePort.sendPort);
     } catch (e) {
       debugPrint('dart catch e: $e');
-      if (!mounted) return;
-
-      closeDialog(); // 关闭连接中对话框
-      var msg = e.toString();
-      showTopToast(context, '连接失败 $msg', isSuccess: false);
+      final message = '[${config.configName}] 连接失败：$e';
+      if (mounted) {
+        closeDialog(); // 关闭连接中对话框
+        if (showImmediateResult) {
+          showTopToast(context, message, isSuccess: false);
+        }
+      }
+      return DashboardConfigActionResult.failure(message);
     }
+    return DashboardConfigActionResult.success(
+      '[${config.configName}] 已发起连接',
+    );
   }
 
   /// 处理连接错误
@@ -463,7 +522,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   }
 
   /// iOS VPN连接
-  Future<void> _connectViaIOSVPN(NetworkConfig config) async {
+  Future<DashboardConfigActionResult> _connectViaIOSVPN(
+    NetworkConfig config, {
+    bool showImmediateResult = true,
+  }) async {
     try {
       debugPrint('[iOS VPN] Starting VPN connection for: ${config.configName}');
 
@@ -482,30 +544,148 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
       if (success) {
         // iOS VPN连接成功，更新UI状态
-        setState(() {
-          _selectedConfig = config;
-        });
-
         if (mounted) {
+          setState(() {
+            _selectedConfig = config;
+          });
+        }
+
+        if (mounted && showImmediateResult) {
           showTopToast(context, '[${config.configName}] VPN连接成功',
               isSuccess: true);
         }
 
         debugPrint('[iOS VPN] Connection successful');
+        return DashboardConfigActionResult.success(
+          '[${config.configName}] VPN 连接成功',
+        );
       } else {
-        if (mounted) {
-          showTopToast(context, '[${config.configName}] VPN连接失败，请确认已添加VPN权限',
-              isSuccess: false);
+        final message = '[${config.configName}] VPN连接失败，请确认已添加VPN权限';
+        if (mounted && showImmediateResult) {
+          showTopToast(context, message, isSuccess: false);
         }
         debugPrint('[iOS VPN] Connection failed');
+        return DashboardConfigActionResult.failure(message);
       }
     } catch (e) {
       debugPrint('[iOS VPN] Connection error: $e');
-      if (mounted) {
-        showTopToast(context, '[${config.configName}] VPN连接异常: $e',
-            isSuccess: false);
+      final message = '[${config.configName}] VPN连接异常: $e';
+      if (mounted && showImmediateResult) {
+        showTopToast(context, message, isSuccess: false);
+      }
+      return DashboardConfigActionResult.failure(message);
+    }
+  }
+
+  Future<DashboardConfigActionResult> _disconnectDashboardConfig(
+    NetworkConfig config,
+  ) async {
+    try {
+      if (Platform.isIOS) {
+        final stopped = await IOSVPNService.stopVPN();
+        if (!stopped) {
+          return DashboardConfigActionResult.failure(
+            '[${config.configName}] VPN 断开失败',
+          );
+        }
+      } else {
+        await vntManager.remove(config.itemKey);
+      }
+      if (mounted && _selectedConfig?.itemKey == config.itemKey) {
+        setState(() => _selectedConfig = null);
+      }
+      await SystemTrayManager().updateMenu();
+      await SystemTrayManager().updateTooltip();
+      return DashboardConfigActionResult.success(
+        '[${config.configName}] 已断开',
+      );
+    } catch (error) {
+      return DashboardConfigActionResult.failure(
+        '[${config.configName}] 断开失败：$error',
+      );
+    }
+  }
+
+  Future<DashboardBatchConnectResult> _connectAllDashboardConfigs(
+    List<NetworkConfig> configs,
+  ) async {
+    final connectedCount = configs
+        .where((config) => vntManager.hasConnectionItem(config.itemKey))
+        .length;
+    final pending = configs
+        .where((config) => !vntManager.hasConnectionItem(config.itemKey))
+        .toList(growable: false);
+    if (pending.isEmpty) {
+      return DashboardBatchConnectResult(
+        requestedCount: configs.length,
+        startedCount: 0,
+        alreadyConnectedCount: connectedCount,
+      );
+    }
+
+    if (!vntManager.supportMultiple()) {
+      final activeConfig =
+          Platform.isIOS ? _selectedConfig : vntManager.getOne()?.networkConfig;
+      if (activeConfig != null) {
+        return DashboardBatchConnectResult(
+          requestedCount: configs.length,
+          startedCount: 0,
+          alreadyConnectedCount: connectedCount == 0 ? 1 : connectedCount,
+          platformLimited: true,
+        );
+      }
+
+      final defaultKey = await DataPersistence().loadDefaultKey();
+      final target =
+          pending.where((config) => config.itemKey == defaultKey).firstOrNull ??
+              pending.first;
+      final result = await _connectToConfigDirectly(
+        target,
+        showProgressDialog: false,
+        showImmediateResult: false,
+      );
+      return DashboardBatchConnectResult(
+        requestedCount: configs.length,
+        startedCount: result.isSuccess ? 1 : 0,
+        alreadyConnectedCount: connectedCount,
+        platformLimited: configs.length > 1,
+        failures: result.isSuccess
+            ? const {}
+            : <String, String>{target.configName: result.message},
+      );
+    }
+
+    final results = await Future.wait(
+      pending.map(
+        (config) async => MapEntry(
+          config,
+          await _connectToConfigDirectly(
+            config,
+            showProgressDialog: false,
+            showImmediateResult: false,
+          ),
+        ),
+      ),
+      eagerError: false,
+    );
+    final failures = <String, String>{};
+    var startedCount = 0;
+    for (final entry in results) {
+      if (entry.value.isSuccess) {
+        startedCount += 1;
+      } else {
+        failures[entry.key.configName] = entry.value.message;
       }
     }
+    if (mounted) {
+      setState(() {});
+    }
+    return DashboardBatchConnectResult(
+      requestedCount: configs.length,
+      startedCount: startedCount,
+      alreadyConnectedCount: connectedCount,
+      failures: failures,
+    );
   }
 
   @override
@@ -655,7 +835,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                   ),
                   SizedBox(height: logoSpacing),
                   Text(
-                    'VNT',
+                    AppVersion.productName,
                     style: TextStyle(
                       fontSize: logoFontSize,
                       fontWeight: FontWeight.bold,
@@ -938,12 +1118,28 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       children: [
         // 0: 仪表盘
         DashboardPage(
+          configRevision: _configRevision,
           onNavigateToConfig: () =>
               setState(() => _selectedIndex = _configIndex),
           onEditDefaultConfig: _editDefaultConfigFromDashboard,
+          onEditConfig: _editConfigFromDashboard,
+          onConnectConfig: (config) => _connectToConfigDirectly(
+            config,
+            showProgressDialog: false,
+            showImmediateResult: false,
+          ),
+          onDisconnectConfig: _disconnectDashboardConfig,
+          isConfigConnected: (config) => Platform.isIOS
+              ? _selectedConfig?.itemKey == config.itemKey
+              : vntManager.hasConnectionItem(config.itemKey),
+          onConnectAll: _connectAllDashboardConfigs,
+          onConfigsChanged: _notifyConfigDataChanged,
           onNavigateToSettings: () =>
               setState(() => _selectedIndex = _settingsIndex),
           onDisconnect: () async {
+            if (Platform.isIOS) {
+              await IOSVPNService.stopVPN();
+            }
             // 获取所有连接的key
             final keys = vntManager.map.keys.toList();
 
@@ -1013,6 +1209,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           },
           onDataChanged: () {
             // 当配置数据改变时，刷新设置页面
+            if (mounted) {
+              setState(() => _configRevision += 1);
+            }
             _refreshSettings?.call();
           },
         ),
@@ -1024,14 +1223,16 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           },
           onDataChanged: () {
             // 当设置页面的数据改变时，刷新配置列表
+            if (mounted) {
+              setState(() => _configRevision += 1);
+            }
             _refreshConfigList?.call();
           },
           onRefreshCallback: (callback) {
             _refreshSettings = callback;
           },
         ),
-        // 6: 关于
-        const AboutPage(),
+        if (_showAboutPage) const AboutPage(),
       ],
     );
   }
