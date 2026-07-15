@@ -13,6 +13,10 @@ String remoteAccessPasswordActionLabel(bool hasAccessPassword) {
 }
 
 @visibleForTesting
+const String remoteAssistConnectHintText =
+    '点击需要控制的设备，输入密码即可链接，或者不输入密码等待对方接受即可远程连接';
+
+@visibleForTesting
 class RemotePeerConnectRequest {
   const RemotePeerConnectRequest({
     required this.password,
@@ -275,6 +279,16 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                     ),
                   ),
                 ),
+                CheckboxListTile(
+                  contentPadding: EdgeInsets.zero,
+                  value: !obscurePassword,
+                  onChanged: (value) => setDialogState(
+                    () => obscurePassword = !(value ?? false),
+                  ),
+                  title: const Text('显示密码'),
+                  subtitle: const Text('忘记密码时可随时查看当前已保存内容'),
+                  controlAffinity: ListTileControlAffinity.leading,
+                ),
               ],
             ),
             actions: [
@@ -296,14 +310,17 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
         return;
       }
 
-      await _manager.configureAccessPassword(password);
+      final normalizedPassword = password.trim();
+      await _manager.configureAccessPassword(normalizedPassword);
       if (!mounted) {
         return;
       }
-      setState(() => _hasAccessPassword = password.trim().isNotEmpty);
+      setState(() => _hasAccessPassword = normalizedPassword.isNotEmpty);
       showTopToast(
         context,
-        password.isEmpty ? '已清空远程密码，后续需要本机手动接受协助' : '已设置远程密码，后续可通过密码无人值守协助',
+        normalizedPassword.isEmpty
+            ? '已清空远程密码，后续需要本机手动接受协助'
+            : '已设置远程密码，后续可通过密码无人值守协助',
         isSuccess: true,
       );
     } catch (error) {
@@ -366,6 +383,8 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 padding: EdgeInsets.all(context.spacingLarge),
                 children: [
                   _buildHeader(isDark),
+                  SizedBox(height: context.spacingMedium),
+                  _buildConnectHintBanner(isDark),
                   SizedBox(height: context.spacingLarge),
                   if (useAndroidLayout) ...[
                     _buildPeerList(isDark, health, peers),
@@ -451,6 +470,46 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           ),
         ),
       ],
+    );
+  }
+
+  Widget _buildConnectHintBanner(bool isDark) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final backgroundColor = primaryColor.withValues(
+      alpha: isDark ? 0.18 : 0.12,
+    );
+    return Container(
+      padding: EdgeInsets.all(context.cardPadding),
+      decoration: BoxDecoration(
+        color: backgroundColor,
+        borderRadius: BorderRadius.circular(context.cardRadius),
+        border: Border.all(
+          color: primaryColor.withValues(alpha: isDark ? 0.45 : 0.28),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Icon(
+            Icons.tips_and_updates_outlined,
+            color: primaryColor,
+            size: context.iconMedium,
+          ),
+          SizedBox(width: context.spacingSmall),
+          Expanded(
+            child: Text(
+              remoteAssistConnectHintText,
+              style: TextStyle(
+                fontSize: context.fontBody,
+                fontWeight: FontWeight.w700,
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 

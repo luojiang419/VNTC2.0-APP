@@ -38,6 +38,18 @@ void main() {
       expect(await store.load(peerKey), isEmpty);
     });
 
+    test('本机远程密码会持久化并支持清空', () async {
+      await store.saveAccessPassword('host-password');
+      expect(await store.loadAccessPassword(), 'host-password');
+
+      await store.saveAccessPassword('');
+      expect(await store.loadAccessPassword(), isEmpty);
+
+      await store.saveAccessPassword('host-password-2');
+      await store.deleteAccessPassword();
+      expect(await store.loadAccessPassword(), isEmpty);
+    });
+
     test('存储键不暴露网络名和虚拟 IP', () {
       const peerKey = 'private-network::10.26.0.8';
       final storageKey = RemoteAssistPasswordStore.storageKeyForPeer(peerKey);

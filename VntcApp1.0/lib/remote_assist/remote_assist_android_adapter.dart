@@ -32,6 +32,9 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
       ];
 
   @override
+  bool get supportsAccessPasswordRead => true;
+
+  @override
   Future<void> refreshState() async {
     await _runtime.refreshState();
   }

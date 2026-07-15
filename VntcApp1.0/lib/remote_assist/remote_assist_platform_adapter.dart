@@ -9,6 +9,8 @@ abstract class RemoteAssistPlatformAdapter {
 
   List<String> get presenceCapabilities;
 
+  bool get supportsAccessPasswordRead => false;
+
   Future<void> start() async {}
 
   Future<void> stop() async {}

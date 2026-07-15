@@ -39,6 +39,7 @@ class RemoteAssistPasswordStore {
   );
 
   static const String _keyPrefix = 'remote_assist_peer_password_v1_';
+  static const String _accessPasswordKey = 'remote_assist_access_password_v1';
 
   final RemoteAssistSecretStorage _storage;
 
@@ -57,6 +58,22 @@ class RemoteAssistPasswordStore {
 
   Future<void> delete(String peerKey) async {
     await _storage.delete(storageKeyForPeer(peerKey));
+  }
+
+  Future<String> loadAccessPassword() async {
+    return await _storage.read(_accessPasswordKey) ?? '';
+  }
+
+  Future<void> saveAccessPassword(String password) async {
+    if (password.isEmpty) {
+      await _storage.delete(_accessPasswordKey);
+      return;
+    }
+    await _storage.write(_accessPasswordKey, password);
+  }
+
+  Future<void> deleteAccessPassword() async {
+    await _storage.delete(_accessPasswordKey);
   }
 
   static String storageKeyForPeer(String peerKey) {

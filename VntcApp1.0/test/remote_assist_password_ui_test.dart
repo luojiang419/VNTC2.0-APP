@@ -7,6 +7,10 @@ void main() {
   test('远程协助密码按钮会区分设置与修改状态', () {
     expect(remoteAccessPasswordActionLabel(false), '设置访问密码');
     expect(remoteAccessPasswordActionLabel(true), '修改访问密码');
+    expect(
+      remoteAssistConnectHintText,
+      '点击需要控制的设备，输入密码即可链接，或者不输入密码等待对方接受即可远程连接',
+    );
   });
 
   test('连接请求保留密码和记住选择', () {
@@ -27,5 +31,7 @@ void main() {
     expect(source, isNot(contains('填入首个在线设备')));
     expect(source, contains('记住此设备密码'));
     expect(source, contains('删除已保存密码'));
+    expect(source, contains("title: const Text('显示密码')"));
+    expect(source, contains('remoteAssistConnectHintText'));
   });
 }

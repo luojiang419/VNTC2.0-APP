@@ -215,12 +215,23 @@ class RemoteAssistManager extends ChangeNotifier {
   }
 
   Future<void> configureAccessPassword(String password) async {
-    await _adapter.configureAccessPassword(password);
+    final normalizedPassword = password.trim();
+    await _adapter.configureAccessPassword(normalizedPassword);
+    await _passwordStore.saveAccessPassword(normalizedPassword);
     await refresh();
   }
 
-  Future<String> loadAccessPassword() {
-    return _adapter.loadAccessPassword();
+  Future<String> loadAccessPassword() async {
+    if (_adapter.supportsAccessPasswordRead) {
+      final runtimePassword = (await _adapter.loadAccessPassword()).trim();
+      if (runtimePassword.isEmpty) {
+        await _passwordStore.deleteAccessPassword();
+        return '';
+      }
+      await _passwordStore.saveAccessPassword(runtimePassword);
+      return runtimePassword;
+    }
+    return (await _passwordStore.loadAccessPassword()).trim();
   }
 
   Future<String> loadSavedPeerPassword(String peerKey) {
