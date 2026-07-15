@@ -100,6 +100,8 @@ tmp/
 # 日志
 *.log
 logs/
+!VntsConsole2.0/lib/features/logs/
+!VntsConsole2.0/lib/features/logs/**
 
 # ===== 嵌入式仓库（暂不作为 submodule） =====
 vnts2.0windows/

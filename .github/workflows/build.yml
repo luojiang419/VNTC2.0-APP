@@ -45,28 +45,54 @@ jobs:
       server_version: ${{ steps.versions.outputs.server_version }}
       release_version: ${{ steps.versions.outputs.release_version }}
       publish_release: ${{ steps.versions.outputs.publish_release }}
+      signing_mode: ${{ steps.versions.outputs.signing_mode }}
     steps:
       - uses: actions/checkout@v4
 
       - name: 计算版本
         id: versions
         shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_SIGNING_MODE: ${{ vars.VNT_RELEASE_SIGNING_MODE || 'compatible' }}
         run: |
           set -euo pipefail
 
           input_version="${{ github.event.inputs.release_version || '' }}"
           client_pubspec_version="$(grep '^version:' "${CLIENT_APP_DIR}/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
           server_cargo_version="$(grep '^version = ' "${SERVER_SOURCE_DIR}/Cargo.toml" | head -1 | cut -d '"' -f2)"
+          semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
+          signing_mode="${RELEASE_SIGNING_MODE,,}"
+          if [[ "${signing_mode}" != "compatible" && "${signing_mode}" != "official" ]]; then
+            echo "VNT_RELEASE_SIGNING_MODE 仅支持 compatible 或 official: ${RELEASE_SIGNING_MODE}" >&2
+            exit 1
+          fi
 
           if [[ "${GITHUB_REF}" == refs/tags/v* ]]; then
             release_version="${GITHUB_REF_NAME#v}"
           elif [[ -n "${input_version}" ]]; then
             release_version="${input_version}"
           elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            IFS='.' read -r version_major version_minor version_patch version_build <<< "${client_pubspec_version}"
-            version_minor="${version_minor:-0}"
-            version_patch="${version_patch:-0}"
-            release_version="${version_major}.${version_minor}.${version_patch}.${GITHUB_RUN_NUMBER}"
+            if ! [[ "${client_pubspec_version}" =~ ${semver_pattern} ]]; then
+              echo "客户端 pubspec 版本必须为三段式版本号: ${client_pubspec_version}" >&2
+              exit 1
+            fi
+
+            latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+            latest_release_version="${latest_tag#v}"
+
+            if [[ "${latest_release_version}" =~ ${semver_pattern} ]]; then
+              highest_version="$(printf '%s\n%s\n' "${client_pubspec_version}" "${latest_release_version}" | sort -V | tail -n 1)"
+              if [[ "${highest_version}" == "${latest_release_version}" ]]; then
+                IFS='.' read -r version_major version_minor version_patch <<< "${latest_release_version}"
+                version_patch=$((10#${version_patch} + 1))
+                release_version="${version_major}.${version_minor}.${version_patch}"
+              else
+                release_version="${client_pubspec_version}"
+              fi
+            else
+              release_version="${client_pubspec_version}"
+            fi
           else
             release_version=""
           fi
@@ -83,33 +109,43 @@ jobs:
 
           for version_name in client_version server_version; do
             version_value="${!version_name}"
-            if ! [[ "${version_value}" =~ ^[0-9]+(\.[0-9]+){1,3}$ ]]; then
-              echo "版本号格式不正确: ${version_value}" >&2
+            if ! [[ "${version_value}" =~ ${semver_pattern} ]]; then
+              echo "版本号必须为三段式版本号: ${version_value}" >&2
               exit 1
             fi
           done
 
-          IFS='.' read -r major minor patch build <<< "${client_version}"
-          minor="${minor:-0}"
-          patch="${patch:-0}"
-          build="${build:-0}"
-          client_build_number=$((10#$major * 1000000 + 10#$minor * 10000 + 10#$patch * 100 + 10#$build))
+          IFS='.' read -r major minor patch <<< "${client_version}"
+          build="${GITHUB_RUN_ATTEMPT:-1}"
+          if (( 10#${minor} > 99 || 10#${patch} > 99 || 10#${build} > 99 )); then
+            echo "版本号或运行重试次数超出 Android 构建号编码范围: ${client_version}+${build}" >&2
+            exit 1
+          fi
+          client_build_number=$((10#${major} * 1000000 + 10#${minor} * 10000 + 10#${patch} * 100 + 10#${build}))
+
+          echo "客户端版本: ${client_version}"
+          echo "客户端构建号: ${client_build_number}"
+          echo "服务端版本: ${server_version}"
+          echo "是否发布: ${publish_release}"
+          echo "签名策略: ${signing_mode}"
 
           echo "client_version=${client_version}" >> "${GITHUB_OUTPUT}"
           echo "client_build_number=${client_build_number}" >> "${GITHUB_OUTPUT}"
           echo "server_version=${server_version}" >> "${GITHUB_OUTPUT}"
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
+          echo "signing_mode=${signing_mode}" >> "${GITHUB_OUTPUT}"
 
   validate-release-signing:
-    name: 校验正式发布签名机密
+    name: 校验发布签名策略
     needs: meta
     runs-on: ubuntu-latest
     steps:
-      - name: 验证正式发布签名机密
+      - name: 验证发布签名策略与机密
         if: needs.meta.outputs.publish_release == 'true'
         shell: bash
         env:
+          VNT_RELEASE_SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
           VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 }}
           VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN }}
           VNT_WINDOWS_SIGN_PFX_BASE64: ${{ secrets.VNT_WINDOWS_SIGN_PFX_BASE64 }}
@@ -126,25 +162,39 @@ jobs:
           missing=()
           for name in \
             VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 \
-            VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN \
-            VNT_WINDOWS_SIGN_PFX_BASE64 \
-            VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN \
-            VNT_WINDOWS_SIGN_SUBJECT_CONTAINS \
-            VNT_MACOS_SIGN_P12_BASE64 \
-            VNT_MACOS_SIGN_P12_PASSWORD_PLAIN \
-            VNT_MACOS_SIGN_IDENTITY \
-            VNT_MACOS_NOTARY_APPLE_ID \
-            VNT_MACOS_NOTARY_TEAM_ID \
-            VNT_MACOS_NOTARY_APP_PASSWORD; do
+            VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN; do
             if [[ -z "${!name:-}" ]]; then
               missing+=("$name")
             fi
           done
 
+          if [[ "${VNT_RELEASE_SIGNING_MODE}" == "official" ]]; then
+            for name in \
+              VNT_WINDOWS_SIGN_PFX_BASE64 \
+              VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN \
+              VNT_WINDOWS_SIGN_SUBJECT_CONTAINS \
+              VNT_MACOS_SIGN_P12_BASE64 \
+              VNT_MACOS_SIGN_P12_PASSWORD_PLAIN \
+              VNT_MACOS_SIGN_IDENTITY \
+              VNT_MACOS_NOTARY_APPLE_ID \
+              VNT_MACOS_NOTARY_TEAM_ID \
+              VNT_MACOS_NOTARY_APP_PASSWORD; do
+              if [[ -z "${!name:-}" ]]; then
+                missing+=("$name")
+              fi
+            done
+          fi
+
           if (( ${#missing[@]} > 0 )); then
-            printf '缺少正式发布签名机密，已拒绝发布：\n' >&2
+            printf '签名策略 %s 缺少必要机密，已拒绝发布：\n' "${VNT_RELEASE_SIGNING_MODE}" >&2
             printf ' - %s\n' "${missing[@]}" >&2
             exit 1
+          fi
+
+          if [[ "${VNT_RELEASE_SIGNING_MODE}" == "compatible" ]]; then
+            echo "[OK] compatible：Android 固定正式证书，Windows 未签名，macOS app ad-hoc/DMG 未签名"
+          else
+            echo "[OK] official：Windows Authenticode + macOS Developer ID/notarization"
           fi
 
   build-client-windows:
@@ -173,6 +223,14 @@ jobs:
           rustup component add rust-src --toolchain "${RUST_VERSION}"
           rustc -V
 
+      - name: 恢复 Windows 远程协助运行时
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          & "$env:GITHUB_WORKSPACE/VntcApp1.0/scripts/restore_vntcrustdesk_artifact_from_release.ps1" `
+            -Repository "$env:GITHUB_REPOSITORY"
+
       - name: 判断是否已应用 Windows 7 引擎
         id: win7_engine
         shell: pwsh
@@ -200,34 +258,57 @@ jobs:
             Write-Host "未找到 Windows 7 引擎补丁包，跳过引擎替换: $archive"
           }
 
-      - name: 打补丁以启用 Dropdown Menu 过滤支持
-        if: steps.win7_engine.outputs.applied != 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          patch_file="${GITHUB_WORKSPACE}/VntcApp1.0/vntcrustdesk-src/.github/patches/flutter_3.24.4_dropdown_menu_enableFilter.diff"
-          if [ -f "$patch_file" ]; then
-            cp "$patch_file" "$(dirname "$(dirname "$(which flutter)")")"
-            cd "$(dirname "$(dirname "$(which flutter)")")"
-            git apply flutter_3.24.4_dropdown_menu_enableFilter.diff || true
-          else
-            echo "未找到 Dropdown Menu 补丁，跳过: $patch_file"
-          fi
-
       - name: 构建 Windows 安装版客户端
         shell: pwsh
         working-directory: VntcApp1.0
         env:
-          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.publish_release == 'true' && '1' || '0' }}
-          VNT_WINDOWS_SIGN_PFX_BASE64: ${{ secrets.VNT_WINDOWS_SIGN_PFX_BASE64 }}
-          VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN: ${{ secrets.VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN }}
-          VNT_WINDOWS_SIGN_SUBJECT_CONTAINS: ${{ secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS }}
-          VNT_WINDOWS_SIGN_TIMESTAMP_URL: ${{ secrets.VNT_WINDOWS_SIGN_TIMESTAMP_URL }}
-          APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER: ${{ secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS }}
+          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.signing_mode == 'official' && '1' || '0' }}
+          VNT_WINDOWS_SIGN_PFX_BASE64: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_PFX_BASE64 || '' }}
+          VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN || '' }}
+          VNT_WINDOWS_SIGN_SUBJECT_CONTAINS: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS || '' }}
+          VNT_WINDOWS_SIGN_TIMESTAMP_URL: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_TIMESTAMP_URL || '' }}
+          APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS || '' }}
         run: |
           .\scripts\export_installer_package.ps1 `
             -Version '${{ needs.meta.outputs.client_version }}' `
             -SkipVersionAdvance
+
+      - name: 校验 Windows 客户端签名结果
+        shell: pwsh
+        env:
+          VNT_RELEASE_SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
+          VNT_WINDOWS_SIGN_SUBJECT_CONTAINS: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS || '' }}
+        run: |
+          $version = '${{ needs.meta.outputs.client_version }}'
+          $setupPath = Join-Path $Env:GITHUB_WORKSPACE "VntcApp1.0/release/installer/VNT_App_${version}_Windows_Setup.exe"
+          if (-not (Test-Path -LiteralPath $setupPath -PathType Leaf)) {
+            throw "Windows installer missing before signature verification: $setupPath"
+          }
+
+          $signature = Get-AuthenticodeSignature -LiteralPath $setupPath
+          $status = [string]$signature.Status
+          $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+          if ($Env:VNT_RELEASE_SIGNING_MODE -eq 'official') {
+            if ($status -ne 'Valid') {
+              throw "Official Windows Authenticode status is not Valid: $status"
+            }
+            if ([string]::IsNullOrWhiteSpace($Env:VNT_WINDOWS_SIGN_SUBJECT_CONTAINS) -or
+                $subject -notlike "*$($Env:VNT_WINDOWS_SIGN_SUBJECT_CONTAINS)*") {
+              throw "Official Windows signer subject mismatch: $subject"
+            }
+          } elseif ($status -ne 'NotSigned') {
+            throw "Compatible mode requires the established NotSigned Windows baseline, got: $status"
+          }
+
+          $reportPath = Join-Path (Split-Path -Parent $setupPath) "VNT_App_${version}_Windows_Setup.signature.json"
+          [ordered]@{
+            platform = 'windows'
+            signingMode = $Env:VNT_RELEASE_SIGNING_MODE
+            authenticodeStatus = $status
+            signerSubject = $subject
+            sha256 = (Get-FileHash -LiteralPath $setupPath -Algorithm SHA256).Hash.ToLowerInvariant()
+          } | ConvertTo-Json | Set-Content -LiteralPath $reportPath -Encoding UTF8
+          Write-Host "[OK] Windows signature policy: $status"
 
       - name: 上传 Windows 客户端产物
         uses: actions/upload-artifact@v4
@@ -236,6 +317,9 @@ jobs:
           path: |
             VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.exe
             VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.sha256
+            VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.signature.json
+            VntcApp1.0/third_party/vntcrustdesk/windows/dist/vntcrustdesk.msi
+            VntcApp1.0/third_party/vntcrustdesk/windows/vntcrustdesk.msi.sha256
           if-no-files-found: error
 
   build-client-macos:
@@ -304,15 +388,16 @@ jobs:
         shell: bash
         working-directory: VntcApp1.0
         env:
-          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.publish_release == 'true' && '1' || '0' }}
-          VNT_MACOS_SIGN_P12_BASE64: ${{ secrets.VNT_MACOS_SIGN_P12_BASE64 }}
-          VNT_MACOS_SIGN_P12_PASSWORD_PLAIN: ${{ secrets.VNT_MACOS_SIGN_P12_PASSWORD_PLAIN }}
-          VNT_MACOS_SIGN_IDENTITY: ${{ secrets.VNT_MACOS_SIGN_IDENTITY }}
-          VNT_MACOS_NOTARY_APPLE_ID: ${{ secrets.VNT_MACOS_NOTARY_APPLE_ID }}
-          VNT_MACOS_NOTARY_TEAM_ID: ${{ secrets.VNT_MACOS_NOTARY_TEAM_ID }}
-          VNT_MACOS_NOTARY_APP_PASSWORD: ${{ secrets.VNT_MACOS_NOTARY_APP_PASSWORD }}
+          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.signing_mode == 'official' && '1' || '0' }}
+          VNT_MACOS_SIGN_P12_BASE64: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_SIGN_P12_BASE64 || '' }}
+          VNT_MACOS_SIGN_P12_PASSWORD_PLAIN: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_SIGN_P12_PASSWORD_PLAIN || '' }}
+          VNT_MACOS_SIGN_IDENTITY: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_SIGN_IDENTITY || '' }}
+          VNT_MACOS_NOTARY_APPLE_ID: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_NOTARY_APPLE_ID || '' }}
+          VNT_MACOS_NOTARY_TEAM_ID: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_NOTARY_TEAM_ID || '' }}
+          VNT_MACOS_NOTARY_APP_PASSWORD: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_NOTARY_APP_PASSWORD || '' }}
         run: |
           set -euo pipefail
+          flutter config --no-enable-swift-package-manager
           flutter pub get
 
           python3 - <<'PY'
@@ -340,6 +425,64 @@ jobs:
             --version "${{ needs.meta.outputs.client_version }}" \
             --build-number "${{ needs.meta.outputs.client_build_number }}"
 
+      - name: 校验 macOS 客户端签名结果
+        shell: bash
+        working-directory: VntcApp1.0
+        env:
+          VNT_RELEASE_SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
+          VNT_MACOS_SIGN_IDENTITY: ${{ needs.meta.outputs.signing_mode == 'official' && secrets.VNT_MACOS_SIGN_IDENTITY || '' }}
+        run: |
+          set -euo pipefail
+          version="${{ needs.meta.outputs.client_version }}"
+          app_path="dist/vnt_app.app"
+          dmg_path="dist/VNT_App_${version}_macOS.dmg"
+          report_path="dist/VNT_App_${version}_macOS.signature.json"
+
+          test -d "$app_path"
+          test -f "$dmg_path"
+          codesign --verify --deep --strict --verbose=2 "$app_path"
+          app_details="$(codesign -dv --verbose=4 "$app_path" 2>&1)"
+
+          if [[ "${VNT_RELEASE_SIGNING_MODE}" == "official" ]]; then
+            codesign --verify --strict --verbose=2 "$dmg_path"
+            xcrun stapler validate "$dmg_path"
+            if [[ -z "${VNT_MACOS_SIGN_IDENTITY}" ]] || ! grep -F "Authority=${VNT_MACOS_SIGN_IDENTITY}" <<< "$app_details" >/dev/null; then
+              echo "macOS Developer ID signing identity mismatch" >&2
+              exit 1
+            fi
+            signature_kind="developer-id-notarized"
+          else
+            if ! grep -E '^Signature=(adhoc|adhoc\s*)$' <<< "$app_details" >/dev/null; then
+              echo "Compatible mode requires the established ad-hoc app signature" >&2
+              printf '%s\n' "$app_details" >&2
+              exit 1
+            fi
+            if codesign --verify "$dmg_path" >/dev/null 2>&1; then
+              echo "Compatible mode requires the established unsigned DMG baseline" >&2
+              exit 1
+            fi
+            signature_kind="ad-hoc-app-unsigned-dmg"
+          fi
+
+          export VNT_MACOS_SIGNATURE_KIND="$signature_kind"
+          export VNT_MACOS_DMG_SHA256="$(shasum -a 256 "$dmg_path" | awk '{print $1}')"
+          python3 - "$report_path" <<'PY'
+          import json
+          import os
+          import sys
+
+          report = {
+              "platform": "macos",
+              "signingMode": os.environ["VNT_RELEASE_SIGNING_MODE"],
+              "signatureKind": os.environ["VNT_MACOS_SIGNATURE_KIND"],
+              "signerIdentity": os.environ.get("VNT_MACOS_SIGN_IDENTITY", ""),
+              "sha256": os.environ["VNT_MACOS_DMG_SHA256"],
+          }
+          with open(sys.argv[1], "w", encoding="utf-8") as handle:
+              json.dump(report, handle, ensure_ascii=False, indent=2)
+          PY
+          echo "[OK] macOS signature policy: $signature_kind"
+
       - name: 上传 macOS 客户端产物
         uses: actions/upload-artifact@v4
         with:
@@ -347,6 +490,7 @@ jobs:
           path: |
             VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg
             VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg.sha256
+            VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.signature.json
           if-no-files-found: error
 
   build-client-android:
@@ -444,6 +588,37 @@ jobs:
           $hash = (Get-FileHash -LiteralPath $targetApk -Algorithm SHA256).Hash.ToLowerInvariant()
           Set-Content -LiteralPath "$targetApk.sha256" -Value "$hash  $targetName" -Encoding Ascii
 
+          $apksigner = Join-Path $Env:ANDROID_HOME "build-tools\$($Env:CLIENT_ANDROID_BUILD_TOOLS_VERSION)\apksigner.bat"
+          if (-not (Test-Path -LiteralPath $apksigner -PathType Leaf)) {
+            throw "apksigner missing: $apksigner"
+          }
+          $signatureOutput = @(& $apksigner verify --verbose --print-certs $targetApk 2>&1)
+          if ($LASTEXITCODE -ne 0) {
+            throw "Android APK signature verification failed: $($signatureOutput -join [Environment]::NewLine)"
+          }
+          $certificateMatches = [regex]::Matches(
+            ($signatureOutput | Out-String),
+            'Signer #\d+ certificate SHA-256 digest:\s*([0-9A-Fa-f:]{64,95})'
+          )
+          if ($certificateMatches.Count -ne 1) {
+            throw "Android APK must contain exactly one recognized signer, got $($certificateMatches.Count)"
+          }
+          $actualCertificate = $certificateMatches[0].Groups[1].Value.Replace(':', '').ToUpperInvariant()
+          $trustPath = Join-Path (Get-Location) 'config\android_official_signing_trust.json'
+          $expectedCertificate = [string]((Get-Content -LiteralPath $trustPath -Raw -Encoding UTF8 | ConvertFrom-Json).certificateSha256)
+          if ($actualCertificate -cne $expectedCertificate) {
+            throw "Android official certificate mismatch. Expected $expectedCertificate, got $actualCertificate"
+          }
+
+          $reportPath = Join-Path $artifactDir 'VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.signature.json'
+          [ordered]@{
+            platform = 'android'
+            signingMode = 'official-fixed-certificate'
+            certificateSha256 = $actualCertificate
+            sha256 = $hash
+          } | ConvertTo-Json | Set-Content -LiteralPath $reportPath -Encoding UTF8
+          Write-Host "[OK] Android official certificate: $actualCertificate"
+
       - name: 上传 Android 客户端产物
         uses: actions/upload-artifact@v4
         with:
@@ -451,6 +626,7 @@ jobs:
           path: |
             artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.apk
             artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.apk.sha256
+            artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.signature.json
           if-no-files-found: error
 
   build-server-windows-light:
@@ -626,6 +802,7 @@ jobs:
 
           repo = os.environ["GITHUB_REPOSITORY"]
           version = os.environ["RELEASE_VERSION"]
+          signing_mode = os.environ["SIGNING_MODE"]
           tag = f"v{version}"
 
           def platform_for(name: str) -> str:
@@ -663,6 +840,7 @@ jobs:
           manifest = {
               "version": version,
               "tag": tag,
+              "signing_mode": signing_mode,
               "published_at": datetime.now(timezone.utc).isoformat(),
               "release_url": f"https://github.com/{repo}/releases/tag/{tag}",
               "assets": assets,
@@ -672,6 +850,7 @@ jobs:
           PY
         env:
           RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+          SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
 
       - name: 发布 Release
         uses: softprops/action-gh-release@v2
@@ -681,6 +860,8 @@ jobs:
           name: VNT Suite v${{ needs.meta.outputs.release_version }}
           body: |
             自动构建发布：
+
+            签名策略：`${{ needs.meta.outputs.signing_mode }}`。每个平台的签名状态与 SHA-256 见同名 `.signature.json` 和 `.sha256` 文件。
 
             - Windows 客户端安装版
             - macOS 客户端
