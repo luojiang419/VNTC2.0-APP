@@ -574,11 +574,7 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
             network_code: vnt_config.token.trim().to_string(),
             device_id,
             device_name: vnt_config.name.trim().to_string(),
-            tun_name: vnt_config
-                .device_name
-                .as_ref()
-                .map(|value| value.trim().to_string())
-                .filter(|value| !value.is_empty()),
+            tun_name: normalize_requested_tun_name(vnt_config.device_name.as_deref()),
             ip,
             password: vnt_config
                 .password
@@ -604,6 +600,39 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
         },
         connect_targets,
     ))
+}
+
+const MACOS_UTUN_NAME_MAX_LEN: usize = 16;
+
+fn normalize_requested_tun_name(raw: Option<&str>) -> Option<String> {
+    normalize_requested_tun_name_with_macos_policy(raw, cfg!(target_os = "macos"))
+}
+
+fn normalize_requested_tun_name_with_macos_policy(
+    raw: Option<&str>,
+    enforce_macos_rules: bool,
+) -> Option<String> {
+    let trimmed = raw?.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    if enforce_macos_rules {
+        if is_valid_macos_utun_name(trimmed) {
+            Some(trimmed.to_string())
+        } else {
+            None
+        }
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
+fn is_valid_macos_utun_name(value: &str) -> bool {
+    value.len() <= MACOS_UTUN_NAME_MAX_LEN
+        && value.starts_with("utun")
+        && value.len() > 4
+        && value[4..].chars().all(|character| character.is_ascii_digit())
 }
 
 fn normalize_requested_mtu(mtu: Option<u32>, allow_wire_guard: bool) -> Option<u16> {
@@ -1181,7 +1210,10 @@ impl From<NatInfo> for RustNatInfo {
 
 #[cfg(test)]
 mod tests {
-    use super::{normalize_requested_mtu, p2p_diagnostic_state};
+    use super::{
+        normalize_requested_mtu, normalize_requested_tun_name_with_macos_policy,
+        p2p_diagnostic_state,
+    };
     use vnt_core::context::config::WIREGUARD_MAX_MTU;
 
     #[test]
@@ -1220,6 +1252,39 @@ mod tests {
         assert_eq!(
             p2p_diagnostic_state(true, true, 2, 1),
             ("p2p_ready", "direct_route_available")
+        );
+    }
+
+    #[test]
+    fn windows_keeps_requested_tun_name_for_followup_processing() {
+        assert_eq!(
+            normalize_requested_tun_name_with_macos_policy(
+                Some("cfg-0123456789abcdef"),
+                false
+            ),
+            Some("cfg-0123456789abcdef".to_string())
+        );
+    }
+
+    #[test]
+    fn macos_drops_cross_platform_auto_tun_name_and_keeps_valid_utun() {
+        assert_eq!(
+            normalize_requested_tun_name_with_macos_policy(
+                Some("cfg-0123456789abcdef"),
+                true
+            ),
+            None
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_macos_policy(Some("utun12"), true),
+            Some("utun12".to_string())
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_macos_policy(
+                Some("utun-name"),
+                true
+            ),
+            None
         );
     }
 }
