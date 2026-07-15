@@ -219,10 +219,9 @@ try {
     if ($manifest.brandReady -ne $true -or $manifest.platform -cne 'android') {
         throw 'APK 不是 Android 品牌母版'
     }
-    if ($manifest.versionName -cne $version -or
-        $manifest.brandId -cne 'official' -or
+    if ($manifest.brandId -cne 'official' -or
         $manifest.applicationId -cne 'top.wherewego.vnt_app') {
-        throw "APK 品牌母版身份/版本不匹配，期望 official $version"
+        throw 'APK 品牌母版身份不匹配，期望 official / top.wherewego.vnt_app'
     }
 } finally {
     $archive.Dispose()

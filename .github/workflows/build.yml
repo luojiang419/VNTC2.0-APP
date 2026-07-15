@@ -63,7 +63,10 @@ jobs:
           elif [[ -n "${input_version}" ]]; then
             release_version="${input_version}"
           elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
-            release_version="${client_pubspec_version}"
+            IFS='.' read -r version_major version_minor version_patch version_build <<< "${client_pubspec_version}"
+            version_minor="${version_minor:-0}"
+            version_patch="${version_patch:-0}"
+            release_version="${version_major}.${version_minor}.${version_patch}.${GITHUB_RUN_NUMBER}"
           else
             release_version=""
           fi
