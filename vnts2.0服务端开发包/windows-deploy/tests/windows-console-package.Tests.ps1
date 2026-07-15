@@ -70,6 +70,37 @@ try {
     Assert-Contract (Test-Path -LiteralPath (Join-Path $distributionRoot "initialize-vnts2-console.ps1") -PathType Leaf) "ZIP 解压后缺少零安装初始化脚本。"
     Assert-Contract (Test-Path -LiteralPath (Join-Path $distributionRoot "tray_manager_plugin.dll") -PathType Leaf) "ZIP 解压后缺少托盘运行库。"
 
+    $flutterReleaseWithoutLegacyManifest = Join-Path $temporaryRoot "flutter-release-without-legacy-manifest"
+    Copy-Item -LiteralPath $flutterRelease -Destination $flutterReleaseWithoutLegacyManifest -Recurse
+    $legacyManifest = Join-Path $flutterReleaseWithoutLegacyManifest "native_assets.json"
+    if (Test-Path -LiteralPath $legacyManifest -PathType Leaf) {
+        Remove-Item -LiteralPath $legacyManifest -Force
+    }
+    $withoutLegacyManifest = & $buildScript `
+        -SourceExecutable $serverRelease `
+        -ConsoleProjectRoot $consoleRoot `
+        -FlutterReleaseDirectory $flutterReleaseWithoutLegacyManifest `
+        -OutputDirectory $temporaryRoot `
+        -Version "${version}-no-legacy-manifest" `
+        -SkipFlutterBuild
+    Assert-Contract (Test-Path -LiteralPath $withoutLegacyManifest.ZipPath -PathType Leaf) "缺少旧版 native_assets.json 时未能生成增强包。"
+    Assert-Contract (-not (Test-Path -LiteralPath (Join-Path $withoutLegacyManifest.StagingDirectory "native_assets.json"))) "新版 Flutter 负载不应虚构旧版 native_assets.json。"
+
+    Set-Content -LiteralPath (Join-Path $flutterReleaseWithoutLegacyManifest "unreviewed-runtime.dll") -Value "contract" -Encoding ASCII
+    $unknownFileRejected = $false
+    try {
+        & $buildScript `
+            -SourceExecutable $serverRelease `
+            -ConsoleProjectRoot $consoleRoot `
+            -FlutterReleaseDirectory $flutterReleaseWithoutLegacyManifest `
+            -OutputDirectory $temporaryRoot `
+            -Version "${version}-unknown-file" `
+            -SkipFlutterBuild | Out-Null
+    } catch {
+        $unknownFileRejected = $true
+    }
+    Assert-Contract $unknownFileRejected "未审核的 Flutter 负载文件未被严格白名单拒绝。"
+
     "windows-console-package.Tests.ps1 PASS"
 } finally {
     if (Test-Path -LiteralPath $temporaryRoot -PathType Container) {

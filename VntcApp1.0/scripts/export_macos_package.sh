@@ -2,7 +2,7 @@
 set -euo pipefail
 
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-DEVELOPER_DIR="${DEVELOPER_DIR:-/Applications/Xcode-16.2.0.app/Contents/Developer}"
+DEVELOPER_DIR="${DEVELOPER_DIR:-$(xcode-select -p)}"
 RUNTIME_DIST_APP="$PROJECT_DIR/third_party/vntcrustdesk/macos/dist/VNTC RustDesk.app"
 MAIN_BUILD_APP="$PROJECT_DIR/build/macos/Build/Products/Release/vnt_app.app"
 DIST_DIR="$PROJECT_DIR/dist"

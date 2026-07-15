@@ -119,14 +119,13 @@ function Assert-Vnts2OutputChild {
     }
 }
 
-$flutterFiles = @(
+$requiredFlutterFiles = @(
     "VNTS2-Console.exe",
     "flutter_windows.dll",
     "file_selector_windows_plugin.dll",
     "screen_retriever_windows_plugin.dll",
     "tray_manager_plugin.dll",
     "window_manager_plugin.dll",
-    "native_assets.json",
     "data\app.so",
     "data\icudtl.dat",
     "data\flutter_assets\AssetManifest.bin",
@@ -138,12 +137,21 @@ $flutterFiles = @(
     "data\flutter_assets\shaders\ink_sparkle.frag",
     "data\flutter_assets\shaders\stretch_effect.frag"
 )
-foreach ($relativePath in $flutterFiles) {
+$optionalFlutterFiles = @(
+    "native_assets.json"
+)
+foreach ($relativePath in $requiredFlutterFiles) {
     $sourcePath = Join-Path $resolvedFlutterRelease $relativePath
     if (-not (Test-Path -LiteralPath $sourcePath -PathType Leaf)) {
         throw "Flutter Release 负载不完整：$relativePath"
     }
 }
+$flutterFiles = @(
+    $requiredFlutterFiles
+    $optionalFlutterFiles | Where-Object {
+        Test-Path -LiteralPath (Join-Path $resolvedFlutterRelease $_) -PathType Leaf
+    }
+)
 $actualFlutterFiles = @(Get-ChildItem -LiteralPath $resolvedFlutterRelease -Recurse -File | ForEach-Object {
     Get-Vnts2RelativePath -Root $resolvedFlutterRelease -Path $_.FullName
 } | Sort-Object)
