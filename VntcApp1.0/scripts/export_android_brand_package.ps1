@@ -1,14 +1,19 @@
 param(
     [string]$InputApk = '',
-    [string]$OutputDirectory = ''
+    [string]$OutputDirectory = '',
+    [string]$Version = ''
 )
 
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 $scriptRoot = $PSScriptRoot
 $projectRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
-$version = (Get-Content -LiteralPath (Join-Path $scriptRoot 'build_version.txt') `
-    -Raw).Trim()
+$versionUtils = Join-Path $scriptRoot 'build_version_utils.ps1'
+. $versionUtils
+$resolvedBuildVersion = Resolve-VntBuildVersion `
+    -Version $Version `
+    -VersionFile (Join-Path $scriptRoot 'build_version.txt')
+$version = $resolvedBuildVersion.Version
 
 . (Join-Path $scriptRoot 'android_official_signing.ps1') -Action Library
 

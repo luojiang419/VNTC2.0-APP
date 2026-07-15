@@ -16,6 +16,10 @@ $script:SigningApplicationId = 'top.wherewego.vnt_app'
 $script:SigningEntropy = [System.Text.Encoding]::UTF8.GetBytes(
     'VNTBrandRepackager.AndroidOfficialSigning.v1'
 )
+$script:CiKeystoreBase64EnvironmentVariable =
+    'VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64'
+$script:CiKeystorePasswordEnvironmentVariable =
+    'VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN'
 $script:SigningEnvironmentVariable = 'VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD'
 $script:SigningRoot = Join-Path $env:LOCALAPPDATA `
     'VNTBrandRepackager\android-official-signing\v1'
@@ -199,6 +203,13 @@ function Protect-OfficialSigningPassword {
 function Get-AndroidOfficialSigningPassword {
     param([Parameter(Mandatory = $true)]$Profile)
 
+    $plainPasswordProperty = $Profile.PSObject.Properties['plainPassword']
+    if ($null -ne $plainPasswordProperty -and
+        $plainPasswordProperty.Value -is [string] -and
+        -not [string]::IsNullOrWhiteSpace([string]$plainPasswordProperty.Value)) {
+        return [string]$plainPasswordProperty.Value
+    }
+
     $protectedBase64 = Get-RequiredJsonString `
         -Value $Profile -Name 'passwordProtectedBase64'
     try {
@@ -346,8 +357,77 @@ function Test-OfficialSigningProfile {
     }
 }
 
+function Get-AndroidOfficialSigningIdentityFromEnvironment {
+    param([switch]$AllowPendingTrust)
+
+    $keystoreBase64 = [System.Environment]::GetEnvironmentVariable(
+        $script:CiKeystoreBase64EnvironmentVariable,
+        [System.EnvironmentVariableTarget]::Process
+    )
+    $plainPassword = [System.Environment]::GetEnvironmentVariable(
+        $script:CiKeystorePasswordEnvironmentVariable,
+        [System.EnvironmentVariableTarget]::Process
+    )
+
+    if ([string]::IsNullOrWhiteSpace($keystoreBase64) -and
+        [string]::IsNullOrWhiteSpace($plainPassword)) {
+        return $null
+    }
+    if ([string]::IsNullOrWhiteSpace($keystoreBase64) -or
+        [string]::IsNullOrWhiteSpace($plainPassword)) {
+        throw "CI 官方签名环境变量必须同时提供：$($script:CiKeystoreBase64EnvironmentVariable) / $($script:CiKeystorePasswordEnvironmentVariable)"
+    }
+
+    try {
+        $keystoreBytes = [Convert]::FromBase64String($keystoreBase64)
+    } catch {
+        throw "CI 官方 Android keystore 不是有效 Base64：$($_.Exception.Message)"
+    }
+    if ($keystoreBytes.Length -le 0) {
+        throw 'CI 官方 Android keystore Base64 解码后为空'
+    }
+
+    New-Item -ItemType Directory -Force -Path $script:SigningRoot | Out-Null
+    $keystorePath = Join-Path $script:SigningRoot '.ci-official-release-v1.p12'
+    try {
+        [System.IO.File]::WriteAllBytes($keystorePath, $keystoreBytes)
+    } finally {
+        [Array]::Clear($keystoreBytes, 0, $keystoreBytes.Length)
+    }
+
+    $keystoreHash = (
+        Get-FileHash -LiteralPath $keystorePath -Algorithm SHA256
+    ).Hash
+    $certificateHash = Get-OfficialCertificateSha256 `
+        -KeystorePath $keystorePath -Password $plainPassword
+
+    $trust = Read-OfficialSigningTrust -AllowPending:$AllowPendingTrust
+    $trustedHash = Get-RequiredJsonString $trust 'certificateSha256'
+    if ($trustedHash -cne 'PENDING_BOOTSTRAP' -and
+        $trustedHash -cne $certificateHash) {
+        throw 'CI 官方 Android 证书与仓库公开信任指纹不匹配'
+    }
+
+    return [pscustomobject]@{
+        KeystorePath = $keystorePath
+        Profile = [pscustomobject]@{
+            plainPassword = $plainPassword
+        }
+        KeyId = $script:SigningKeyId
+        Alias = $script:SigningAlias
+        CertificateSha256 = $certificateHash
+        KeystoreSha256 = $keystoreHash
+    }
+}
+
 function Get-AndroidOfficialSigningIdentity {
     param([switch]$AllowPendingTrust)
+
+    $environmentIdentity = Get-AndroidOfficialSigningIdentityFromEnvironment `
+        -AllowPendingTrust:$AllowPendingTrust
+    if ($null -ne $environmentIdentity) {
+        return $environmentIdentity
+    }
 
     $hasKeystore = Test-Path -LiteralPath $script:SigningKeystorePath -PathType Leaf
     $hasProfile = Test-Path -LiteralPath $script:SigningProfilePath -PathType Leaf

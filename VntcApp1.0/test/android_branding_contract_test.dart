@@ -119,6 +119,11 @@ void main() {
     expect(signing, contains('RandomNumberGenerator'));
     expect(signing, contains('New-Object byte[] 48'));
     expect(signing, contains('DataProtectionScope]::CurrentUser'));
+    expect(signing, contains('VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64'));
+    expect(
+      signing,
+      contains('VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN'),
+    );
     expect(signing, contains('RSA'));
     expect(signing, contains("'-keysize', '3072'"));
     expect(exporter, contains("'build-tools\\36.0.0'"));

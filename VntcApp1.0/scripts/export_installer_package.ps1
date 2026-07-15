@@ -1,3 +1,8 @@
+param(
+    [string]$Version = '',
+    [switch]$SkipVersionAdvance
+)
+
 $ErrorActionPreference = 'Stop'
 
 $projectDir = Resolve-Path (Join-Path $PSScriptRoot '..')
@@ -165,14 +170,17 @@ $innoCompiler = Ensure-InnoSetup
 Require-Path -Path $innoCompiler -Label 'Inno Setup compiler'
 . $versionUtils
 
-$currentBuildVersion = Get-VntBuildVersion -VersionFile $versionFile
+$currentBuildVersionInfo = Resolve-VntBuildVersion `
+    -Version $Version `
+    -VersionFile $versionFile
+$currentBuildVersion = $currentBuildVersionInfo.Version
 $portablePackageDir = Join-Path $portableRoot "VNT_App_${currentBuildVersion}_Windows_Portable"
 $setupPath = Join-Path $installerRoot "VNT_App_${currentBuildVersion}_Windows_Setup.exe"
 $shaPath = Join-Path $installerRoot "VNT_App_${currentBuildVersion}_Windows_Setup.sha256"
 $issPath = Join-Path $stageDir "VNT_App_${currentBuildVersion}_Windows_Setup.iss"
 $env:VNT_BUILD_VERSION = $currentBuildVersion
 
-& $portableScript -SkipVersionAdvance
+& $portableScript -Version $currentBuildVersion -SkipVersionAdvance
 if (-not $?) {
     throw "Portable export failed: $LASTEXITCODE"
 }
@@ -367,8 +375,10 @@ Require-Path -Path $setupPath -Label 'Installer exe'
 $setupHash = Get-FileSha256 -Path $setupPath
 Set-Content -LiteralPath $shaPath -Value "$setupHash *VNT_App_${currentBuildVersion}_Windows_Setup.exe" -Encoding ASCII
 
-$nextBuildVersion = Get-NextVntBuildVersion -CurrentVersion $currentBuildVersion
-Set-Content -LiteralPath $versionFile -Value $nextBuildVersion -Encoding ASCII
+if (-not $SkipVersionAdvance -and $currentBuildVersionInfo.Source -eq 'file') {
+    $nextBuildVersion = Get-NextVntBuildVersion -CurrentVersion $currentBuildVersion
+    Set-Content -LiteralPath $versionFile -Value $nextBuildVersion -Encoding ASCII
+}
 
 Write-Host "[OK] Installer exe: $setupPath"
 Write-Host "[OK] Installer SHA256 file: $shaPath"

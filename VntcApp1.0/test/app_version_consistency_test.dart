@@ -24,7 +24,11 @@ void main() {
       'scripts/export_macos_package.sh',
     ).readAsStringSync();
 
-    expect(packageScript, contains('VNT_App_${expectedVersion}_macOS.dmg'));
+    expect(packageScript, contains('PACKAGE_VERSION'));
+    expect(
+      packageScript,
+      contains(r'VNT_App_${PACKAGE_VERSION}_macOS.dmg'),
+    );
     expect(packageScript, isNot(contains('VNT_App_2.0.0_macOS.dmg')));
   });
 }

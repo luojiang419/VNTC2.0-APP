@@ -1,11 +1,13 @@
 use anyhow::{Context, ensure};
+use fs2::FileExt;
 use futures::TryStreamExt;
 use ipnet::Ipv4Net;
 use once_cell::sync::OnceCell;
 use serde::{Deserialize, Serialize};
 use sqlx_core::{query::query, row::Row};
 use sqlx_sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
-use std::fs::{File, OpenOptions, TryLockError};
+use std::fs::{File, OpenOptions};
+use std::io::ErrorKind;
 use std::net::Ipv4Addr;
 use std::path::Path;
 
@@ -234,13 +236,14 @@ fn acquire_database_process_lock(path: &Path) -> anyhow::Result<File> {
         .write(true)
         .open(path)
         .with_context(|| format!("Failed to open database process lock: {}", path.display()))?;
-    match file.try_lock() {
+    match file.try_lock_exclusive() {
         Ok(()) => Ok(file),
-        Err(TryLockError::WouldBlock) => anyhow::bail!(
+        Err(error) if error.kind() == ErrorKind::WouldBlock => anyhow::bail!(
             "Database is already in use by another VNTS process; stop the service before rotation"
         ),
-        Err(TryLockError::Error(error)) => Err(error)
-            .with_context(|| format!("Failed to lock database process file: {}", path.display())),
+        Err(error) => {
+            Err(error).with_context(|| format!("Failed to lock database process file: {}", path.display()))
+        }
     }
 }
 

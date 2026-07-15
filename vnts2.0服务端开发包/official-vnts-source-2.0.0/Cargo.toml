@@ -46,6 +46,7 @@ prost = "0.14"
 prost-types = "0.14"
 tokio-tungstenite = "0.28.0"
 tungstenite = "0.28.0"
+fs2 = "0.4"
 
 axum = "0.8.8"
 tower = "0.5"

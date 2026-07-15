@@ -1,4 +1,5 @@
 param(
+    [string]$Version = '',
     [switch]$SkipVersionAdvance
 )
 
@@ -131,7 +132,10 @@ Require-Path -Path $bootstrapScriptSource -Label 'vntcrustdesk bootstrap script'
 Require-Path -Path $uninstallScriptSource -Label 'vntcrustdesk uninstall script'
 . $versionUtils
 
-$currentBuildVersion = Get-VntBuildVersion -VersionFile $versionFile
+$currentBuildVersionInfo = Resolve-VntBuildVersion `
+    -Version $Version `
+    -VersionFile $versionFile
+$currentBuildVersion = $currentBuildVersionInfo.Version
 $packageDir = Join-Path $portableRoot "VNT_App_${currentBuildVersion}_Windows_Portable"
 $zipPath = Join-Path $portableRoot "VNT_App_${currentBuildVersion}_Windows_Portable.zip"
 $shaPath = Join-Path $portableRoot "VNT_App_${currentBuildVersion}_Windows_SHA256.txt"
@@ -200,7 +204,7 @@ Compress-Archive -LiteralPath $packageDir -DestinationPath $zipPath -Compression
 $zipHash = Get-FileSha256 -Path $zipPath
 Set-Content -LiteralPath $shaPath -Value "$zipHash *VNT_App_${currentBuildVersion}_Windows_Portable.zip" -Encoding ASCII
 
-if (-not $SkipVersionAdvance) {
+if (-not $SkipVersionAdvance -and $currentBuildVersionInfo.Source -eq 'file') {
     $nextBuildVersion = Get-NextVntBuildVersion -CurrentVersion $currentBuildVersion
     Set-Content -LiteralPath $versionFile -Value $nextBuildVersion -Encoding ASCII
 }

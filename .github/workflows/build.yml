@@ -30,6 +30,9 @@ env:
   SERVER_LINUX_DEPLOY_DIR: vnts2.0服务端开发包/linux-deploy
   CLIENT_FLUTTER_VERSION: 3.44.2
   CONSOLE_FLUTTER_VERSION: 3.44.2
+  CLIENT_JAVA_VERSION: 17
+  CLIENT_ANDROID_BUILD_TOOLS_VERSION: 36.0.0
+  CLIENT_ANDROID_NDK_VERSION: 28.2.13676358
   RUST_VERSION: 1.88.0
 
 jobs:
@@ -59,6 +62,8 @@ jobs:
             release_version="${GITHUB_REF_NAME#v}"
           elif [[ -n "${input_version}" ]]; then
             release_version="${input_version}"
+          elif [[ "${GITHUB_EVENT_NAME}" == "push" ]]; then
+            release_version="${client_pubspec_version}"
           else
             release_version=""
           fi
@@ -94,7 +99,7 @@ jobs:
           echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
 
   build-client-windows:
-    name: Windows 客户端
+    name: Windows 客户端安装版
     needs: meta
     runs-on: windows-latest
     steps:
@@ -158,39 +163,21 @@ jobs:
             echo "未找到 Dropdown Menu 补丁，跳过: $patch_file"
           fi
 
-      - name: 构建 Windows 客户端
+      - name: 构建 Windows 安装版客户端
         shell: pwsh
         working-directory: VntcApp1.0
         run: |
-          flutter pub get
-          flutter build windows --release -v `
-            --build-name "${{ needs.meta.outputs.client_version }}" `
-            --build-number "${{ needs.meta.outputs.client_build_number }}" `
-            "--dart-define=APP_BASE_TITLE=VNTC APP2.0" `
-            "--dart-define=APP_BUILD_VERSION=${{ needs.meta.outputs.client_version }}" `
-            "--dart-define=APP_DISPLAY_VERSION=v${{ needs.meta.outputs.client_version }}" `
-            "--dart-define=APP_PRODUCT_NAME=VNTC APP2.0" `
-            "--dart-define=APP_WINDOW_TITLE=VNTC APP2.0 v${{ needs.meta.outputs.client_version }}"
-
-          $artifactDir = Join-Path $Env:GITHUB_WORKSPACE 'artifacts'
-          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
-
-          $releaseDir = Join-Path (Get-Location) 'build\windows\x64\runner\Release'
-          $zipName = "vntapp-client-${{ needs.meta.outputs.client_version }}-windows-x64.zip"
-          $zipPath = Join-Path $artifactDir $zipName
-          if (Test-Path $zipPath) {
-            Remove-Item -LiteralPath $zipPath -Force
-          }
-
-          Compress-Archive -Path (Join-Path $releaseDir '*') -DestinationPath $zipPath -Force
-          $hash = (Get-FileHash -LiteralPath $zipPath -Algorithm SHA256).Hash.ToLowerInvariant()
-          Set-Content -LiteralPath "$zipPath.sha256" -Value "$hash  $zipName" -Encoding Ascii
+          .\scripts\export_installer_package.ps1 `
+            -Version '${{ needs.meta.outputs.client_version }}' `
+            -SkipVersionAdvance
 
       - name: 上传 Windows 客户端产物
         uses: actions/upload-artifact@v4
         with:
           name: client-windows
-          path: artifacts/*
+          path: |
+            VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.exe
+            VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.sha256
           if-no-files-found: error
 
   build-client-macos:
@@ -299,7 +286,7 @@ jobs:
           bash macos/create_dmg.sh "$APP_PATH" "$DMG_PATH"
 
           mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          final_name="vntapp-client-${{ needs.meta.outputs.client_version }}-macos.dmg"
+          final_name="VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg"
           cp "$DMG_PATH" "$GITHUB_WORKSPACE/artifacts/$final_name"
           shasum -a 256 "$GITHUB_WORKSPACE/artifacts/$final_name" | awk '{print $1 "  '"$final_name"'"}' > "$GITHUB_WORKSPACE/artifacts/$final_name.sha256"
 
@@ -308,6 +295,107 @@ jobs:
         with:
           name: client-macos
           path: artifacts/*
+          if-no-files-found: error
+
+  build-client-android:
+    name: Android 客户端
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ env.CLIENT_JAVA_VERSION }}
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: 安装 Android 构建组件
+        shell: pwsh
+        run: |
+          sdkmanager --install `
+            "platform-tools" `
+            "build-tools;${Env:CLIENT_ANDROID_BUILD_TOOLS_VERSION}" `
+            "ndk;${Env:CLIENT_ANDROID_NDK_VERSION}"
+
+      - name: 设置 Flutter
+        uses: subosito/flutter-action@v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
+
+      - name: 设置 Rust
+        shell: pwsh
+        run: |
+          rustup set auto-self-update disable
+          rustup toolchain install "${Env:RUST_VERSION}"
+          rustup default "${Env:RUST_VERSION}"
+          rustup target add aarch64-linux-android
+          rustc -V
+
+      - name: 验证 Android 正式签名机密
+        shell: pwsh
+        run: |
+          if ([string]::IsNullOrWhiteSpace('${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 }}')) {
+            throw '缺少 GitHub Secret: VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64'
+          }
+          if ([string]::IsNullOrWhiteSpace('${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN }}')) {
+            throw '缺少 GitHub Secret: VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN'
+          }
+
+      - name: 构建未签名 Android APK
+        shell: pwsh
+        working-directory: VntcApp1.0
+        run: |
+          flutter pub get
+          flutter build apk --release `
+            --target-platform android-arm64 `
+            --build-name "${{ needs.meta.outputs.client_version }}" `
+            --build-number "${{ needs.meta.outputs.client_build_number }}" `
+            "--dart-define=APP_BASE_TITLE=VNTC APP2.0" `
+            "--dart-define=APP_BUILD_VERSION=${{ needs.meta.outputs.client_version }}" `
+            "--dart-define=APP_DISPLAY_VERSION=v${{ needs.meta.outputs.client_version }}" `
+            "--dart-define=APP_PRODUCT_NAME=VNTC APP2.0" `
+            "--dart-define=APP_WINDOW_TITLE=VNTC APP2.0 v${{ needs.meta.outputs.client_version }}"
+
+      - name: 导出正式 Android 客户端
+        shell: pwsh
+        working-directory: VntcApp1.0
+        env:
+          VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 }}
+          VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN }}
+        run: |
+          .\scripts\export_android_brand_package.ps1 `
+            -Version '${{ needs.meta.outputs.client_version }}'
+
+      - name: 整理 Android 客户端发布文件
+        shell: pwsh
+        working-directory: VntcApp1.0
+        run: |
+          $artifactDir = Join-Path $Env:GITHUB_WORKSPACE 'artifacts'
+          New-Item -ItemType Directory -Force -Path $artifactDir | Out-Null
+
+          $sourceApk = Join-Path (Get-Location) 'release\android\VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64_Brand_Master.apk'
+          $targetName = 'VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.apk'
+          $targetApk = Join-Path $artifactDir $targetName
+
+          Copy-Item -LiteralPath $sourceApk -Destination $targetApk -Force
+
+          $hash = (Get-FileHash -LiteralPath $targetApk -Algorithm SHA256).Hash.ToLowerInvariant()
+          Set-Content -LiteralPath "$targetApk.sha256" -Value "$hash  $targetName" -Encoding Ascii
+
+      - name: 上传 Android 客户端产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-android
+          path: |
+            artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.apk
+            artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.apk.sha256
           if-no-files-found: error
 
   build-server-windows-light:
@@ -328,7 +416,14 @@ jobs:
       - name: 构建服务端二进制
         shell: pwsh
         run: |
-          cargo build --manifest-path '.\vnts2.0服务端开发包\official-vnts-source-2.0.0\Cargo.toml' --release --locked
+          $targetDir = Join-Path $Env:RUNNER_TEMP 'vnts2-windows-light-target'
+          "SERVER_WINDOWS_TARGET_DIR=$targetDir" >> $Env:GITHUB_ENV
+          cargo build `
+            --manifest-path '.\vnts2.0服务端开发包\official-vnts-source-2.0.0\Cargo.toml' `
+            --release `
+            --locked
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}\vnts2-windows-light-target
 
       - name: 构建轻量原生管理器
         shell: pwsh
@@ -339,6 +434,7 @@ jobs:
         shell: pwsh
         run: |
           & '.\vnts2.0服务端开发包\windows-deploy\build-vnts2-windows-package.ps1' `
+            -SourceExecutable (Join-Path $Env:SERVER_WINDOWS_TARGET_DIR 'release\vnts2.exe') `
             -Version '${{ needs.meta.outputs.server_version }}'
 
       - name: 上传轻量版服务端产物
@@ -374,12 +470,20 @@ jobs:
       - name: 构建服务端二进制
         shell: pwsh
         run: |
-          cargo build --manifest-path '.\vnts2.0服务端开发包\official-vnts-source-2.0.0\Cargo.toml' --release --locked
+          $targetDir = Join-Path $Env:RUNNER_TEMP 'vnts2-windows-console-target'
+          "SERVER_WINDOWS_TARGET_DIR=$targetDir" >> $Env:GITHUB_ENV
+          cargo build `
+            --manifest-path '.\vnts2.0服务端开发包\official-vnts-source-2.0.0\Cargo.toml' `
+            --release `
+            --locked
+        env:
+          CARGO_TARGET_DIR: ${{ runner.temp }}\vnts2-windows-console-target
 
       - name: 生成增强版发布包
         shell: pwsh
         run: |
           & '.\vnts2.0服务端开发包\windows-deploy\build-vnts2-console-package.ps1' `
+            -SourceExecutable (Join-Path $Env:SERVER_WINDOWS_TARGET_DIR 'release\vnts2.exe') `
             -Version '${{ needs.meta.outputs.server_version }}' `
             -FlutterExecutable 'flutter'
 
@@ -431,6 +535,7 @@ jobs:
       - meta
       - build-client-windows
       - build-client-macos
+      - build-client-android
       - build-server-windows-light
       - build-server-windows-console
       - build-server-linux
@@ -464,10 +569,14 @@ jobs:
 
           def platform_for(name: str) -> str:
               lower = name.lower()
+              if lower.endswith(".apk"):
+                  return "android"
               if lower.endswith(".dmg"):
                   return "macos"
               if lower.endswith(".tar.gz"):
                   return "linux"
+              if lower.endswith(".exe") or lower.endswith(".msi"):
+                  return "windows"
               if lower.endswith(".zip"):
                   return "windows"
               return "unknown"
@@ -507,12 +616,14 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.meta.outputs.release_version }}
+          target_commitish: ${{ github.sha }}
           name: VNT Suite v${{ needs.meta.outputs.release_version }}
           body: |
             自动构建发布：
 
-            - Windows 客户端
+            - Windows 客户端安装版
             - macOS 客户端
+            - Android 客户端
             - Windows 服务端轻量版
             - Windows 服务端增强版
             - Linux 服务端

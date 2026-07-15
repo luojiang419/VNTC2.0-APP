@@ -2,7 +2,7 @@
 setlocal
 
 set "PROJECT_DIR=%~dp0.."
-set "FLUTTER_BIN=D:\APPdata\flutter\bin\flutter.bat"
+set "FLUTTER_BIN=%FLUTTER_BIN%"
 set "RUST_BIN=%USERPROFILE%\.cargo\bin"
 set "VERSION_FILE=%PROJECT_DIR%\scripts\build_version.txt"
 set "RELEASE_DIR=%PROJECT_DIR%\build\windows\x64\runner\Release"
@@ -10,8 +10,15 @@ set "DIST_DIR=%PROJECT_DIR%\dist"
 set "OUTPUT_DIR=%PROJECT_DIR%\output"
 set "LAUNCHER_EXE=%PROJECT_DIR%\windows_launcher\vnt_app.exe"
 
-if not exist "%FLUTTER_BIN%" (
-  echo [ERROR] Flutter not found: %FLUTTER_BIN%
+if "%FLUTTER_BIN%"=="" if exist "D:\APPdata\flutter\bin\flutter.bat" set "FLUTTER_BIN=D:\APPdata\flutter\bin\flutter.bat"
+if "%FLUTTER_BIN%"=="" (
+  for /f "delims=" %%I in ('where flutter.bat 2^>nul') do if not defined FLUTTER_BIN set "FLUTTER_BIN=%%~fI"
+)
+if "%FLUTTER_BIN%"=="" (
+  for /f "delims=" %%I in ('where flutter 2^>nul') do if not defined FLUTTER_BIN set "FLUTTER_BIN=%%~fI"
+)
+if "%FLUTTER_BIN%"=="" (
+  echo [ERROR] Flutter not found in FLUTTER_BIN, D:\APPdata\flutter\bin, or PATH
   exit /b 1
 )
 

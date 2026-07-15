@@ -11,23 +11,70 @@ REMOTE_ASSIST_RESOURCE_DIR="$DIST_APP/Contents/Resources/remote_assist"
 COCOAPODS_VERSION="${COCOAPODS_VERSION:-1.15.2}"
 CREATE_DMG=0
 REBUILD_RUNTIME=0
+VERSION_FILE="$PROJECT_DIR/scripts/build_version.txt"
+VERSION_OVERRIDE=""
+BUILD_NUMBER_OVERRIDE=""
 
-for arg in "$@"; do
-  case "$arg" in
+while [ "$#" -gt 0 ]; do
+  case "$1" in
     --dmg)
       CREATE_DMG=1
       ;;
     --rebuild-runtime)
       REBUILD_RUNTIME=1
       ;;
+    --version)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --version" >&2
+        exit 1
+      fi
+      VERSION_OVERRIDE="$1"
+      ;;
+    --version=*)
+      VERSION_OVERRIDE="${1#*=}"
+      ;;
+    --build-number)
+      shift
+      if [ "$#" -eq 0 ]; then
+        echo "Missing value for --build-number" >&2
+        exit 1
+      fi
+      BUILD_NUMBER_OVERRIDE="$1"
+      ;;
+    --build-number=*)
+      BUILD_NUMBER_OVERRIDE="${1#*=}"
+      ;;
     *)
-      echo "Unknown argument: $arg" >&2
+      echo "Unknown argument: $1" >&2
       exit 1
       ;;
   esac
+  shift
 done
 
 export DEVELOPER_DIR
+
+if [ -n "$VERSION_OVERRIDE" ]; then
+  PACKAGE_VERSION="$VERSION_OVERRIDE"
+elif [ -n "${VNT_BUILD_VERSION:-}" ]; then
+  PACKAGE_VERSION="$VNT_BUILD_VERSION"
+else
+  PACKAGE_VERSION="$(tr -d '\r\n' < "$VERSION_FILE")"
+fi
+
+if [ -z "$PACKAGE_VERSION" ]; then
+  echo "Build version is empty" >&2
+  exit 1
+fi
+
+if [ -n "$BUILD_NUMBER_OVERRIDE" ]; then
+  PACKAGE_BUILD_NUMBER="$BUILD_NUMBER_OVERRIDE"
+elif [ -n "${VNT_BUILD_NUMBER:-}" ]; then
+  PACKAGE_BUILD_NUMBER="$VNT_BUILD_NUMBER"
+else
+  PACKAGE_BUILD_NUMBER=""
+fi
 
 configure_macos_build_env() {
   if [ "$(uname -m)" = "x86_64" ]; then
@@ -79,7 +126,22 @@ if [ ! -d "$RUNTIME_DIST_APP" ]; then
 fi
 
 cd "$PROJECT_DIR"
-flutter build macos --release
+flutter pub get
+build_args=(
+  build
+  macos
+  --release
+  --build-name "$PACKAGE_VERSION"
+  "--dart-define=APP_BASE_TITLE=VNTC APP2.0"
+  "--dart-define=APP_BUILD_VERSION=$PACKAGE_VERSION"
+  "--dart-define=APP_DISPLAY_VERSION=v$PACKAGE_VERSION"
+  "--dart-define=APP_PRODUCT_NAME=VNTC APP2.0"
+  "--dart-define=APP_WINDOW_TITLE=VNTC APP2.0 v$PACKAGE_VERSION"
+)
+if [ -n "$PACKAGE_BUILD_NUMBER" ]; then
+  build_args+=(--build-number "$PACKAGE_BUILD_NUMBER")
+fi
+flutter "${build_args[@]}"
 
 if [ ! -d "$MAIN_BUILD_APP" ]; then
   echo "main macOS app missing after build: $MAIN_BUILD_APP" >&2
@@ -129,7 +191,8 @@ codesign --force --deep --sign - "$DIST_APP"
 codesign --verify --deep --strict --verbose=2 "$DIST_APP"
 
 if [ "$CREATE_DMG" -eq 1 ]; then
-  DMG_PATH="$DIST_DIR/VNT_App_4.8.22_macOS.dmg"
+  DMG_PATH="$DIST_DIR/VNT_App_${PACKAGE_VERSION}_macOS.dmg"
+  DMG_SHA_PATH="$DMG_PATH.sha256"
   DMG_STAGE="$(mktemp -d "${TMPDIR:-/tmp}/vnt_macos_dmg.XXXXXX")"
   trap 'rm -rf "$DMG_STAGE"' EXIT
   ditto "$DIST_APP" "$DMG_STAGE/vnt_app.app"
@@ -140,7 +203,10 @@ if [ "$CREATE_DMG" -eq 1 ]; then
   rm -f "$DMG_PATH"
   hdiutil create -volname "VNT App" -fs HFS+ -srcfolder "$DMG_STAGE" -format UDBZ "$DMG_PATH"
   hdiutil verify "$DMG_PATH"
+  DMG_HASH="$(shasum -a 256 "$DMG_PATH" | awk '{print $1}')"
+  printf '%s  %s\n' "$DMG_HASH" "$(basename "$DMG_PATH")" > "$DMG_SHA_PATH"
   echo "[OK] DMG: $DMG_PATH"
+  echo "[OK] DMG SHA256: $DMG_SHA_PATH"
 fi
 
 echo "[OK] dist app: $DIST_APP"

@@ -7,6 +7,37 @@ function Get-VntBuildVersion {
     }
     return $version
 }
+
+function Resolve-VntBuildVersion {
+    param(
+        [string]$Version,
+        [Parameter(Mandatory = $true)][string]$VersionFile,
+        [string]$EnvironmentVariableName = 'VNT_BUILD_VERSION'
+    )
+
+    if (-not [string]::IsNullOrWhiteSpace($Version)) {
+        return [pscustomobject]@{
+            Version = $Version.Trim()
+            Source = 'parameter'
+        }
+    }
+
+    $environmentVersion = [System.Environment]::GetEnvironmentVariable(
+        $EnvironmentVariableName
+    )
+    if (-not [string]::IsNullOrWhiteSpace($environmentVersion)) {
+        return [pscustomobject]@{
+            Version = $environmentVersion.Trim()
+            Source = 'environment'
+        }
+    }
+
+    return [pscustomobject]@{
+        Version = Get-VntBuildVersion -VersionFile $VersionFile
+        Source = 'file'
+    }
+}
+
 function Get-NextVntBuildVersion {
     param([Parameter(Mandatory = $true)][string]$CurrentVersion)
 
