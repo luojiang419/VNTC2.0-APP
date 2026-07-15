@@ -840,6 +840,9 @@ class AppUpdateService {
     required bool sha256Verified,
   }) async {
     final command = '''
+\$ErrorActionPreference = 'Stop'
+\$securityModule = Join-Path \$env:SystemRoot 'System32\\WindowsPowerShell\\v1.0\\Modules\\Microsoft.PowerShell.Security\\Microsoft.PowerShell.Security.psd1'
+Import-Module -Name \$securityModule -Force -ErrorAction Stop
 \$signature = Get-AuthenticodeSignature -LiteralPath ${_psString(installer.path)}
 \$subject = if (\$signature.SignerCertificate) { \$signature.SignerCertificate.Subject } else { '' }
 [ordered]@{
@@ -854,8 +857,8 @@ class AppUpdateService {
         '-Command',
         command,
       ],
-      stdoutEncoding: utf8,
-      stderrEncoding: utf8,
+      stdoutEncoding: systemEncoding,
+      stderrEncoding: systemEncoding,
     ).timeout(const Duration(seconds: 10));
     if (result.exitCode != 0) {
       throw StateError('安装包签名校验失败：${result.stderr}');
