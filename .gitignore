@@ -121,3 +121,8 @@ vnts2.0服务端/
 vnts2.0/linux/vnts2
 vnts2.0/packages/
 vnts2.0服务端开发包/windows-deploy/vnts2.exe
+
+# ===== 敏感运行时数据（禁止提交） =====
+vnts2.0服务端开发包/official-vnts-source-2.0.0/network_control.db
+vnts2.0服务端开发包/official-vnts-source-2.0.0/network_control.db.lock
+vnts2.0服务端开发包/windows-deploy/data/
