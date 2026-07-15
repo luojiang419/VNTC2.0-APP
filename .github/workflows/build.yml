@@ -101,9 +101,57 @@ jobs:
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
 
+  validate-release-signing:
+    name: 校验正式发布签名机密
+    needs: meta
+    runs-on: ubuntu-latest
+    steps:
+      - name: 验证正式发布签名机密
+        if: needs.meta.outputs.publish_release == 'true'
+        shell: bash
+        env:
+          VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 }}
+          VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN: ${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN }}
+          VNT_WINDOWS_SIGN_PFX_BASE64: ${{ secrets.VNT_WINDOWS_SIGN_PFX_BASE64 }}
+          VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN: ${{ secrets.VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN }}
+          VNT_WINDOWS_SIGN_SUBJECT_CONTAINS: ${{ secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS }}
+          VNT_MACOS_SIGN_P12_BASE64: ${{ secrets.VNT_MACOS_SIGN_P12_BASE64 }}
+          VNT_MACOS_SIGN_P12_PASSWORD_PLAIN: ${{ secrets.VNT_MACOS_SIGN_P12_PASSWORD_PLAIN }}
+          VNT_MACOS_SIGN_IDENTITY: ${{ secrets.VNT_MACOS_SIGN_IDENTITY }}
+          VNT_MACOS_NOTARY_APPLE_ID: ${{ secrets.VNT_MACOS_NOTARY_APPLE_ID }}
+          VNT_MACOS_NOTARY_TEAM_ID: ${{ secrets.VNT_MACOS_NOTARY_TEAM_ID }}
+          VNT_MACOS_NOTARY_APP_PASSWORD: ${{ secrets.VNT_MACOS_NOTARY_APP_PASSWORD }}
+        run: |
+          set -euo pipefail
+          missing=()
+          for name in \
+            VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 \
+            VNT_ANDROID_OFFICIAL_KEYSTORE_PASSWORD_PLAIN \
+            VNT_WINDOWS_SIGN_PFX_BASE64 \
+            VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN \
+            VNT_WINDOWS_SIGN_SUBJECT_CONTAINS \
+            VNT_MACOS_SIGN_P12_BASE64 \
+            VNT_MACOS_SIGN_P12_PASSWORD_PLAIN \
+            VNT_MACOS_SIGN_IDENTITY \
+            VNT_MACOS_NOTARY_APPLE_ID \
+            VNT_MACOS_NOTARY_TEAM_ID \
+            VNT_MACOS_NOTARY_APP_PASSWORD; do
+            if [[ -z "${!name:-}" ]]; then
+              missing+=("$name")
+            fi
+          done
+
+          if (( ${#missing[@]} > 0 )); then
+            printf '缺少正式发布签名机密，已拒绝发布：\n' >&2
+            printf ' - %s\n' "${missing[@]}" >&2
+            exit 1
+          fi
+
   build-client-windows:
     name: Windows 客户端安装版
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -169,6 +217,13 @@ jobs:
       - name: 构建 Windows 安装版客户端
         shell: pwsh
         working-directory: VntcApp1.0
+        env:
+          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.publish_release == 'true' && '1' || '0' }}
+          VNT_WINDOWS_SIGN_PFX_BASE64: ${{ secrets.VNT_WINDOWS_SIGN_PFX_BASE64 }}
+          VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN: ${{ secrets.VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN }}
+          VNT_WINDOWS_SIGN_SUBJECT_CONTAINS: ${{ secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS }}
+          VNT_WINDOWS_SIGN_TIMESTAMP_URL: ${{ secrets.VNT_WINDOWS_SIGN_TIMESTAMP_URL }}
+          APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER: ${{ secrets.VNT_WINDOWS_SIGN_SUBJECT_CONTAINS }}
         run: |
           .\scripts\export_installer_package.ps1 `
             -Version '${{ needs.meta.outputs.client_version }}' `
@@ -185,7 +240,9 @@ jobs:
 
   build-client-macos:
     name: macOS 客户端
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: macos-14
     steps:
       - uses: actions/checkout@v4
@@ -246,6 +303,14 @@ jobs:
       - name: 构建 macOS 客户端
         shell: bash
         working-directory: VntcApp1.0
+        env:
+          VNT_REQUIRE_OFFICIAL_SIGNING: ${{ needs.meta.outputs.publish_release == 'true' && '1' || '0' }}
+          VNT_MACOS_SIGN_P12_BASE64: ${{ secrets.VNT_MACOS_SIGN_P12_BASE64 }}
+          VNT_MACOS_SIGN_P12_PASSWORD_PLAIN: ${{ secrets.VNT_MACOS_SIGN_P12_PASSWORD_PLAIN }}
+          VNT_MACOS_SIGN_IDENTITY: ${{ secrets.VNT_MACOS_SIGN_IDENTITY }}
+          VNT_MACOS_NOTARY_APPLE_ID: ${{ secrets.VNT_MACOS_NOTARY_APPLE_ID }}
+          VNT_MACOS_NOTARY_TEAM_ID: ${{ secrets.VNT_MACOS_NOTARY_TEAM_ID }}
+          VNT_MACOS_NOTARY_APP_PASSWORD: ${{ secrets.VNT_MACOS_NOTARY_APP_PASSWORD }}
         run: |
           set -euo pipefail
           flutter pub get
@@ -270,39 +335,25 @@ jobs:
                   if "#import <TargetConditionals.h>" not in text:
                       header.write_text(text.replace("#if TARGET_OS_OSX", "#import <TargetConditionals.h>\n\n#if TARGET_OS_OSX", 1))
           PY
-
-          flutter build macos --release -v \
-            --build-name "${{ needs.meta.outputs.client_version }}" \
-            --build-number "${{ needs.meta.outputs.client_build_number }}" \
-            --dart-define=APP_BASE_TITLE="VNTC APP2.0" \
-            --dart-define=APP_BUILD_VERSION="${{ needs.meta.outputs.client_version }}" \
-            --dart-define=APP_DISPLAY_VERSION="v${{ needs.meta.outputs.client_version }}" \
-            --dart-define=APP_PRODUCT_NAME="VNTC APP2.0" \
-            --dart-define=APP_WINDOW_TITLE="VNTC APP2.0 v${{ needs.meta.outputs.client_version }}"
-
-          APP_PATH="build/macos/Build/Products/Release/vnt_app.app"
-          DMG_PATH="vnt_APP.dmg"
-          chmod +x "$APP_PATH/Contents/MacOS/vnt_app"
-          codesign --force --deep --timestamp=none --preserve-metadata=identifier,entitlements,flags --sign - "$APP_PATH"
-          codesign --verify --verbose "$APP_PATH"
-          chmod +x macos/create_dmg.sh
-          bash macos/create_dmg.sh "$APP_PATH" "$DMG_PATH"
-
-          mkdir -p "$GITHUB_WORKSPACE/artifacts"
-          final_name="VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg"
-          cp "$DMG_PATH" "$GITHUB_WORKSPACE/artifacts/$final_name"
-          shasum -a 256 "$GITHUB_WORKSPACE/artifacts/$final_name" | awk '{print $1 "  '"$final_name"'"}' > "$GITHUB_WORKSPACE/artifacts/$final_name.sha256"
+          bash ./scripts/export_macos_package.sh \
+            --dmg \
+            --version "${{ needs.meta.outputs.client_version }}" \
+            --build-number "${{ needs.meta.outputs.client_build_number }}"
 
       - name: 上传 macOS 客户端产物
         uses: actions/upload-artifact@v4
         with:
           name: client-macos
-          path: artifacts/*
+          path: |
+            VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg
+            VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.dmg.sha256
           if-no-files-found: error
 
   build-client-android:
     name: Android 客户端
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -342,6 +393,7 @@ jobs:
           rustc -V
 
       - name: 验证 Android 正式签名机密
+        if: needs.meta.outputs.publish_release == 'true'
         shell: pwsh
         run: |
           if ([string]::IsNullOrWhiteSpace('${{ secrets.VNT_ANDROID_OFFICIAL_KEYSTORE_BASE64 }}')) {
@@ -403,7 +455,9 @@ jobs:
 
   build-server-windows-light:
     name: Windows 服务端轻量版
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -451,7 +505,9 @@ jobs:
 
   build-server-windows-console:
     name: Windows 服务端增强版
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -501,7 +557,9 @@ jobs:
 
   build-server-linux:
     name: Linux 服务端
-    needs: meta
+    needs:
+      - meta
+      - validate-release-signing
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

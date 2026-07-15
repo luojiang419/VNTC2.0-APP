@@ -40,6 +40,7 @@ set "VNT_BUILD_NAME=%VNT_BUILD_VERSION%.0"
 for /f "tokens=1-4 delims=." %%A in ("%VNT_BUILD_VERSION%") do if not "%%C"=="" set "VNT_BUILD_NAME=%VNT_BUILD_VERSION%"
 set "VNT_BUILD_PRODUCT_NAME=VNTC APP2.0"
 set "VNT_BUILD_TITLE=%VNT_BUILD_PRODUCT_NAME% %VNT_BUILD_DISPLAY_VERSION%"
+set "WINDOWS_TRUSTED_PUBLISHER=%APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER%"
 
 where cargo >nul 2>nul
 if errorlevel 1 (
@@ -56,7 +57,11 @@ if errorlevel 1 exit /b 1
 call "%FLUTTER_BIN%" pub get
 if errorlevel 1 exit /b 1
 
-call "%FLUTTER_BIN%" build windows --release --build-name %VNT_BUILD_NAME% "--dart-define=APP_BASE_TITLE=VNTC APP2.0" "--dart-define=APP_BUILD_VERSION=%VNT_BUILD_VERSION%" "--dart-define=APP_DISPLAY_VERSION=%VNT_BUILD_DISPLAY_VERSION%" "--dart-define=APP_PRODUCT_NAME=%VNT_BUILD_PRODUCT_NAME%" "--dart-define=APP_WINDOW_TITLE=%VNT_BUILD_TITLE%"
+if "%WINDOWS_TRUSTED_PUBLISHER%"=="" (
+  call "%FLUTTER_BIN%" build windows --release --build-name %VNT_BUILD_NAME% "--dart-define=APP_BASE_TITLE=VNTC APP2.0" "--dart-define=APP_BUILD_VERSION=%VNT_BUILD_VERSION%" "--dart-define=APP_DISPLAY_VERSION=%VNT_BUILD_DISPLAY_VERSION%" "--dart-define=APP_PRODUCT_NAME=%VNT_BUILD_PRODUCT_NAME%" "--dart-define=APP_WINDOW_TITLE=%VNT_BUILD_TITLE%"
+) else (
+  call "%FLUTTER_BIN%" build windows --release --build-name %VNT_BUILD_NAME% "--dart-define=APP_BASE_TITLE=VNTC APP2.0" "--dart-define=APP_BUILD_VERSION=%VNT_BUILD_VERSION%" "--dart-define=APP_DISPLAY_VERSION=%VNT_BUILD_DISPLAY_VERSION%" "--dart-define=APP_PRODUCT_NAME=%VNT_BUILD_PRODUCT_NAME%" "--dart-define=APP_WINDOW_TITLE=%VNT_BUILD_TITLE%" "--dart-define=APP_UPDATE_WINDOWS_TRUSTED_PUBLISHER=%WINDOWS_TRUSTED_PUBLISHER%"
+)
 if errorlevel 1 exit /b 1
 
 if not exist "%RELEASE_DIR%" (

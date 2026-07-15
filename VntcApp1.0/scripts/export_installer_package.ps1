@@ -32,6 +32,11 @@ $vntcRustDeskMsiDest = Join-Path $stageDir 'vntcrustdesk.msi'
 $bootstrapScriptDest = Join-Path $stageDir 'bootstrap_vntcrustdesk.ps1'
 $uninstallScriptDest = Join-Path $stageDir 'uninstall_vntcrustdesk.ps1'
 $innoCompiler = $null
+$requireOfficialSigning = $false
+$windowsSignPfxBase64 = ''
+$windowsSignPfxPassword = ''
+$windowsSignSubjectContains = ''
+$windowsSignTimestampUrl = ''
 
 function Require-Path {
     param(
@@ -87,6 +92,100 @@ function Get-FileSha256 {
     } finally {
         $stream.Dispose()
         $sha256.Dispose()
+    }
+}
+
+function Get-OptionalEnv {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $value = [Environment]::GetEnvironmentVariable($Name)
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        return ''
+    }
+    return $value.Trim()
+}
+
+function Get-SignToolPath {
+    $command = Get-Command signtool.exe -ErrorAction SilentlyContinue
+    if ($null -ne $command -and -not [string]::IsNullOrWhiteSpace($command.Source)) {
+        return $command.Source
+    }
+
+    $candidates = @(
+        'C:\Program Files (x86)\Windows Kits\10\App Certification Kit\signtool.exe',
+        'C:\Program Files (x86)\Windows Kits\10\bin\x64\signtool.exe',
+        'C:\Program Files (x86)\Windows Kits\10\bin\10.0.26100.0\x64\signtool.exe',
+        'C:\Program Files (x86)\Windows Kits\10\bin\10.0.22621.0\x64\signtool.exe'
+    )
+
+    foreach ($candidate in $candidates) {
+        if (Test-Path -LiteralPath $candidate) {
+            return $candidate
+        }
+    }
+
+    $kitRoot = 'C:\Program Files (x86)\Windows Kits\10\bin'
+    if (Test-Path -LiteralPath $kitRoot) {
+        $dynamicCandidate = Get-ChildItem -LiteralPath $kitRoot -Directory -ErrorAction SilentlyContinue |
+            Sort-Object Name -Descending |
+            ForEach-Object { Join-Path $_.FullName 'x64\signtool.exe' } |
+            Where-Object { Test-Path -LiteralPath $_ } |
+            Select-Object -First 1
+        if (-not [string]::IsNullOrWhiteSpace($dynamicCandidate)) {
+            return $dynamicCandidate
+        }
+    }
+
+    return $null
+}
+
+function Sign-WindowsBinary {
+    param(
+        [Parameter(Mandatory = $true)][string]$Path,
+        [Parameter(Mandatory = $true)][string]$PfxBase64,
+        [Parameter(Mandatory = $true)][string]$PfxPassword,
+        [Parameter(Mandatory = $true)][string]$SubjectContains,
+        [string]$TimestampUrl = 'http://timestamp.digicert.com'
+    )
+
+    $signTool = Get-SignToolPath
+    if ([string]::IsNullOrWhiteSpace($signTool)) {
+        throw 'signtool.exe not found; cannot apply official Windows signature.'
+    }
+
+    $tempPfxPath = Join-Path ([System.IO.Path]::GetTempPath()) ("vnt_windows_sign_{0}.pfx" -f [guid]::NewGuid().ToString('N'))
+    try {
+        [System.IO.File]::WriteAllBytes($tempPfxPath, [Convert]::FromBase64String($PfxBase64))
+
+        $arguments = @(
+            'sign',
+            '/fd', 'SHA256',
+            '/td', 'SHA256',
+            '/f', $tempPfxPath,
+            '/p', $PfxPassword
+        )
+        if (-not [string]::IsNullOrWhiteSpace($TimestampUrl)) {
+            $arguments += @('/tr', $TimestampUrl)
+        }
+        $arguments += $Path
+
+        & $signTool @arguments | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "signtool signing failed: $LASTEXITCODE"
+        }
+
+        $signature = Get-AuthenticodeSignature -LiteralPath $Path
+        $subject = if ($signature.SignerCertificate) { [string]$signature.SignerCertificate.Subject } else { '' }
+        if ([string]$signature.Status -ne 'Valid') {
+            throw "Windows Authenticode status is not Valid: $($signature.Status)"
+        }
+        if ($subject -notlike "*$SubjectContains*") {
+            throw "Windows signer subject mismatch: $subject"
+        }
+    } finally {
+        if (Test-Path -LiteralPath $tempPfxPath) {
+            Remove-Item -LiteralPath $tempPfxPath -Force -ErrorAction SilentlyContinue
+        }
     }
 }
 
@@ -169,6 +268,27 @@ Require-Path -Path $uninstallScriptSource -Label 'vntcrustdesk uninstall script'
 $innoCompiler = Ensure-InnoSetup
 Require-Path -Path $innoCompiler -Label 'Inno Setup compiler'
 . $versionUtils
+
+$requireOfficialSigning = (Get-OptionalEnv -Name 'VNT_REQUIRE_OFFICIAL_SIGNING') -in @('1', 'true', 'TRUE', 'yes', 'YES')
+$windowsSignPfxBase64 = Get-OptionalEnv -Name 'VNT_WINDOWS_SIGN_PFX_BASE64'
+$windowsSignPfxPassword = Get-OptionalEnv -Name 'VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN'
+$windowsSignSubjectContains = Get-OptionalEnv -Name 'VNT_WINDOWS_SIGN_SUBJECT_CONTAINS'
+$windowsSignTimestampUrl = Get-OptionalEnv -Name 'VNT_WINDOWS_SIGN_TIMESTAMP_URL'
+if ([string]::IsNullOrWhiteSpace($windowsSignTimestampUrl)) {
+    $windowsSignTimestampUrl = 'http://timestamp.digicert.com'
+}
+
+if ($requireOfficialSigning) {
+    if ([string]::IsNullOrWhiteSpace($windowsSignPfxBase64)) {
+        throw '缺少环境变量 VNT_WINDOWS_SIGN_PFX_BASE64，禁止发布未正式签名的 Windows 安装包'
+    }
+    if ([string]::IsNullOrWhiteSpace($windowsSignPfxPassword)) {
+        throw '缺少环境变量 VNT_WINDOWS_SIGN_PFX_PASSWORD_PLAIN，禁止发布未正式签名的 Windows 安装包'
+    }
+    if ([string]::IsNullOrWhiteSpace($windowsSignSubjectContains)) {
+        throw '缺少环境变量 VNT_WINDOWS_SIGN_SUBJECT_CONTAINS，禁止发布未正式签名的 Windows 安装包'
+    }
+}
 
 $currentBuildVersionInfo = Resolve-VntBuildVersion `
     -Version $Version `
@@ -372,6 +492,14 @@ if ($LASTEXITCODE -ne 0) {
 }
 
 Require-Path -Path $setupPath -Label 'Installer exe'
+if (-not [string]::IsNullOrWhiteSpace($windowsSignPfxBase64)) {
+    Sign-WindowsBinary `
+        -Path $setupPath `
+        -PfxBase64 $windowsSignPfxBase64 `
+        -PfxPassword $windowsSignPfxPassword `
+        -SubjectContains $windowsSignSubjectContains `
+        -TimestampUrl $windowsSignTimestampUrl
+}
 $setupHash = Get-FileSha256 -Path $setupPath
 Set-Content -LiteralPath $shaPath -Value "$setupHash *VNT_App_${currentBuildVersion}_Windows_Setup.exe" -Encoding ASCII
 
