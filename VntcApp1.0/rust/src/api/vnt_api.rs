@@ -603,18 +603,25 @@ fn convert_to_core_config(vnt_config: &VntConfig) -> anyhow::Result<(CoreConfig,
 }
 
 const MACOS_UTUN_NAME_MAX_LEN: usize = 16;
+const WINDOWS_TUN_SAFE_NAME_MAX_LEN: usize = 48;
+const WINDOWS_TUN_SAFE_FALLBACK: &str = "default";
 
 fn normalize_requested_tun_name(raw: Option<&str>) -> Option<String> {
-    normalize_requested_tun_name_with_macos_policy(raw, cfg!(target_os = "macos"))
+    normalize_requested_tun_name_with_platform_policy(raw, cfg!(windows), cfg!(target_os = "macos"))
 }
 
-fn normalize_requested_tun_name_with_macos_policy(
+fn normalize_requested_tun_name_with_platform_policy(
     raw: Option<&str>,
+    enforce_windows_rules: bool,
     enforce_macos_rules: bool,
 ) -> Option<String> {
     let trimmed = raw?.trim();
     if trimmed.is_empty() {
         return None;
+    }
+
+    if enforce_windows_rules {
+        return Some(normalize_requested_windows_tun_name(trimmed));
     }
 
     if enforce_macos_rules {
@@ -625,6 +632,19 @@ fn normalize_requested_tun_name_with_macos_policy(
         }
     } else {
         Some(trimmed.to_string())
+    }
+}
+
+fn normalize_requested_windows_tun_name(value: &str) -> String {
+    let suffix: String = value
+        .chars()
+        .filter(|character| character.is_ascii_alphanumeric() || matches!(character, '-' | '_'))
+        .take(WINDOWS_TUN_SAFE_NAME_MAX_LEN)
+        .collect();
+    if suffix.is_empty() {
+        WINDOWS_TUN_SAFE_FALLBACK.to_string()
+    } else {
+        suffix
     }
 }
 
@@ -1211,7 +1231,7 @@ impl From<NatInfo> for RustNatInfo {
 #[cfg(test)]
 mod tests {
     use super::{
-        normalize_requested_mtu, normalize_requested_tun_name_with_macos_policy,
+        normalize_requested_mtu, normalize_requested_tun_name_with_platform_policy,
         p2p_diagnostic_state,
     };
     use vnt_core::context::config::WIREGUARD_MAX_MTU;
@@ -1256,32 +1276,83 @@ mod tests {
     }
 
     #[test]
-    fn windows_keeps_requested_tun_name_for_followup_processing() {
+    fn windows_normalizes_requested_tun_name_to_managed_suffix_rules() {
         assert_eq!(
-            normalize_requested_tun_name_with_macos_policy(
+            normalize_requested_tun_name_with_platform_policy(
                 Some("cfg-0123456789abcdef"),
+                true,
                 false
             ),
             Some("cfg-0123456789abcdef".to_string())
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_platform_policy(
+                Some(" custom!@#Name "),
+                true,
+                false
+            ),
+            Some("customName".to_string())
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_platform_policy(
+                Some(&"a".repeat(128)),
+                true,
+                false
+            ),
+            Some("a".repeat(48))
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_platform_policy(
+                Some("!!!"),
+                true,
+                false
+            ),
+            Some("default".to_string())
+        );
+        assert_eq!(
+            normalize_requested_tun_name_with_platform_policy(
+                Some("   "),
+                true,
+                false
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn non_windows_non_macos_keeps_trimmed_requested_tun_name() {
+        assert_eq!(
+            normalize_requested_tun_name_with_platform_policy(
+                Some("  custom!@#Name "),
+                false,
+                false
+            ),
+            Some("custom!@#Name".to_string())
         );
     }
 
     #[test]
     fn macos_drops_cross_platform_auto_tun_name_and_keeps_valid_utun() {
         assert_eq!(
-            normalize_requested_tun_name_with_macos_policy(
+            normalize_requested_tun_name_with_platform_policy(
                 Some("cfg-0123456789abcdef"),
+                false,
                 true
             ),
             None
         );
         assert_eq!(
-            normalize_requested_tun_name_with_macos_policy(Some("utun12"), true),
+            normalize_requested_tun_name_with_platform_policy(
+                Some("utun12"),
+                false,
+                true
+            ),
             Some("utun12".to_string())
         );
         assert_eq!(
-            normalize_requested_tun_name_with_macos_policy(
+            normalize_requested_tun_name_with_platform_policy(
                 Some("utun-name"),
+                false,
                 true
             ),
             None
