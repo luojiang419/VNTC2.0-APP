@@ -53,14 +53,28 @@ if (-not (Test-Path -LiteralPath $ConsoleProjectRoot -PathType Container)) {
     throw "未找到 Flutter 增强控制台工程：$ConsoleProjectRoot"
 }
 
+function Resolve-Vnts2FlutterExecutable {
+    param(
+        [Parameter(Mandatory = $true)][string]$Executable
+    )
+
+    if (Test-Path -LiteralPath $Executable -PathType Leaf) {
+        return (Resolve-Path -LiteralPath $Executable).Path
+    }
+
+    $command = Get-Command $Executable -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
+    if ($null -eq $command -or [string]::IsNullOrWhiteSpace($command.Source)) {
+        throw "未找到 Flutter：$Executable"
+    }
+    return $command.Source
+}
+
 $resolvedConsoleRoot = (Resolve-Path -LiteralPath $ConsoleProjectRoot).Path
 if (-not $SkipFlutterBuild) {
-    if (-not (Test-Path -LiteralPath $FlutterExecutable -PathType Leaf)) {
-        throw "未找到 Flutter：$FlutterExecutable"
-    }
+    $resolvedFlutterExecutable = Resolve-Vnts2FlutterExecutable -Executable $FlutterExecutable
     Push-Location $resolvedConsoleRoot
     try {
-        & $FlutterExecutable build windows --release
+        & $resolvedFlutterExecutable build windows --release
         if ($LASTEXITCODE -ne 0) {
             throw "Flutter Windows Release 构建失败（退出码 $LASTEXITCODE）。"
         }

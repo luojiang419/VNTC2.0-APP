@@ -5,7 +5,7 @@ readonly SCRIPT_DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
 readonly PACKAGE_ROOT="$(cd -- "${SCRIPT_DIR}/.." && pwd)"
 readonly SOURCE_DIR="${PACKAGE_ROOT}/official-vnts-source-2.0.0"
 readonly DIST_DIR="${PACKAGE_ROOT}/dist"
-readonly VERSION="2.0.0"
+readonly VERSION="${1:-${VNTS2_VERSION:-$(grep '^version = ' "${SOURCE_DIR}/Cargo.toml" | head -1 | cut -d '"' -f2)}}"
 
 case "$(uname -s):$(uname -m)" in
   Linux:x86_64) ;;
