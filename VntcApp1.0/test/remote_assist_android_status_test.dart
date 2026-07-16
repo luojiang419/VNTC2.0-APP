@@ -118,4 +118,27 @@ void main() {
     expect(
         nativeService, contains('Intent(this, VntMainActivity::class.java)'));
   });
+
+  test('Android 原生生命周期不越权写输入服务且拒绝空录屏会话', () {
+    final mainActivity = File(
+      'vntcrustdesk-src/flutter/android/app/src/main/kotlin/'
+      'com/carriez/flutter_hbb/MainActivity.kt',
+    ).readAsStringSync();
+    final inputService = File(
+      'vntcrustdesk-src/flutter/android/app/src/main/kotlin/'
+      'com/carriez/flutter_hbb/InputService.kt',
+    ).readAsStringSync();
+    final mainService = File(
+      'vntcrustdesk-src/flutter/android/app/src/main/kotlin/'
+      'com/carriez/flutter_hbb/MainService.kt',
+    ).readAsStringSync();
+
+    expect(mainActivity, contains('InputService.disconnect()'));
+    expect(mainActivity, isNot(contains('InputService.ctx =')));
+    expect(inputService, contains('fun disconnect()'));
+    expect(
+      mainService,
+      contains('?: throw IllegalStateException('),
+    );
+  });
 }

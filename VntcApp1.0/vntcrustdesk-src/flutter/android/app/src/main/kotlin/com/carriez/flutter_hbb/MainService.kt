@@ -443,6 +443,7 @@ class MainService : Service() {
         return try {
             val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val projection = manager.getMediaProjection(Activity.RESULT_OK, resultIntent)
+                ?: throw IllegalStateException("MediaProjectionManager returned no projection")
             projection.registerCallback(mediaProjectionCallback, Handler(Looper.getMainLooper()))
             mediaProjection = projection
             _isReady = true
