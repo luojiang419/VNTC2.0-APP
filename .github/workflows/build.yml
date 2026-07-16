@@ -560,6 +560,12 @@ jobs:
           docker image prune --all --force || true
           df -h
 
+      - name: 设置 RustDesk Flutter
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
+
       - name: 安装 Android 原生构建依赖
         shell: bash
         run: |
@@ -650,10 +656,13 @@ jobs:
         working-directory: VntcApp1.0/vntcrustdesk-src
         run: |
           set -euo pipefail
+          pushd flutter >/dev/null
+          flutter pub get --enforce-lockfile
+          popd >/dev/null
           flutter_rust_bridge_codegen \
             --rust-input src/flutter_ffi.rs \
-            --dart-output "${RUNNER_TEMP}/rustdesk-generated-bridge.dart" \
-            --c-output "${RUNNER_TEMP}/rustdesk-bridge-generated.h"
+            --dart-output flutter/lib/generated_bridge.dart \
+            --c-output flutter/macos/Runner/bridge_generated.h
           test -s src/bridge_generated.rs
           test -s src/bridge_generated.io.rs
           grep -q 'IntoIntoDart<EventToUI>' src/bridge_generated.rs

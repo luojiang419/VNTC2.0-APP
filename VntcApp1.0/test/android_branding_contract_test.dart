@@ -125,6 +125,8 @@ void main() {
     expect(workflow, contains('RUSTDESK_FRB_CODEGEN_VERSION: 1.80.1'));
     expect(workflow, contains('rustup component add rustfmt'));
     expect(workflow, contains('flutter_rust_bridge_codegen'));
+    expect(workflow, contains('flutter pub get --enforce-lockfile'));
+    expect(workflow, contains('--dart-output flutter/lib/generated_bridge.dart'));
     expect(workflow, contains('test -s src/bridge_generated.rs'));
     expect(workflow, contains('test -s src/bridge_generated.io.rs'));
     expect(workflow, contains('CargoKit 会在此步骤重编主业务'));
