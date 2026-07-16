@@ -32,6 +32,18 @@ void main() {
     expect(workflow, contains('创建草稿 Release 并上传资产'));
     expect(workflow, contains('draft: true'));
     expect(workflow, contains('远端复核草稿 Release 资产'));
+    expect(
+      workflow,
+      contains('RELEASE_ID: \${{ steps.create_draft_release.outputs.id }}'),
+    );
+    expect(
+      workflow,
+      contains('releases/\${RELEASE_ID}'),
+    );
+    expect(
+      workflow,
+      isNot(contains('releases/tags/\${tag}')),
+    );
     expect(workflow, contains('将已验收草稿转为正式 Release'));
     expect(workflow, contains('验收 Latest Release、标签与校验文件'));
     expect(workflow, contains('清理当前运行创建的失败草稿'));
