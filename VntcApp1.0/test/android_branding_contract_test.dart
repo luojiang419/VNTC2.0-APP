@@ -114,6 +114,9 @@ void main() {
     final workflow = File(
       '../.github/workflows/build.yml',
     ).readAsStringSync();
+    final rustdeskFlutterLock = File(
+      'vntcrustdesk-src/flutter/pubspec.lock',
+    ).readAsStringSync();
 
     expect(ndkBuild, contains('max-page-size=16384'));
     expect(ndkBuild, contains('common-page-size=16384'));
@@ -127,6 +130,13 @@ void main() {
     expect(workflow, contains('flutter_rust_bridge_codegen'));
     expect(workflow, contains('flutter pub get --enforce-lockfile'));
     expect(workflow, contains('--dart-output flutter/lib/generated_bridge.dart'));
+    expect(rustdeskFlutterLock, contains('version: "1.18.0"'));
+    expect(
+      rustdeskFlutterLock,
+      contains(
+        '1741988757a65eb6b36abe716829688cf01910bbf91c34354ff7ec1c3de2b349',
+      ),
+    );
     expect(workflow, contains('test -s src/bridge_generated.rs'));
     expect(workflow, contains('test -s src/bridge_generated.io.rs'));
     expect(workflow, contains('CargoKit 会在此步骤重编主业务'));
