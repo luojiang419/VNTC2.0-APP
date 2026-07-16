@@ -3,7 +3,9 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  final workflow = File('../.github/workflows/build.yml').readAsStringSync();
+  final workflow = File('../.github/workflows/build.yml')
+      .readAsStringSync()
+      .replaceAll('\r\n', '\n');
 
   test('正式发布串行执行并使用最小权限', () {
     expect(workflow, contains('cancel-in-progress: false'));
