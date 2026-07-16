@@ -151,7 +151,8 @@ jobs:
 
   test-client:
     name: 客户端静态分析与测试
-    runs-on: ubuntu-latest
+    # 更新器和窗口行为测试包含 Windows 平台分支，必须在主客户端平台执行。
+    runs-on: windows-latest
     permissions:
       contents: read
     steps:
@@ -167,13 +168,17 @@ jobs:
 
       - name: 验证客户端与 Android 发布契约
         working-directory: VntcApp1.0
-        shell: bash
+        shell: pwsh
         run: |
-          set -euo pipefail
+          $ErrorActionPreference = 'Stop'
           flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter analyze --no-pub
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
           flutter test --no-pub
-          python3 scripts/verify_android_16kb_alignment.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          python scripts/verify_android_16kb_alignment.py --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
   validate-release-signing:
     name: 校验发布签名策略
