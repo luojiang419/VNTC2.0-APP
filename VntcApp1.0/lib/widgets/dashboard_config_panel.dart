@@ -322,6 +322,9 @@ class _DashboardConfigPanelState extends State<DashboardConfigPanel> {
                       key: const ValueKey('dashboard-config-list'),
                       buildDefaultDragHandles: false,
                       itemCount: _configs.length,
+                      // Flutter 3.44 已提供 onReorderItem，但当前项目仍需兼容
+                      // 尚未暴露该参数的旧 Flutter SDK。
+                      // ignore: deprecated_member_use
                       onReorder: _reorder,
                       proxyDecorator: (child, index, animation) => Material(
                         color: Colors.transparent,

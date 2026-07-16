@@ -170,7 +170,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          flutter pub get
+          flutter pub get --enforce-lockfile
           flutter analyze --no-pub
           flutter test --no-pub
           python3 scripts/verify_android_16kb_alignment.py --self-test

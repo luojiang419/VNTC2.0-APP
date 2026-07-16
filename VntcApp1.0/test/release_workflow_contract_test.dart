@@ -18,6 +18,7 @@ void main() {
 
   test('客户端测试通过后才允许构建和发布', () {
     expect(workflow, contains('test-client:'));
+    expect(workflow, contains('flutter pub get --enforce-lockfile'));
     expect(workflow, contains('flutter analyze --no-pub'));
     expect(workflow, contains('flutter test --no-pub'));
     expect(workflow, contains('verify_android_16kb_alignment.py --self-test'));
