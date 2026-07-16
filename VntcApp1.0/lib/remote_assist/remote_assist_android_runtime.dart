@@ -18,6 +18,7 @@ class RemoteAssistAndroidRuntime {
       RemoteAssistAndroidRuntime._();
 
   Completer<void>? _bootstrapCompleter;
+  Completer<void>? _controlledStartCompleter;
 
   Future<void> ensureInitialized() {
     final existing = _bootstrapCompleter;
@@ -100,18 +101,91 @@ class RemoteAssistAndroidRuntime {
     return (await hbb_platform.bind.mainGetPermanentPassword()).trim();
   }
 
-  Future<void> startControlledService() async {
-    await ensureInitialized();
-
-    final status = await RemoteAssistAndroidBridge.instance.getStatus();
-    if (!status.screenCapturePermissionGranted) {
-      await RemoteAssistAndroidBridge.instance.requestPermission(
-        RemoteAssistConstants.androidPermissionScreenCapture,
-      );
-      throw StateError('请先完成屏幕录制授权，再启动受控服务');
+  Future<void> startControlledService() {
+    final existing = _controlledStartCompleter;
+    if (existing != null) {
+      return existing.future;
     }
 
-    await hbb_common.gFFI.serverModel.startService();
+    final completer = Completer<void>();
+    _controlledStartCompleter = completer;
+    () async {
+      try {
+        await ensureInitialized();
+
+        final status = await RemoteAssistAndroidBridge.instance.getStatus();
+        if (!status.screenCapturePermissionGranted) {
+          await RemoteAssistAndroidBridge.instance.requestPermission(
+            RemoteAssistConstants.androidPermissionScreenCapture,
+          );
+          await _waitForScreenCapturePermission();
+        }
+
+        // MediaProjection 就绪事件会让 RustDesk 模型自动继续启动。只在它尚未
+        // 启动时补一次调用，避免一次授权触发两套监听与 FFI 初始化。
+        if (!hbb_common.gFFI.serverModel.isStart) {
+          await hbb_common.gFFI.serverModel.startService();
+        }
+        await _waitForControlledRuntime();
+        completer.complete();
+      } catch (error, stackTrace) {
+        if (hbb_common.gFFI.serverModel.isStart) {
+          try {
+            await hbb_common.gFFI.serverModel.stopService();
+          } catch (_) {
+            // 保留原始启动错误，清理失败会在下一次健康检查中继续暴露。
+          }
+        }
+        completer.completeError(error, stackTrace);
+      } finally {
+        if (identical(_controlledStartCompleter, completer)) {
+          _controlledStartCompleter = null;
+        }
+      }
+    }();
+    return completer.future;
+  }
+
+  Future<void> _waitForScreenCapturePermission() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 90));
+    while (DateTime.now().isBefore(deadline)) {
+      final status = await RemoteAssistAndroidBridge.instance.getStatus();
+      if (status.screenCapturePermissionGranted) {
+        return;
+      }
+      if (status.screenCaptureState == 'cancelled') {
+        throw StateError('用户取消了屏幕录制授权');
+      }
+      if (status.screenCaptureState == 'error') {
+        throw StateError(
+          status.screenCaptureError.isEmpty
+              ? '屏幕录制授权初始化失败'
+              : status.screenCaptureError,
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    throw TimeoutException('等待屏幕录制授权超时，请保持应用在前台后重试');
+  }
+
+  Future<void> _waitForControlledRuntime() async {
+    final deadline = DateTime.now().add(const Duration(seconds: 12));
+    while (DateTime.now().isBefore(deadline)) {
+      final status = await RemoteAssistAndroidBridge.instance.getStatus();
+      if (status.controlledRuntimeReady && status.listenerReady) {
+        return;
+      }
+      if (status.screenCaptureState == 'stopped' ||
+          status.screenCaptureState == 'error') {
+        throw StateError(
+          status.screenCaptureError.isEmpty
+              ? '屏幕录制会话在远控监听就绪前已停止'
+              : status.screenCaptureError,
+        );
+      }
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+    }
+    throw TimeoutException('远程协助服务已启动，但 49999 端口未在预期时间内就绪');
   }
 
   Future<void> stopControlledService() async {

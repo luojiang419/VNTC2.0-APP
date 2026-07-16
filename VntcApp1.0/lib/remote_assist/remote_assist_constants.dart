@@ -31,6 +31,10 @@ class RemoteAssistConstants {
   static const String capabilityMacos = 'remote_assist_macos';
   static const String capabilityController = 'remote_assist_controller';
   static const String capabilityControlled = 'remote_assist_controlled';
+  static const String capabilityStateProtocolV1 =
+      'remote_assist_state_protocol_v1';
+  static const String capabilityHostReady = 'remote_assist_host_ready';
+  static const String capabilityInputReady = 'remote_assist_input_ready';
 
   static const bool androidRemoteAssistEnabled = true;
 

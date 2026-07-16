@@ -42,7 +42,8 @@ if (flutterVersionName == null) {
 android {
     namespace = "top.wherewego.vnt_app"
     compileSdk = flutter.compileSdkVersion
-    ndkVersion = flutter.ndkVersion
+    // NDK r28 默认生成 16KB ELF LOAD 对齐，并与 CI 的固定工具链保持一致。
+    ndkVersion = "28.2.13676358"
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17

@@ -11,7 +11,7 @@
     <uses-permission android:name="android.permission.ACCESS_LOCAL_NETWORK" />
     <!-- VPN服务权限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PROJECTION" />
     <uses-permission android:name="android.permission.BIND_QUICK_SETTINGS_TILE"
         tools:ignore="ProtectedPermissions" />
@@ -53,17 +53,20 @@
         <service
             android:name=".vpn.MyVpnService"
             android:exported="true"
+            android:foregroundServiceType="systemExempted"
             android:permission="android.permission.BIND_VPN_SERVICE">
             <intent-filter>
                 <action android:name="android.net.VpnService" />
             </intent-filter>
+            <meta-data
+                android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
+                android:value="false" />
         </service>
         <!-- 常驻通知服务 -->
         <service
             android:name=".VntNotificationService"
             android:enabled="true"
-            android:exported="false"
-            android:foregroundServiceType="dataSync" />
+            android:exported="false" />
         <service
             android:name="com.carriez.flutter_hbb.MainService"
             android:enabled="true"
@@ -103,9 +106,6 @@
                 android:name="android.service.quicksettings.TOGGLEABLE_TILE"
                 android:value="true" />
         </service>
-        <meta-data
-            android:name="android.net.VpnService.SUPPORTS_ALWAYS_ON"
-            android:value="true" />
         <!-- 开机自启接收器 -->
         <receiver
             android:name=".BootReceiver"

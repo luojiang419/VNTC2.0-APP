@@ -103,6 +103,31 @@ void main() {
     expect(exporter, contains("native-code: 'arm64-v8a'"));
   });
 
+  test('Android RustDesk 原生库由云端重建并验证 ELF 16KB 对齐', () {
+    final ndkBuild = File(
+      'vntcrustdesk-src/flutter/ndk_arm64.sh',
+    ).readAsStringSync();
+    final appGradle = File('android/app/build.gradle').readAsStringSync();
+    final verifier = File(
+      'scripts/verify_android_16kb_alignment.py',
+    ).readAsStringSync();
+    final workflow = File(
+      '../.github/workflows/build.yml',
+    ).readAsStringSync();
+
+    expect(ndkBuild, contains('max-page-size=16384'));
+    expect(ndkBuild, contains('common-page-size=16384'));
+    expect(appGradle, contains('ndkVersion = "28.2.13676358"'));
+    expect(verifier, contains('PT_LOAD = 1'));
+    expect(verifier, contains('DEFAULT_MINIMUM_ALIGNMENT = 16 * 1024'));
+    expect(workflow, contains('build-rustdesk-android-arm64:'));
+    expect(workflow, contains('rustdesk-android-arm64-native'));
+    expect(workflow, contains('CargoKit 会在此步骤重编主业务'));
+    expect(workflow,
+        contains('RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384'));
+    expect(workflow, contains('verify_android_16kb_alignment.py'));
+  });
+
   test('Android 正式母版使用独立官方签名且公开信任配置不含私密信息', () {
     final gradle = File('android/app/build.gradle').readAsStringSync();
     final signing = File(

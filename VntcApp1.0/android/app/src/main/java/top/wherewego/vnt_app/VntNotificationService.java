@@ -24,13 +24,15 @@ import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
- * VNT 常驻通知服务
- * 提供不可移除的常驻通知，显示连接状态并支持快速切换
+ * VNT 通知动作服务。
+ *
+ * <p>实际 VPN 前台生命周期由 MyVpnService 承担。本服务只负责短时处理通知按钮和刷新通知，
+ * 避免把普通状态通知错误地声明为长期 dataSync 前台服务。</p>
  */
 public class VntNotificationService extends Service {
     private static final String TAG = "VntNotificationService";
-    private static final String CHANNEL_ID = "vnt_notification_channel";
-    private static final int NOTIFICATION_ID = 1001;
+    public static final String CHANNEL_ID = "vnt_notification_channel";
+    public static final int NOTIFICATION_ID = 1001;
 
     // 通知动作
     private static final String ACTION_TOGGLE = "top.wherewego.vnt_app.NOTIFICATION_TOGGLE";
@@ -64,27 +66,7 @@ public class VntNotificationService extends Service {
         // 读取配置名称
         loadConfigName();
 
-        // 如果 Flutter 已初始化，从 Flutter 获取最新状态
-        if (FlutterMethodChannel.initialized()) {
-            updateNotificationFromFlutter();
-        }
-
-        // 启动前台服务（添加错误处理）
-        try {
-            Notification notification = buildNotification();
-            if (notification != null) {
-                startForeground(NOTIFICATION_ID, notification);
-                Log.i(TAG, "前台服务启动成功");
-            } else {
-                Log.e(TAG, "通知创建失败，无法启动前台服务");
-                // 如果通知创建失败，停止服务避免ANR
-                stopSelf();
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "启动前台服务失败: " + e.getMessage(), e);
-            // 捕获异常，避免崩溃
-            stopSelf();
-        }
+        Log.i(TAG, "通知动作服务启动成功");
     }
 
     @Override
@@ -94,16 +76,18 @@ public class VntNotificationService extends Service {
         // 处理来自通知按钮的 Intent
         if (intent != null && ACTION_TOGGLE.equals(intent.getAction())) {
             Log.i(TAG, "收到切换连接状态的 Intent");
-            handleToggle();
-            return START_STICKY;
+            handleToggle(() -> stopSelf(startId));
+            return START_NOT_STICKY;
         }
 
         // 如果 Flutter 已初始化，获取当前连接状态
         if (FlutterMethodChannel.initialized()) {
-            updateNotificationFromFlutter();
+            updateNotificationFromFlutter(() -> stopSelf(startId));
+        } else {
+            stopSelf(startId);
         }
 
-        return START_STICKY; // 服务被杀死后自动重启
+        return START_NOT_STICKY;
     }
 
     @Override
@@ -279,30 +263,39 @@ public class VntNotificationService extends Service {
     /**
      * 从 Flutter 获取最新状态并更新通知
      */
-    private void updateNotificationFromFlutter() {
+    private void updateNotificationFromFlutter(@Nullable Runnable onComplete) {
         Log.i(TAG, "开始从 Flutter 更新通知状态");
 
         if (!FlutterMethodChannel.initialized()) {
             Log.w(TAG, "Flutter 未初始化，无法更新通知");
+            if (onComplete != null) {
+                onComplete.run();
+            }
             return;
         }
 
         FlutterMethodChannel.getDeviceInfo(deviceInfo -> {
-            boolean newIsConnected = Boolean.TRUE.equals(deviceInfo.get("isConnected"));
-            String newConfigName = (String) deviceInfo.get("configName");
+            try {
+                boolean newIsConnected = Boolean.TRUE.equals(deviceInfo.get("isConnected"));
+                String newConfigName = (String) deviceInfo.get("configName");
 
-            if (newConfigName == null || newConfigName.isEmpty()) {
-                newConfigName = "默认配置";
+                if (newConfigName == null || newConfigName.isEmpty()) {
+                    newConfigName = "默认配置";
+                }
+
+                Log.i(TAG, "从 Flutter 获取到状态: isConnected=" + newIsConnected + ", configName=" + newConfigName);
+
+                // 更新状态
+                isConnected = newIsConnected;
+                configName = newConfigName;
+
+                // 更新通知
+                updateNotification();
+            } finally {
+                if (onComplete != null) {
+                    onComplete.run();
+                }
             }
-
-            Log.i(TAG, "从 Flutter 获取到状态: isConnected=" + newIsConnected + ", configName=" + newConfigName);
-
-            // 更新状态
-            isConnected = newIsConnected;
-            configName = newConfigName;
-
-            // 更新通知
-            updateNotification();
 
             return null;
         });
@@ -340,7 +333,7 @@ public class VntNotificationService extends Service {
     /**
      * 处理切换连接状态
      */
-    private void handleToggle() {
+    private void handleToggle(@Nullable Runnable onComplete) {
         Log.i(TAG, "收到切换连接状态的请求");
 
         // 检查 Flutter 是否已初始化
@@ -351,6 +344,9 @@ public class VntNotificationService extends Service {
             Intent intent = new Intent(this, MainActivity.class);
             intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(intent);
+            if (onComplete != null) {
+                onComplete.run();
+            }
             return;
         }
 
@@ -368,6 +364,9 @@ public class VntNotificationService extends Service {
                     MyTileService.setState(false);
                 }
                 VntWidget.updateAllWidgets(getApplicationContext());
+                if (onComplete != null) {
+                    onComplete.run();
+                }
             } else {
                 Log.i(TAG, "当前未连接，立即更新通知为已连接状态，然后执行连接操作");
                 // 立即更新通知为已连接状态（乐观更新）
@@ -394,6 +393,9 @@ public class VntNotificationService extends Service {
                     }
                     updateNotification();
                     VntWidget.updateAllWidgets(getApplicationContext());
+                    if (onComplete != null) {
+                        onComplete.run();
+                    }
                     return null;
                 });
             }
@@ -409,16 +411,12 @@ public class VntNotificationService extends Service {
             // 如果 Service 实例存在，直接调用实例方法
             if (instance != null) {
                 Log.d(TAG, "直接调用实例方法更新通知");
-                instance.updateNotificationFromFlutter();
+                instance.updateNotificationFromFlutter(null);
             } else {
                 Log.w(TAG, "Service 实例不存在，尝试启动 Service");
-                // Service 未运行，尝试启动
+                // Service 未运行时只启动短时通知动作服务，不再冒充前台 dataSync 服务。
                 Intent serviceIntent = new Intent(context, VntNotificationService.class);
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent);
-                } else {
-                    context.startService(serviceIntent);
-                }
+                context.startService(serviceIntent);
             }
         } catch (Exception e) {
             Log.e(TAG, "更新通知失败: " + e.getMessage(), e);

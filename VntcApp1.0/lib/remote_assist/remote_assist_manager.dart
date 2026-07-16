@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 
 import 'remote_assist_constants.dart';
+import 'remote_assist_connection_preflight.dart';
 import 'remote_assist_android_adapter.dart';
 import 'remote_assist_log.dart';
 import 'remote_assist_models.dart';
@@ -27,6 +28,8 @@ class RemoteAssistManager extends ChangeNotifier {
       RemoteAssistPresenceService();
   final RemoteAssistPasswordStore _passwordStore =
       RemoteAssistPasswordStore.instance;
+  final RemoteAssistConnectionPreflight _connectionPreflight =
+      const RemoteAssistConnectionPreflight();
 
   Timer? _refreshTimer;
   bool _started = false;
@@ -178,11 +181,6 @@ class RemoteAssistManager extends ChangeNotifier {
         return;
       }
 
-      await _syncPresence();
-      if (!_started || _stopping) {
-        return;
-      }
-
       _health = await _adapter.collectStatus(
         vntConnected: _localNodes.isNotEmpty,
         localVirtualIps:
@@ -190,6 +188,10 @@ class RemoteAssistManager extends ChangeNotifier {
         networkCidrs: _networkCidrs,
         presenceRunning: _presenceService.isRunning,
       );
+      await _syncPresence(_health);
+      if (!_started || _stopping) {
+        return;
+      }
       _peers = _mergePeers();
       _lastRefreshAt = DateTime.now();
     } catch (error, stackTrace) {
@@ -202,10 +204,75 @@ class RemoteAssistManager extends ChangeNotifier {
     }
   }
 
-  Future<void> launchController(String virtualIp, {String? password}) async {
+  Future<void> launchController(
+    String virtualIp, {
+    String? peerKey,
+    String? password,
+  }) async {
     final trimmedIp = virtualIp.trim();
     if (!isValidIpv4(trimmedIp)) {
       throw ArgumentError('请输入有效的 IPv4 地址');
+    }
+
+    if (!_health.vntConnected) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.vntNotConnected,
+        message: '当前未连接 VNT，无法访问对方虚拟 IP',
+      );
+    }
+    if (!_health.controllerReady) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.controllerUnavailable,
+        message: '当前设备的远程控制端尚未就绪',
+      );
+    }
+
+    RemoteAssistPeer? peer;
+    for (final candidate in _peers) {
+      if ((peerKey != null && candidate.key == peerKey) ||
+          (peerKey == null && candidate.virtualIp == trimmedIp)) {
+        peer = candidate;
+        break;
+      }
+    }
+    if (peer == null) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.peerNotInActiveNetwork,
+        message: '目标设备不属于当前活动的 VNT 网络',
+      );
+    }
+    if (!peer.isOnline) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.peerVntOffline,
+        message: '目标设备当前不在线',
+      );
+    }
+    if (peer.hasPresence && !peer.canBeControlled) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.peerRoleUnsupported,
+        message: '目标设备未声明可被远程协助能力',
+      );
+    }
+    if (peer.hasRemoteAssistState && !peer.remoteHostReady) {
+      throw const RemoteAssistConnectionException(
+        code: RemoteAssistConnectionErrorCode.peerHostNotReady,
+        message: '目标设备在线，但其受控服务、录屏或监听端口尚未就绪',
+      );
+    }
+
+    try {
+      await _connectionPreflight.probeTcpListener(
+        trimmedIp,
+        port: RemoteAssistConstants.directAccessPort,
+      );
+      await RemoteAssistLog.write(
+        '远程协助连接预检通过: peer=${peer.key} target=$trimmedIp:${RemoteAssistConstants.directAccessPort}',
+      );
+    } catch (error) {
+      await RemoteAssistLog.write(
+        '远程协助连接预检失败: peer=${peer.key} target=$trimmedIp error=$error',
+      );
+      rethrow;
     }
 
     await _adapter.launchController(
@@ -270,7 +337,7 @@ class RemoteAssistManager extends ChangeNotifier {
     await refresh();
   }
 
-  Future<void> _syncPresence() async {
+  Future<void> _syncPresence(RemoteAssistHealthStatus health) async {
     if (_localNodes.isEmpty) {
       _presenceCache = const {};
       await _presenceService.stop();
@@ -278,6 +345,12 @@ class RemoteAssistManager extends ChangeNotifier {
     }
 
     final version = await _adapter.resolveVersion();
+    final capabilities = <String>{
+      ..._adapter.presenceCapabilities,
+      RemoteAssistConstants.capabilityStateProtocolV1,
+      if (health.controlledViewReady) RemoteAssistConstants.capabilityHostReady,
+      if (health.controlledReady) RemoteAssistConstants.capabilityInputReady,
+    }.toList(growable: false);
     final contexts = _localNodes
         .map(
           (node) => RemoteAssistPresenceContext(
@@ -287,7 +360,7 @@ class RemoteAssistManager extends ChangeNotifier {
             version: version,
             platform: _adapter.platform,
             supportedRoles: _adapter.supportedRoles,
-            capabilities: _adapter.presenceCapabilities,
+            capabilities: capabilities,
             peerVirtualIps: node.peerVirtualIps,
           ),
         )

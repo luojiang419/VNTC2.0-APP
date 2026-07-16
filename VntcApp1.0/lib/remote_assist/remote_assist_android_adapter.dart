@@ -58,13 +58,19 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
       issues.add('当前未连接任何虚拟网络');
     }
     if (!status.notificationPermissionGranted) {
-      issues.add('未授予通知权限，受控服务前台通知可能无法正常展示');
+      issues.add('建议授予通知权限，便于查看远程协助前台运行状态（不阻断基础远控）');
     }
     if (!status.controllerAvailable) {
       issues.add('当前安装包未包含适用于本机架构的内置控制端，无法在本机直接发起远程协助');
     }
     if (!status.screenCapturePermissionGranted) {
-      issues.add('未完成屏幕录制授权，无法让其他设备查看和控制本机屏幕');
+      if (status.screenCaptureRequestPending) {
+        issues.add('正在等待用户确认屏幕录制授权');
+      } else if (status.screenCaptureError.isNotEmpty) {
+        issues.add('屏幕录制不可用：${status.screenCaptureError}');
+      } else {
+        issues.add('未建立有效的屏幕录制会话，其他设备无法查看本机屏幕');
+      }
     }
     if (!status.accessibilityPermissionGranted) {
       issues.add(
@@ -73,8 +79,15 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
             : '未开启无障碍控制服务，远程输入无法作用到本机',
       );
     }
+    if (status.inputDispatchState == 'failed') {
+      issues.add(
+        status.inputDispatchError.isEmpty
+            ? '最近一次远程输入被系统拒绝，请重新连接无障碍服务'
+            : '最近一次远程输入失败：${status.inputDispatchError}',
+      );
+    }
     if (!status.overlayPermissionGranted) {
-      issues.add('未授予悬浮窗权限，远控运行态浮窗和前台驻留能力不完整');
+      issues.add('建议授予悬浮窗权限，便于展示远控运行状态（不阻断基础远控）');
     }
     if (!status.batteryOptimizationIgnored) {
       issues.add('建议关闭电池优化，避免受控服务在后台被系统回收');
@@ -108,7 +121,14 @@ class RemoteAssistAndroidAdapter extends RemoteAssistPlatformAdapter {
       controlledServiceRunning: status.controlledServiceRunning,
       notificationPermissionGranted: status.notificationPermissionGranted,
       screenCapturePermissionGranted: status.screenCapturePermissionGranted,
+      screenCaptureActive: status.screenCaptureActive,
+      screenCaptureState: status.screenCaptureState,
+      screenCaptureError: status.screenCaptureError,
       accessibilityPermissionGranted: status.accessibilityPermissionGranted,
+      accessibilitySettingEnabled: status.accessibilitySettingEnabled,
+      inputDispatchState: status.inputDispatchState,
+      lastInputDispatchAtEpochMs: status.lastInputDispatchAtEpochMs,
+      inputDispatchError: status.inputDispatchError,
       overlayPermissionGranted: status.overlayPermissionGranted,
       batteryOptimizationIgnored: status.batteryOptimizationIgnored,
       issues: issues,

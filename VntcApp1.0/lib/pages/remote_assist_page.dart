@@ -64,6 +64,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     try {
       await _manager.launchController(
         peer.virtualIp,
+        peerKey: peer.key,
         password: accessPassword.isEmpty ? null : accessPassword,
       );
       if (!mounted) {
@@ -1066,7 +1067,9 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     RemoteAssistPeer peer,
   ) {
     final primaryColor = Theme.of(context).primaryColor;
-    final canConnect = health.canLaunch && !peer.isLinux;
+    final canConnect = health.canLaunch &&
+        !peer.isLinux &&
+        (!peer.hasRemoteAssistState || peer.remoteHostReady);
     return Material(
       color: Colors.transparent,
       child: InkWell(
@@ -1201,6 +1204,12 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
     }
     if (!health.canLaunch) {
       return '${_platformLabel(peer.platform)} · 当前不可连接';
+    }
+    if (peer.hasRemoteAssistState && !peer.remoteHostReady) {
+      return '${_platformLabel(peer.platform)} · 对方受控服务未就绪';
+    }
+    if (peer.remoteHostReady && !peer.remoteInputReady) {
+      return '${_platformLabel(peer.platform)} · 可观看，控制未就绪';
     }
     return '${_platformLabel(peer.platform)} · 点击连接';
   }

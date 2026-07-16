@@ -15,11 +15,11 @@ on:
         type: string
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: ${{ github.workflow }}-production-release
+  cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 env:
   CARGO_TERM_COLOR: always
@@ -33,6 +33,8 @@ env:
   CLIENT_JAVA_VERSION: 17
   CLIENT_ANDROID_BUILD_TOOLS_VERSION: 36.0.0
   CLIENT_ANDROID_NDK_VERSION: 28.2.13676358
+  RUSTDESK_CARGO_NDK_VERSION: 3.1.2
+  RUSTDESK_VCPKG_COMMIT_ID: 120deac3062162151622ca4860575a33844ba10b
   RUST_VERSION: 1.88.0
 
 jobs:
@@ -63,6 +65,7 @@ jobs:
           server_cargo_version="$(grep '^version = ' "${SERVER_SOURCE_DIR}/Cargo.toml" | head -1 | cut -d '"' -f2)"
           semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
           signing_mode="${RELEASE_SIGNING_MODE,,}"
+          already_released="false"
           if [[ "${signing_mode}" != "compatible" && "${signing_mode}" != "official" ]]; then
             echo "VNT_RELEASE_SIGNING_MODE 仅支持 compatible 或 official: ${RELEASE_SIGNING_MODE}" >&2
             exit 1
@@ -78,10 +81,16 @@ jobs:
               exit 1
             fi
 
-            latest_tag="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" --jq '.tag_name' 2>/dev/null || true)"
+            latest_release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)"
+            latest_tag="$(jq -r '.tag_name // empty' <<< "${latest_release_json}" 2>/dev/null || true)"
+            latest_target="$(jq -r '.target_commitish // empty' <<< "${latest_release_json}" 2>/dev/null || true)"
             latest_release_version="${latest_tag#v}"
 
-            if [[ "${latest_release_version}" =~ ${semver_pattern} ]]; then
+            if [[ "${latest_target}" == "${GITHUB_SHA}" && "${latest_release_version}" =~ ${semver_pattern} ]]; then
+              release_version="${latest_release_version}"
+              already_released="true"
+              echo "当前提交已由 ${latest_tag} 正式发布，本次运行保持幂等，不再创建新版本。"
+            elif [[ "${latest_release_version}" =~ ${semver_pattern} ]]; then
               highest_version="$(printf '%s\n%s\n' "${client_pubspec_version}" "${latest_release_version}" | sort -V | tail -n 1)"
               if [[ "${highest_version}" == "${latest_release_version}" ]]; then
                 IFS='.' read -r version_major version_minor version_patch <<< "${latest_release_version}"
@@ -100,7 +109,11 @@ jobs:
           if [[ -n "${release_version}" ]]; then
             client_version="${release_version}"
             server_version="${release_version}"
-            publish_release="true"
+            if [[ "${already_released}" == "true" ]]; then
+              publish_release="false"
+            else
+              publish_release="true"
+            fi
           else
             client_version="${client_pubspec_version}"
             server_version="${server_cargo_version}"
@@ -135,6 +148,32 @@ jobs:
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
           echo "signing_mode=${signing_mode}" >> "${GITHUB_OUTPUT}"
+
+  test-client:
+    name: 客户端静态分析与测试
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Flutter
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
+
+      - name: 验证客户端与 Android 发布契约
+        working-directory: VntcApp1.0
+        shell: bash
+        run: |
+          set -euo pipefail
+          flutter pub get
+          flutter analyze --no-pub
+          flutter test --no-pub
+          python3 scripts/verify_android_16kb_alignment.py --self-test
 
   validate-release-signing:
     name: 校验发布签名策略
@@ -202,6 +241,7 @@ jobs:
     needs:
       - meta
       - validate-release-signing
+      - test-client
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -209,7 +249,7 @@ jobs:
           fetch-depth: 0
 
       - name: 设置 Flutter
-        uses: subosito/flutter-action@v2.12.0
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
         with:
           channel: stable
           flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
@@ -327,6 +367,7 @@ jobs:
     needs:
       - meta
       - validate-release-signing
+      - test-client
     runs-on: macos-15-intel
     steps:
       - uses: actions/checkout@v4
@@ -334,12 +375,12 @@ jobs:
           fetch-depth: 0
 
       - name: 设置 Xcode
-        uses: maxim-lobanov/setup-xcode@v1
+        uses: maxim-lobanov/setup-xcode@ed7a3b1fda3918c0306d1b724322adc0b8cc0a90 # v1.7.0
         with:
           xcode-version: "16.2"
 
       - name: 设置 Flutter
-        uses: subosito/flutter-action@v2.12.0
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
         with:
           channel: stable
           flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
@@ -493,11 +534,140 @@ jobs:
             VntcApp1.0/dist/VNT_App_${{ needs.meta.outputs.client_version }}_macOS.signature.json
           if-no-files-found: error
 
+  build-rustdesk-android-arm64:
+    name: Android RustDesk 16KB 原生库
+    needs:
+      - test-client
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 释放原生构建磁盘空间
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo rm -rf /usr/share/dotnet /opt/ghc /usr/local/.ghcup
+          docker image prune --all --force || true
+          df -h
+
+      - name: 安装 Android 原生构建依赖
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y \
+            clang \
+            cmake \
+            curl \
+            gcc-multilib \
+            g++ \
+            g++-multilib \
+            git \
+            libayatana-appindicator3-dev \
+            libasound2-dev \
+            libc6-dev \
+            libclang-dev \
+            libgstreamer1.0-dev \
+            libgstreamer-plugins-base1.0-dev \
+            libgtk-3-dev \
+            libpam0g-dev \
+            libpulse-dev \
+            libunwind-dev \
+            libva-dev \
+            libxcb-randr0-dev \
+            libxcb-shape0-dev \
+            libxcb-xfixes0-dev \
+            libxdo-dev \
+            libxfixes-dev \
+            llvm-dev \
+            nasm \
+            ninja-build \
+            openjdk-17-jdk-headless \
+            pkg-config \
+            tree \
+            wget
+
+      - name: 设置 Android SDK
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
+
+      - name: 安装固定 NDK
+        shell: bash
+        run: |
+          set -euo pipefail
+          sdkmanager --install "ndk;${CLIENT_ANDROID_NDK_VERSION}"
+          ndk_path="${ANDROID_HOME}/ndk/${CLIENT_ANDROID_NDK_VERSION}"
+          test -d "${ndk_path}"
+          echo "ANDROID_NDK_HOME=${ndk_path}" >> "${GITHUB_ENV}"
+          echo "ANDROID_NDK_ROOT=${ndk_path}" >> "${GITHUB_ENV}"
+
+      - name: 设置 Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set auto-self-update disable
+          rustup toolchain install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup target add aarch64-linux-android
+          cargo install cargo-ndk --version "${RUSTDESK_CARGO_NDK_VERSION}" --locked
+          rustc -V
+          cargo ndk --version
+
+      - name: 设置固定 vcpkg
+        uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
+        with:
+          vcpkgDirectory: ${{ runner.temp }}/vcpkg
+          vcpkgGitCommitId: ${{ env.RUSTDESK_VCPKG_COMMIT_ID }}
+          doNotCache: false
+
+      - name: 构建 RustDesk Android 依赖
+        shell: bash
+        working-directory: VntcApp1.0/vntcrustdesk-src
+        env:
+          VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+        run: |
+          set -euo pipefail
+          chmod +x flutter/build_android_deps.sh
+          ./flutter/build_android_deps.sh arm64-v8a
+
+      - name: 构建 16KB 对齐 RustDesk 原生库
+        shell: bash
+        working-directory: VntcApp1.0/vntcrustdesk-src
+        env:
+          VCPKG_ROOT: ${{ runner.temp }}/vcpkg
+        run: |
+          set -euo pipefail
+          chmod +x flutter/ndk_arm64.sh
+          ./flutter/ndk_arm64.sh
+          mkdir -p rustdesk-native
+          cp target/aarch64-linux-android/release/liblibrustdesk.so \
+            rustdesk-native/librustdesk.so
+
+      - name: 验证 RustDesk ELF 16KB 对齐
+        shell: bash
+        run: |
+          set -euo pipefail
+          python3 VntcApp1.0/scripts/verify_android_16kb_alignment.py --self-test
+          python3 VntcApp1.0/scripts/verify_android_16kb_alignment.py \
+            VntcApp1.0/vntcrustdesk-src/rustdesk-native/librustdesk.so
+
+      - name: 上传 RustDesk Android 原生库
+        uses: actions/upload-artifact@v4
+        with:
+          name: rustdesk-android-arm64-native
+          path: VntcApp1.0/vntcrustdesk-src/rustdesk-native/librustdesk.so
+          if-no-files-found: error
+
   build-client-android:
     name: Android 客户端
     needs:
       - meta
       - validate-release-signing
+      - test-client
+      - build-rustdesk-android-arm64
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -511,7 +681,7 @@ jobs:
           java-version: ${{ env.CLIENT_JAVA_VERSION }}
 
       - name: 设置 Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@9fc6c4e9069bf8d3d10b2204b1fb8f6ef7065407 # v3.2.2
 
       - name: 安装 Android 构建组件
         shell: pwsh
@@ -522,7 +692,7 @@ jobs:
             "ndk;${Env:CLIENT_ANDROID_NDK_VERSION}"
 
       - name: 设置 Flutter
-        uses: subosito/flutter-action@v2.12.0
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
         with:
           channel: stable
           flutter-version: ${{ env.CLIENT_FLUTTER_VERSION }}
@@ -535,6 +705,19 @@ jobs:
           rustup default "${Env:RUST_VERSION}"
           rustup target add aarch64-linux-android
           rustc -V
+
+      - name: 注入 16KB 对齐 RustDesk 原生库
+        uses: actions/download-artifact@v4
+        with:
+          name: rustdesk-android-arm64-native
+          path: VntcApp1.0/android/app/src/main/rustdeskJniLibs/arm64-v8a
+
+      - name: 验证注入的 RustDesk 原生库
+        shell: pwsh
+        run: |
+          python .\VntcApp1.0\scripts\verify_android_16kb_alignment.py --self-test
+          python .\VntcApp1.0\scripts\verify_android_16kb_alignment.py `
+            .\VntcApp1.0\android\app\src\main\rustdeskJniLibs\arm64-v8a\librustdesk.so
 
       - name: 验证 Android 正式签名机密
         if: needs.meta.outputs.publish_release == 'true'
@@ -550,6 +733,10 @@ jobs:
       - name: 构建未签名 Android APK
         shell: pwsh
         working-directory: VntcApp1.0
+        env:
+          # CargoKit 会在此步骤重编主业务 librust_lib_vnt_app.so；显式固定
+          # linker 页面参数，避免只修复 RustDesk 而遗漏主业务 Rust 库。
+          RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384 -C link-arg=-Wl,-z,common-page-size=16384
         run: |
           flutter pub get
           flutter build apk --release `
@@ -571,6 +758,13 @@ jobs:
         run: |
           .\scripts\export_android_brand_package.ps1 `
             -Version '${{ needs.meta.outputs.client_version }}'
+
+      - name: 验证最终 APK 全部原生库 16KB 对齐
+        shell: pwsh
+        working-directory: VntcApp1.0
+        run: |
+          python .\scripts\verify_android_16kb_alignment.py `
+            '.\release\android\VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64_Brand_Master.apk'
 
       - name: 整理 Android 客户端发布文件
         shell: pwsh
@@ -634,6 +828,7 @@ jobs:
     needs:
       - meta
       - validate-release-signing
+      - test-client
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -684,12 +879,13 @@ jobs:
     needs:
       - meta
       - validate-release-signing
+      - test-client
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
 
       - name: 设置 Flutter
-        uses: subosito/flutter-action@v2.12.0
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
         with:
           channel: stable
           flutter-version: ${{ env.CONSOLE_FLUTTER_VERSION }}
@@ -736,6 +932,7 @@ jobs:
     needs:
       - meta
       - validate-release-signing
+      - test-client
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -770,6 +967,7 @@ jobs:
     if: needs.meta.outputs.publish_release == 'true'
     needs:
       - meta
+      - test-client
       - build-client-windows
       - build-client-macos
       - build-client-android
@@ -777,6 +975,8 @@ jobs:
       - build-server-windows-console
       - build-server-linux
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
     steps:
       - name: 下载全部产物
         uses: actions/download-artifact@v4
@@ -852,8 +1052,9 @@ jobs:
           RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
           SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
 
-      - name: 发布 Release
-        uses: softprops/action-gh-release@v2
+      - name: 创建草稿 Release 并上传资产
+        id: create_draft_release
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
           tag_name: v${{ needs.meta.outputs.release_version }}
           target_commitish: ${{ github.sha }}
@@ -870,4 +1071,186 @@ jobs:
             - Windows 服务端增强版
             - Linux 服务端
           files: release-assets/*
-          prerelease: ${{ contains(needs.meta.outputs.release_version, 'test') || contains(needs.meta.outputs.release_version, 'beta') || contains(needs.meta.outputs.release_version, 'rc') }}
+          draft: true
+          prerelease: false
+          fail_on_unmatched_files: true
+
+      - name: 远端复核草稿 Release 资产
+        id: verify_draft_release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          release_json="${RUNNER_TEMP}/draft-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" > "${release_json}"
+
+          RELEASE_JSON="${release_json}" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          release = json.loads(Path(os.environ["RELEASE_JSON"]).read_text(encoding="utf-8"))
+          expected_tag = f"v{os.environ['RELEASE_VERSION']}"
+          expected_sha = os.environ["GITHUB_SHA"]
+          if release.get("tag_name") != expected_tag:
+              raise SystemExit(f"draft tag mismatch: {release.get('tag_name')} != {expected_tag}")
+          if release.get("target_commitish") != expected_sha:
+              raise SystemExit(
+                  f"draft target mismatch: {release.get('target_commitish')} != {expected_sha}"
+              )
+          if release.get("draft") is not True or release.get("prerelease") is not False:
+              raise SystemExit("release must remain a non-prerelease draft during verification")
+
+          expected = {
+              path.name: path
+              for path in Path("release-assets").iterdir()
+              if path.is_file()
+          }
+          assets = release.get("assets") or []
+          actual = {asset["name"]: asset for asset in assets}
+          if len(actual) != len(assets):
+              raise SystemExit("draft contains duplicate asset names")
+          if set(actual) != set(expected):
+              raise SystemExit(
+                  f"draft asset set mismatch: missing={sorted(set(expected) - set(actual))}, "
+                  f"unexpected={sorted(set(actual) - set(expected))}"
+              )
+
+          for name, path in expected.items():
+              data = path.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              asset = actual[name]
+              if asset.get("state") != "uploaded":
+                  raise SystemExit(f"asset is not uploaded: {name}")
+              if asset.get("size") != len(data):
+                  raise SystemExit(f"asset size mismatch: {name}")
+              remote_digest = asset.get("digest")
+              if remote_digest and remote_digest != f"sha256:{digest}":
+                  raise SystemExit(f"asset digest mismatch: {name}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"release_id={release['id']}\n")
+          print(f"[OK] verified draft release {release['id']} with {len(expected)} assets")
+          PY
+
+      - name: 将已验收草稿转为正式 Release
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_ID: ${{ steps.verify_draft_release.outputs.release_id }}
+        run: |
+          set -euo pipefail
+          gh api --method PATCH \
+            "repos/${GITHUB_REPOSITORY}/releases/${RELEASE_ID}" \
+            -F draft=false \
+            -F prerelease=false >/dev/null
+
+      - name: 验收 Latest Release、标签与校验文件
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          latest_json="${RUNNER_TEMP}/latest-release.json"
+          gh api "repos/${GITHUB_REPOSITORY}/releases/latest" > "${latest_json}"
+
+          LATEST_JSON="${latest_json}" python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+
+          release = json.loads(Path(os.environ["LATEST_JSON"]).read_text(encoding="utf-8"))
+          expected_tag = f"v{os.environ['RELEASE_VERSION']}"
+          expected_sha = os.environ["GITHUB_SHA"]
+          if release.get("tag_name") != expected_tag:
+              raise SystemExit(f"latest tag mismatch: {release.get('tag_name')} != {expected_tag}")
+          if release.get("target_commitish") != expected_sha:
+              raise SystemExit(
+                  f"latest target mismatch: {release.get('target_commitish')} != {expected_sha}"
+              )
+          if release.get("draft") is not False or release.get("prerelease") is not False:
+              raise SystemExit("latest release is not a stable public release")
+
+          expected = {
+              path.name: path
+              for path in Path("release-assets").iterdir()
+              if path.is_file()
+          }
+          assets = release.get("assets") or []
+          actual = {asset["name"]: asset for asset in assets}
+          if len(actual) != len(assets) or set(actual) != set(expected):
+              raise SystemExit("latest release asset set does not match local verified assets")
+          for name, path in expected.items():
+              data = path.read_bytes()
+              digest = hashlib.sha256(data).hexdigest()
+              asset = actual[name]
+              if asset.get("state") != "uploaded" or asset.get("size") != len(data):
+                  raise SystemExit(f"latest asset state/size mismatch: {name}")
+              remote_digest = asset.get("digest")
+              if remote_digest and remote_digest != f"sha256:{digest}":
+                  raise SystemExit(f"latest asset digest mismatch: {name}")
+          print(f"[OK] latest release contains {len(expected)} verified assets")
+          PY
+
+          tag_type="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.type')"
+          tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" --jq '.object.sha')"
+          if [[ "${tag_type}" == "tag" ]]; then
+            tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.object.sha')"
+          fi
+          if [[ "${tag_sha}" != "${GITHUB_SHA}" ]]; then
+            echo "正式标签未指向当前提交: ${tag_sha} != ${GITHUB_SHA}" >&2
+            exit 1
+          fi
+
+          checksum_url="$(jq -r '.assets[] | select(.name == "SHA256SUMS.txt") | .browser_download_url' "${latest_json}")"
+          if [[ -z "${checksum_url}" || "${checksum_url}" == "null" ]]; then
+            echo "Latest Release 缺少 SHA256SUMS.txt" >&2
+            exit 1
+          fi
+          curl --fail --location --retry 3 --silent --show-error \
+            "${checksum_url}" --output "${RUNNER_TEMP}/remote-SHA256SUMS.txt"
+          cmp release-assets/SHA256SUMS.txt "${RUNNER_TEMP}/remote-SHA256SUMS.txt"
+          echo "[OK] Latest Release、标签和远端 SHA256SUMS.txt 验收通过"
+
+      - name: 清理当前运行创建的失败草稿
+        if: failure()
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
+        run: |
+          set -euo pipefail
+          tag="v${RELEASE_VERSION}"
+          release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${tag}" 2>/dev/null || true)"
+          if [[ -z "${release_json}" ]]; then
+            exit 0
+          fi
+
+          release_id="$(jq -r '.id' <<< "${release_json}")"
+          is_draft="$(jq -r '.draft' <<< "${release_json}")"
+          target="$(jq -r '.target_commitish' <<< "${release_json}")"
+          if [[ "${is_draft}" != "true" || "${target}" != "${GITHUB_SHA}" ]]; then
+            echo "保留非本次运行草稿或已经正式发布的 Release: ${tag}"
+            exit 0
+          fi
+
+          gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/${release_id}"
+          ref_json="$(gh api "repos/${GITHUB_REPOSITORY}/git/ref/tags/${tag}" 2>/dev/null || true)"
+          if [[ -z "${ref_json}" ]]; then
+            exit 0
+          fi
+          tag_type="$(jq -r '.object.type' <<< "${ref_json}")"
+          tag_sha="$(jq -r '.object.sha' <<< "${ref_json}")"
+          if [[ "${tag_type}" == "tag" ]]; then
+            tag_sha="$(gh api "repos/${GITHUB_REPOSITORY}/git/tags/${tag_sha}" --jq '.object.sha')"
+          fi
+          if [[ "${tag_sha}" == "${GITHUB_SHA}" ]]; then
+            gh api --method DELETE "repos/${GITHUB_REPOSITORY}/git/refs/tags/${tag}"
+          fi

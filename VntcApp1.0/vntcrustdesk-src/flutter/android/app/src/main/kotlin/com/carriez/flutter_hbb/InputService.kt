@@ -9,6 +9,7 @@ package com.carriez.flutter_hbb
 import android.accessibilityservice.AccessibilityService
 import android.accessibilityservice.GestureDescription
 import android.graphics.Path
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
@@ -34,6 +35,7 @@ import kotlin.math.max
 import hbb.MessageOuterClass.KeyEvent
 import hbb.MessageOuterClass.KeyboardMode
 import hbb.KeyEventConverter
+import top.wherewego.vnt_app.MainActivity as VntMainActivity
 
 // const val BUTTON_UP = 2
 // const val BUTTON_BACK = 0x08
@@ -63,9 +65,36 @@ const val LONG_TAP_DELAY = 200L
 class InputService : AccessibilityService() {
 
     companion object {
+        @Volatile
         var ctx: InputService? = null
+            private set
+        @Volatile
+        private var _lastGestureState = "idle"
+        @Volatile
+        private var _lastGestureAtEpochMs = 0L
+        @Volatile
+        private var _lastGestureError = ""
+
         val isOpen: Boolean
             get() = ctx != null
+        val lastGestureState: String
+            get() = _lastGestureState
+        val lastGestureAtEpochMs: Long
+            get() = _lastGestureAtEpochMs
+        val lastGestureError: String
+            get() = _lastGestureError
+
+        private fun markGesturePending() {
+            _lastGestureState = "pending"
+            _lastGestureAtEpochMs = System.currentTimeMillis()
+            _lastGestureError = ""
+        }
+
+        private fun markGestureResult(success: Boolean, error: String = "") {
+            _lastGestureState = if (success) "success" else "failed"
+            _lastGestureAtEpochMs = System.currentTimeMillis()
+            _lastGestureError = error
+        }
     }
 
     private val logTag = "input service"
@@ -148,7 +177,7 @@ class InputService : AccessibilityService() {
         }
 
         if (mask == BACK_UP) {
-            performGlobalAction(GLOBAL_ACTION_BACK)
+            performGlobalActionTracked(GLOBAL_ACTION_BACK)
             return
         }
 
@@ -157,7 +186,7 @@ class InputService : AccessibilityService() {
             timer.purge()
             recentActionTask = object : TimerTask() {
                 override fun run() {
-                    performGlobalAction(GLOBAL_ACTION_RECENTS)
+                    performGlobalActionTracked(GLOBAL_ACTION_RECENTS)
                     recentActionTask = null
                 }
             }
@@ -168,7 +197,7 @@ class InputService : AccessibilityService() {
         if (mask == WHEEL_BUTTON_UP) {
             if (recentActionTask != null) {
                 recentActionTask!!.cancel()
-                performGlobalAction(GLOBAL_ACTION_HOME)
+                performGlobalActionTracked(GLOBAL_ACTION_HOME)
             }
             return
         }
@@ -236,6 +265,50 @@ class InputService : AccessibilityService() {
     }
 
     @RequiresApi(Build.VERSION_CODES.N)
+    private fun dispatchGestureTracked(gesture: GestureDescription): Boolean {
+        markGesturePending()
+        return try {
+            val accepted = dispatchGesture(
+                gesture,
+                object : AccessibilityService.GestureResultCallback() {
+                    override fun onCompleted(gestureDescription: GestureDescription?) {
+                        markGestureResult(true)
+                    }
+
+                    override fun onCancelled(gestureDescription: GestureDescription?) {
+                        markGestureResult(false, "系统取消了远程手势")
+                    }
+                },
+                Handler(Looper.getMainLooper())
+            )
+            if (!accepted) {
+                markGestureResult(false, "系统拒绝分发远程手势")
+            }
+            accepted
+        } catch (error: Exception) {
+            markGestureResult(false, error.message ?: "远程手势分发异常")
+            Log.e(logTag, "dispatchGesture failed", error)
+            false
+        }
+    }
+
+    private fun performGlobalActionTracked(action: Int): Boolean {
+        markGesturePending()
+        return try {
+            val accepted = performGlobalAction(action)
+            markGestureResult(
+                accepted,
+                if (accepted) "" else "系统拒绝执行远程全局操作"
+            )
+            accepted
+        } catch (error: Exception) {
+            markGestureResult(false, error.message ?: "远程全局操作异常")
+            Log.e(logTag, "performGlobalAction failed", error)
+            false
+        }
+    }
+
+    @RequiresApi(Build.VERSION_CODES.N)
     private fun consumeWheelActions() {
         if (isWheelActionsPolling) {
             return
@@ -243,7 +316,7 @@ class InputService : AccessibilityService() {
             isWheelActionsPolling = true
         }
         wheelActionsQueue.poll()?.let {
-            dispatchGesture(it, null, null)
+            dispatchGestureTracked(it)
             timer.purge()
             timer.schedule(object : TimerTask() {
                 override fun run() {
@@ -266,7 +339,7 @@ class InputService : AccessibilityService() {
             val builder = GestureDescription.Builder()
             builder.addStroke(longPressStroke)
             Log.d(logTag, "performClick x:$x y:$y time:$duration")
-            dispatchGesture(builder.build(), null, null)
+            dispatchGestureTracked(builder.build())
         } catch (e: Exception) {
             Log.e(logTag, "performClick, error:$e")
         }
@@ -328,7 +401,7 @@ class InputService : AccessibilityService() {
                 val builder = GestureDescription.Builder()
                 builder.addStroke(it)
                 Log.d(logTag, "doDispatchGesture x:$x y:$y time:$duration")
-                dispatchGesture(builder.build(), null, null)
+                dispatchGestureTracked(builder.build())
             }
         } catch (e: Exception) {
             Log.e(logTag, "doDispatchGesture, willContinue:$willContinue, error:$e")
@@ -365,7 +438,7 @@ class InputService : AccessibilityService() {
             val builder = GestureDescription.Builder()
             builder.addStroke(stroke)
             Log.d(logTag, "end gesture x:$x y:$y time:$duration")
-            dispatchGesture(builder.build(), null, null)
+            dispatchGestureTracked(builder.build())
         } catch (e: Exception) {
             Log.e(logTag, "endGesture error:$e")
         }
@@ -488,7 +561,7 @@ class InputService : AccessibilityService() {
         if (event.keyCode == KeyEventAndroid.KEYCODE_POWER) {
             // Perform power dialog action when action is up
             if (event.action == KeyEventAndroid.ACTION_UP) {
-                performGlobalAction(GLOBAL_ACTION_POWER_DIALOG);
+                performGlobalActionTracked(GLOBAL_ACTION_POWER_DIALOG);
             }
             return true
         }
@@ -716,11 +789,15 @@ class InputService : AccessibilityService() {
     override fun onServiceConnected() {
         super.onServiceConnected()
         ctx = this
-        val info = AccessibilityServiceInfo()
+        _lastGestureState = "idle"
+        _lastGestureAtEpochMs = 0L
+        _lastGestureError = ""
+        // 保留 XML 中声明的 eventTypes、feedbackType 和 capabilities，只追加运行时 flags。
+        val info = serviceInfo ?: AccessibilityServiceInfo()
         if (Build.VERSION.SDK_INT >= 33) {
-            info.flags = FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = info.flags or FLAG_INPUT_METHOD_EDITOR or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         } else {
-            info.flags = FLAG_RETRIEVE_INTERACTIVE_WINDOWS
+            info.flags = info.flags or FLAG_RETRIEVE_INTERACTIVE_WINDOWS
         }
         setServiceInfo(info)
         fakeEditTextForTextStateCalculation = EditText(this)
@@ -730,11 +807,24 @@ class InputService : AccessibilityService() {
         val layout = fakeEditTextForTextStateCalculation?.getLayout()
         Log.d(logTag, "fakeEditTextForTextStateCalculation layout:$layout")
         Log.d(logTag, "onServiceConnected!")
+        VntMainActivity.notifyRustdeskStateChange("input", true)
     }
 
     override fun onDestroy() {
         ctx = null
+        timer.cancel()
+        recentActionTask?.cancel()
+        recentActionTask = null
+        wheelActionsQueue.clear()
+        fakeEditTextForTextStateCalculation = null
+        VntMainActivity.notifyRustdeskStateChange("input", false)
         super.onDestroy()
+    }
+
+    override fun onUnbind(intent: Intent?): Boolean {
+        ctx = null
+        VntMainActivity.notifyRustdeskStateChange("input", false)
+        return super.onUnbind(intent)
     }
 
     override fun onInterrupt() {}

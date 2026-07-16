@@ -100,34 +100,49 @@ public class RemoteAssistAndroidBridge {
         boolean notificationGranted = hasNotificationPermission();
         boolean screenCaptureGranted =
                 com.carriez.flutter_hbb.MainService.Companion.isReady();
+        boolean screenCaptureActive =
+                com.carriez.flutter_hbb.MainService.Companion.isStart();
+        String projectionState =
+                com.carriez.flutter_hbb.MainService.Companion.getProjectionState();
+        String projectionError =
+                com.carriez.flutter_hbb.MainService.Companion.getProjectionError();
         boolean accessibilityGranted = isAccessibilityConnected();
         boolean accessibilitySettingEnabled = isAccessibilitySettingEnabled();
+        String inputDispatchState =
+                com.carriez.flutter_hbb.InputService.Companion.getLastGestureState();
+        long lastInputDispatchAt =
+                com.carriez.flutter_hbb.InputService.Companion.getLastGestureAtEpochMs();
+        String inputDispatchError =
+                com.carriez.flutter_hbb.InputService.Companion.getLastGestureError();
         boolean overlayGranted = Settings.canDrawOverlays(activity);
         boolean batteryOptimizationIgnored = isIgnoringBatteryOptimizations();
         boolean controllerAvailable = hasBundledRustdeskController();
         boolean controlledServiceRunning =
-                com.carriez.flutter_hbb.MainService.Companion.isReady();
+                com.carriez.flutter_hbb.MainService.Companion.isServiceRunning();
         boolean portListening = controlledServiceRunning && isTcpPortListening(DIRECT_ACCESS_PORT);
         status.put("notificationPermissionGranted", hasNotificationPermission());
         status.put("screenCapturePermissionGranted", screenCaptureGranted);
+        status.put("screenCaptureActive", screenCaptureActive);
+        status.put("screenCaptureState", projectionState);
+        status.put("screenCaptureError", projectionError);
+        status.put("screenCaptureRequestPending", "requesting".equals(projectionState));
         status.put("accessibilityPermissionGranted", accessibilityGranted);
         status.put("accessibilitySettingEnabled", accessibilitySettingEnabled);
+        status.put("inputDispatchState", inputDispatchState);
+        status.put("lastInputDispatchAtEpochMs", lastInputDispatchAt);
+        status.put("inputDispatchError", inputDispatchError);
         status.put("overlayPermissionGranted", overlayGranted);
         status.put("batteryOptimizationIgnored", batteryOptimizationIgnored);
         status.put("controllerAvailable", controllerAvailable);
         status.put("controlledRoleSupported", true);
-        status.put("controlledRuntimeReady", portListening);
+        status.put("controlledRuntimeReady", portListening && screenCaptureGranted);
         status.put("controlledServiceRunning", controlledServiceRunning);
         status.put(
                 "permissionsReady",
-                notificationGranted
-                        && screenCaptureGranted
-                        && accessibilityGranted
-                        && overlayGranted
-                        && batteryOptimizationIgnored
+                screenCaptureGranted && accessibilityGranted
         );
         status.put("listenerReady", portListening);
-        status.put("runtimeVersion", "android-integrated-v3");
+        status.put("runtimeVersion", "android-integrated-v4");
         status.put("runtimeAvailable", true);
         status.put("serviceInstalled", true);
         status.put("serviceRunning", controlledServiceRunning);
@@ -164,6 +179,7 @@ public class RemoteAssistAndroidBridge {
     private void requestPermission(String permission, boolean startServiceAfterGrant) {
         switch (permission) {
             case "screen_capture":
+                com.carriez.flutter_hbb.MainService.markProjectionRequestStarted();
                 Intent intent = new Intent(
                         activity,
                         com.carriez.flutter_hbb.PermissionRequestTransparentActivity.class
@@ -229,17 +245,11 @@ public class RemoteAssistAndroidBridge {
             requestPermission("screen_capture", true);
             return;
         }
-        Intent serviceIntent = new Intent(activity, com.carriez.flutter_hbb.MainService.class);
-        serviceIntent.setAction("INIT_MEDIA_PROJECTION_AND_SERVICE");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            activity.startForegroundService(serviceIntent);
-        } else {
-            activity.startService(serviceIntent);
-        }
+        activity.refreshRustdeskServiceState();
     }
 
     private void stopControlledService() {
-        activity.stopService(new Intent(activity, com.carriez.flutter_hbb.MainService.class));
+        com.carriez.flutter_hbb.MainService.stop(activity);
     }
 
     private boolean hasNotificationPermission() {

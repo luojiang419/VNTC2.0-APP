@@ -38,6 +38,7 @@ import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.content.ContextCompat
 import top.wherewego.vnt_app.R
+import top.wherewego.vnt_app.MainActivity as VntMainActivity
 import io.flutter.embedding.android.FlutterActivity
 import java.util.concurrent.Executors
 import kotlin.concurrent.thread
@@ -196,15 +197,56 @@ class MainService : Service() {
     private val wakeLock: PowerManager.WakeLock by lazy { powerManager.newWakeLock(PowerManager.ACQUIRE_CAUSES_WAKEUP or PowerManager.SCREEN_BRIGHT_WAKE_LOCK, "rustdesk:wakelock")}
 
     companion object {
-        private var _isReady = false // media permission ready status
+        @Volatile
+        private var _isReady = false // active media projection session status
+        @Volatile
         private var _isStart = false // screen capture start status
+        @Volatile
         private var _isAudioStart = false // audio capture start status
+        @Volatile
+        private var instance: MainService? = null
+        @Volatile
+        private var _projectionState = "idle"
+        @Volatile
+        private var _projectionError = ""
+
         val isReady: Boolean
             get() = _isReady
         val isStart: Boolean
             get() = _isStart
         val isAudioStart: Boolean
             get() = _isAudioStart
+        val isServiceRunning: Boolean
+            get() = instance?.destroying == false
+        val projectionState: String
+            get() = _projectionState
+        val projectionError: String
+            get() = _projectionError
+
+        @JvmStatic
+        fun markProjectionRequestStarted() {
+            _projectionState = "requesting"
+            _projectionError = ""
+        }
+
+        @JvmStatic
+        fun markProjectionRequestCancelled() {
+            _projectionState = "cancelled"
+            _projectionError = "用户取消了屏幕录制授权"
+            _isReady = false
+        }
+
+        @JvmStatic
+        fun markProjectionRequestFailed(reason: String) {
+            _projectionState = "error"
+            _projectionError = reason
+            _isReady = false
+        }
+
+        @JvmStatic
+        fun stop(context: Context) {
+            instance?.destroy() ?: context.stopService(Intent(context, MainService::class.java))
+        }
     }
 
     private val logTag = "LOG_SERVICE"
@@ -215,11 +257,29 @@ class MainService : Service() {
 
     // video
     private var mediaProjection: MediaProjection? = null
+    private var destroying = false
     private var surface: Surface? = null
     private val sendVP9Thread = Executors.newSingleThreadExecutor()
     private var videoEncoder: MediaCodec? = null
     private var imageReader: ImageReader? = null
     private var virtualDisplay: VirtualDisplay? = null
+
+    private val mediaProjectionCallback = object : MediaProjection.Callback() {
+        override fun onStop() {
+            Log.w(logTag, "MediaProjection session stopped by the system or user")
+            val handleStop = Runnable {
+                _projectionState = "stopped"
+                _projectionError = "屏幕共享已被系统或用户停止"
+                releaseMediaProjection(stopProjection = false)
+                VntMainActivity.notifyRustdeskMethod(
+                    "on_media_projection_stopped",
+                    mapOf("reason" to "projection_stopped")
+                )
+                stopSelf()
+            }
+            serviceHandler?.post(handleStop) ?: handleStop.run()
+        }
+    }
 
     // audio
     private val audioRecordHandle = AudioRecordHandle(this, { isStart }, { isAudioStart })
@@ -231,6 +291,11 @@ class MainService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
+        destroying = false
+        _isReady = false
+        _isStart = false
+        _isAudioStart = false
         Log.d(logTag,"MainService onCreate, sdk int:${Build.VERSION.SDK_INT} reuseVirtualDisplay:$reuseVirtualDisplay")
         FFI.init(this)
         HandlerThread("Service", Process.THREAD_PRIORITY_BACKGROUND).apply {
@@ -250,9 +315,25 @@ class MainService : Service() {
     }
 
     override fun onDestroy() {
-        checkMediaPermission()
+        destroying = true
+        if (_projectionState == "ready" || _projectionState == "capturing") {
+            _projectionState = "stopped"
+            _projectionError = ""
+        }
+        releaseMediaProjection(stopProjection = true)
+        audioRecordHandle.destroy()
+        sendVP9Thread.shutdownNow()
+        serviceLooper?.quitSafely()
+        serviceHandler = null
+        serviceLooper = null
+        if (instance === this) {
+            instance = null
+        }
+        @Suppress("DEPRECATION")
+        stopForeground(true)
         stopService(Intent(this, FloatingWindowService::class.java))
         super.onDestroy()
+        Log.d(logTag, "MainService destroyed and projection resources released")
     }
 
     private var isHalfScale: Boolean? = null;
@@ -334,17 +415,19 @@ class MainService : Service() {
                 FFI.startService()
             }
             Log.d(logTag, "service starting: ${startId}:${Thread.currentThread()}")
-            val mediaProjectionManager =
-                getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
-
             intent.getParcelableExtra<Intent>(EXT_MEDIA_PROJECTION_RES_INTENT)?.let {
-                mediaProjection =
-                    mediaProjectionManager.getMediaProjection(Activity.RESULT_OK, it)
-                checkMediaPermission()
-                _isReady = true
+                initializeMediaProjection(it)
             } ?: let {
-                Log.d(logTag, "getParcelableExtra intent null, invoke requestMediaProjection")
-                requestMediaProjection()
+                Log.w(logTag, "MediaProjection token missing; consent must be requested by a visible Activity")
+                _isReady = false
+                _projectionState = "error"
+                _projectionError = "缺少屏幕录制授权令牌"
+                checkMediaPermission()
+                VntMainActivity.notifyRustdeskMethod(
+                    "on_media_projection_failed",
+                    mapOf("reason" to "projection_token_missing")
+                )
+                stopSelf()
             }
         }
         return START_NOT_STICKY // don't use sticky (auto restart), the new service (from auto restart) will lose control
@@ -355,12 +438,33 @@ class MainService : Service() {
         updateScreenInfo(newConfig.orientation)
     }
 
-    private fun requestMediaProjection() {
-        val intent = Intent(this, PermissionRequestTransparentActivity::class.java).apply {
-            action = ACT_REQUEST_MEDIA_PROJECTION
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+    private fun initializeMediaProjection(resultIntent: Intent): Boolean {
+        releaseMediaProjection(stopProjection = true)
+        return try {
+            val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
+            val projection = manager.getMediaProjection(Activity.RESULT_OK, resultIntent)
+            projection.registerCallback(mediaProjectionCallback, Handler(Looper.getMainLooper()))
+            mediaProjection = projection
+            _isReady = true
+            _projectionState = "ready"
+            _projectionError = ""
+            checkMediaPermission()
+            Log.i(logTag, "MediaProjection session initialized")
+            true
+        } catch (error: Exception) {
+            mediaProjection = null
+            _isReady = false
+            _projectionState = "error"
+            _projectionError = error.message ?: "屏幕录制会话初始化失败"
+            checkMediaPermission()
+            Log.e(logTag, "Failed to initialize MediaProjection", error)
+            VntMainActivity.notifyRustdeskMethod(
+                "on_media_projection_failed",
+                mapOf("reason" to "projection_init_failed", "message" to (error.message ?: ""))
+            )
+            stopSelf()
+            false
         }
-        startActivity(intent)
     }
 
     @SuppressLint("WrongConstant")
@@ -404,6 +508,7 @@ class MainService : Service() {
         return audioRecordHandle.onVoiceCallClosed(mediaProjection)
     }
 
+    @Synchronized
     fun startCapture(): Boolean {
         if (isStart) {
             return true
@@ -416,11 +521,21 @@ class MainService : Service() {
         updateScreenInfo(resources.configuration.orientation)
         Log.d(logTag, "Start Capture")
         surface = createSurface()
+        if (surface == null) {
+            Log.e(logTag, "startCapture failed: capture surface is null")
+            return false
+        }
 
-        if (useVP9) {
+        val displayStarted = if (useVP9) {
             startVP9VideoRecorder(mediaProjection!!)
         } else {
             startRawVideoRecorder(mediaProjection!!)
+        }
+        if (!displayStarted) {
+            Log.e(logTag, "startCapture failed: virtual display was not created")
+            stopCapture()
+            invalidateMediaProjection("virtual_display_failed")
+            return false
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
@@ -433,6 +548,7 @@ class MainService : Service() {
         }
         checkMediaPermission()
         _isStart = true
+        _projectionState = "capturing"
         FFI.setFrameRawEnable("video",true)
         MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
         return true
@@ -443,24 +559,40 @@ class MainService : Service() {
         Log.d(logTag, "Stop Capture")
         FFI.setFrameRawEnable("video",false)
         _isStart = false
+        if (_isReady && _projectionState == "capturing") {
+            _projectionState = "ready"
+        }
         MainActivity.rdClipboardManager?.setCaptureStarted(_isStart)
         // release video
-        if (reuseVirtualDisplay) {
-            // The virtual display video projection can be paused by calling `setSurface(null)`.
-            // https://developer.android.com/reference/android/hardware/display/VirtualDisplay.Callback
-            // https://learn.microsoft.com/en-us/dotnet/api/android.hardware.display.virtualdisplay.callback.onpaused?view=net-android-34.0
-            virtualDisplay?.setSurface(null)
-        } else {
-            virtualDisplay?.release()
+        try {
+            if (reuseVirtualDisplay) {
+                // The virtual display video projection can be paused by calling `setSurface(null)`.
+                // https://developer.android.com/reference/android/hardware/display/VirtualDisplay.Callback
+                // https://learn.microsoft.com/en-us/dotnet/api/android.hardware.display.virtualdisplay.callback.onpaused?view=net-android-34.0
+                virtualDisplay?.setSurface(null)
+            } else {
+                virtualDisplay?.release()
+            }
+        } catch (error: Exception) {
+            Log.w(logTag, "Failed to detach capture surface", error)
         }
         // suface needs to be release after `imageReader.close()` to imageReader access released surface
         // https://github.com/rustdesk/rustdesk/issues/4118#issuecomment-1515666629
         imageReader?.close()
         imageReader = null
         videoEncoder?.let {
-            it.signalEndOfInputStream()
-            it.stop()
-            it.release()
+            try {
+                it.signalEndOfInputStream()
+                it.stop()
+            } catch (error: Exception) {
+                Log.w(logTag, "Failed to stop video encoder cleanly", error)
+            } finally {
+                try {
+                    it.release()
+                } catch (error: Exception) {
+                    Log.w(logTag, "Failed to release video encoder", error)
+                }
+            }
         }
         if (!reuseVirtualDisplay) {
             virtualDisplay = null
@@ -469,6 +601,7 @@ class MainService : Service() {
         // suface needs to be release after `imageReader.close()` to imageReader access released surface
         // https://github.com/rustdesk/rustdesk/issues/4118#issuecomment-1515666629
         surface?.release()
+        surface = null
 
         // release audio
         _isAudioStart = false
@@ -476,50 +609,84 @@ class MainService : Service() {
     }
 
     fun destroy() {
-        Log.d(logTag, "destroy service")
-        _isReady = false
-        _isAudioStart = false
-
-        stopCapture()
-
-        if (reuseVirtualDisplay) {
-            virtualDisplay?.release()
-            virtualDisplay = null
+        if (destroying) {
+            return
         }
-
-        mediaProjection = null
-        checkMediaPermission()
+        Log.d(logTag, "destroy service")
+        destroying = true
+        _projectionState = "stopped"
+        _projectionError = ""
+        releaseMediaProjection(stopProjection = true)
+        @Suppress("DEPRECATION")
         stopForeground(true)
         stopService(Intent(this, FloatingWindowService::class.java))
         stopSelf()
     }
 
+    @Synchronized
+    private fun invalidateMediaProjection(reason: String) {
+        _projectionState = "error"
+        _projectionError = reason
+        releaseMediaProjection(stopProjection = true)
+        VntMainActivity.notifyRustdeskMethod(
+            "on_media_projection_failed",
+            mapOf("reason" to reason)
+        )
+        stopSelf()
+    }
+
+    @Synchronized
+    private fun releaseMediaProjection(stopProjection: Boolean) {
+        val projection = mediaProjection
+        mediaProjection = null
+        _isReady = false
+        _isAudioStart = false
+
+        stopCapture()
+        try {
+            virtualDisplay?.release()
+        } catch (error: Exception) {
+            Log.w(logTag, "Failed to release virtual display", error)
+        }
+        virtualDisplay = null
+
+        if (projection != null) {
+            try {
+                projection.unregisterCallback(mediaProjectionCallback)
+            } catch (error: Exception) {
+                Log.d(logTag, "MediaProjection callback was already unregistered", error)
+            }
+            if (stopProjection) {
+                try {
+                    projection.stop()
+                } catch (error: Exception) {
+                    Log.w(logTag, "Failed to stop MediaProjection cleanly", error)
+                }
+            }
+        }
+        checkMediaPermission()
+    }
+
     fun checkMediaPermission(): Boolean {
         Handler(Looper.getMainLooper()).post {
-            MainActivity.flutterMethodChannel?.invokeMethod(
-                "on_state_changed",
-                mapOf("name" to "media", "value" to isReady.toString())
-            )
+            VntMainActivity.notifyRustdeskStateChange("media", isReady)
         }
         Handler(Looper.getMainLooper()).post {
-            MainActivity.flutterMethodChannel?.invokeMethod(
-                "on_state_changed",
-                mapOf("name" to "input", "value" to InputService.isOpen.toString())
-            )
+            VntMainActivity.notifyRustdeskStateChange("input", InputService.isOpen)
         }
         return isReady
     }
 
-    private fun startRawVideoRecorder(mp: MediaProjection) {
+    private fun startRawVideoRecorder(mp: MediaProjection): Boolean {
         Log.d(logTag, "startRawVideoRecorder,screen info:$SCREEN_INFO")
         if (surface == null) {
             Log.d(logTag, "startRawVideoRecorder failed,surface is null")
-            return
+            return false
         }
-        createOrSetVirtualDisplay(mp, surface!!)
+        return createOrSetVirtualDisplay(mp, surface!!)
     }
 
-    private fun startVP9VideoRecorder(mp: MediaProjection) {
+    private fun startVP9VideoRecorder(mp: MediaProjection): Boolean {
         createMediaCodec()
         videoEncoder?.let {
             surface = it.createInputSurface()
@@ -528,14 +695,15 @@ class MainService : Service() {
             }
             it.setCallback(cb)
             it.start()
-            createOrSetVirtualDisplay(mp, surface!!)
+            return createOrSetVirtualDisplay(mp, surface!!)
         }
+        return false
     }
 
     // https://github.com/bk138/droidVNC-NG/blob/b79af62db5a1c08ed94e6a91464859ffed6f4e97/app/src/main/java/net/christianbeier/droidvnc_ng/MediaProjectionService.java#L250
     // Reuse virtualDisplay if it exists, to avoid media projection confirmation dialog every connection.
-    private fun createOrSetVirtualDisplay(mp: MediaProjection, s: Surface) {
-        try {
+    private fun createOrSetVirtualDisplay(mp: MediaProjection, s: Surface): Boolean {
+        return try {
             virtualDisplay?.let {
                 it.resize(SCREEN_INFO.width, SCREEN_INFO.height, SCREEN_INFO.dpi)
                 it.setSurface(s)
@@ -546,10 +714,13 @@ class MainService : Service() {
                     s, null, null
                 )
             }
-        } catch (e: SecurityException) {
-            Log.w(logTag, "createOrSetVirtualDisplay: got SecurityException, re-requesting confirmation");
-            // This initiates a prompt dialog for the user to confirm screen projection.
-            requestMediaProjection()
+            virtualDisplay != null
+        } catch (error: SecurityException) {
+            Log.w(logTag, "createOrSetVirtualDisplay rejected expired or reused consent", error)
+            false
+        } catch (error: IllegalStateException) {
+            Log.w(logTag, "createOrSetVirtualDisplay rejected invalid projection state", error)
+            false
         }
     }
 
@@ -619,7 +790,7 @@ class MainService : Service() {
 
     @SuppressLint("UnspecifiedImmutableFlag")
     private fun createForegroundNotification() {
-        val intent = Intent(this, MainActivity::class.java).apply {
+        val intent = Intent(this, VntMainActivity::class.java).apply {
             flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
             action = Intent.ACTION_MAIN
             addCategory(Intent.CATEGORY_LAUNCHER)
@@ -636,7 +807,7 @@ class MainService : Service() {
             .setDefaults(Notification.DEFAULT_ALL)
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_DEFAULT)
-            .setContentTitle(DEFAULT_NOTIFY_TITLE)
+            .setContentTitle(getString(R.string.app_name))
             .setContentText(translate(DEFAULT_NOTIFY_TEXT))
             .setOnlyAlertOnce(true)
             .setContentIntent(pendingIntent)

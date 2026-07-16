@@ -108,6 +108,38 @@ void main() {
     expect(status.canAttemptRepair, isTrue);
   });
 
+  test('Android 通知、悬浮窗和电池白名单是建议项，不阻断核心远控', () {
+    final status = buildStatus(
+      platform: RemoteAssistPlatform.android,
+      controlledServiceRunning: true,
+      portListening: true,
+      screenCapturePermissionGranted: true,
+      accessibilityPermissionGranted: true,
+      notificationPermissionGranted: false,
+      overlayPermissionGranted: false,
+      batteryOptimizationIgnored: false,
+    );
+
+    expect(status.permissionsReady, isTrue);
+    expect(status.controlledViewReady, isTrue);
+    expect(status.controlledReady, isTrue);
+    expect(status.hasAndroidRecommendations, isTrue);
+  });
+
+  test('Android 无障碍未连接时允许观看但不宣称可完整控制', () {
+    final status = buildStatus(
+      platform: RemoteAssistPlatform.android,
+      controlledServiceRunning: true,
+      portListening: true,
+      screenCapturePermissionGranted: true,
+      accessibilityPermissionGranted: false,
+    );
+
+    expect(status.controlledViewReady, isTrue);
+    expect(status.controlledReady, isFalse);
+    expect(status.needsAndroidPermissionGuidance, isTrue);
+  });
+
   test('macOS status exposes bundled runtime and controlled readiness', () {
     final status = buildStatus(
       platform: RemoteAssistPlatform.macos,

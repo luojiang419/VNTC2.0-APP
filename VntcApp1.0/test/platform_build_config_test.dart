@@ -90,16 +90,18 @@ void main() {
     expect(chatPage, isNot(contains('await sourceFile.readAsBytes()')));
   });
 
-  test('Android dataSync foreground service declares its scoped permission',
-      () {
+  test('Android VPN foreground service uses the systemExempted scope', () {
     final manifest =
         _readProjectFile('android/app/src/main/AndroidManifest.xml');
 
     expect(
       manifest,
-      contains('android.permission.FOREGROUND_SERVICE_DATA_SYNC'),
+      contains('android.permission.FOREGROUND_SERVICE_SYSTEM_EXEMPTED'),
     );
-    expect(manifest, contains('android:foregroundServiceType="dataSync"'));
+    expect(
+        manifest, contains('android:foregroundServiceType="systemExempted"'));
+    expect(
+        manifest, isNot(contains('android:foregroundServiceType="dataSync"')));
   });
 
   test('Android updater resumes APK install after unknown-source approval', () {
@@ -236,12 +238,13 @@ void main() {
     );
 
     expect(versionUtils, contains('function Get-VntBuildVersion'));
+    expect(versionUtils, contains('function Resolve-VntBuildVersion'));
     expect(versionUtils, contains('function Get-NextVntBuildVersion'));
     expect(versionUtils, contains("-match '^(\\d+)\\.(\\d+)\\.(\\d+)\$'"));
     expect(portableScript, contains('build_version_utils.ps1'));
     expect(installerScript, contains('build_version_utils.ps1'));
-    expect(portableScript, contains('Get-VntBuildVersion -VersionFile'));
-    expect(installerScript, contains('Get-VntBuildVersion -VersionFile'));
+    expect(portableScript, contains('Resolve-VntBuildVersion `'));
+    expect(installerScript, contains('Resolve-VntBuildVersion `'));
     final windowsBuildScript = _readProjectFile('scripts/build_windows.bat');
     expect(windowsBuildScript, contains('tokens=1-4 delims=.'));
   });

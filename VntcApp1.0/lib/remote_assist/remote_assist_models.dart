@@ -179,6 +179,16 @@ class RemoteAssistPeer {
   bool get canBeControlled =>
       supportedRoles.contains(RemoteAssistConstants.capabilityControlled);
 
+  bool get hasRemoteAssistState => capabilities.contains(
+        RemoteAssistConstants.capabilityStateProtocolV1,
+      );
+
+  bool get remoteHostReady =>
+      capabilities.contains(RemoteAssistConstants.capabilityHostReady);
+
+  bool get remoteInputReady =>
+      capabilities.contains(RemoteAssistConstants.capabilityInputReady);
+
   bool get isLinux => platform == RemoteAssistPlatform.linux;
 }
 
@@ -208,7 +218,14 @@ class RemoteAssistHealthStatus {
     required this.controlledServiceRunning,
     required this.notificationPermissionGranted,
     required this.screenCapturePermissionGranted,
+    this.screenCaptureActive = false,
+    this.screenCaptureState = 'idle',
+    this.screenCaptureError = '',
     required this.accessibilityPermissionGranted,
+    this.accessibilitySettingEnabled = false,
+    this.inputDispatchState = 'idle',
+    this.lastInputDispatchAtEpochMs = 0,
+    this.inputDispatchError = '',
     required this.overlayPermissionGranted,
     required this.batteryOptimizationIgnored,
     required this.issues,
@@ -238,7 +255,14 @@ class RemoteAssistHealthStatus {
   final bool controlledServiceRunning;
   final bool notificationPermissionGranted;
   final bool screenCapturePermissionGranted;
+  final bool screenCaptureActive;
+  final String screenCaptureState;
+  final String screenCaptureError;
   final bool accessibilityPermissionGranted;
+  final bool accessibilitySettingEnabled;
+  final String inputDispatchState;
+  final int lastInputDispatchAtEpochMs;
+  final String inputDispatchError;
   final bool overlayPermissionGranted;
   final bool batteryOptimizationIgnored;
   final List<String> issues;
@@ -299,23 +323,23 @@ class RemoteAssistHealthStatus {
     if (!isAndroid || !supportsControlledRole) {
       return !isAndroid;
     }
-    return notificationPermissionGranted &&
-        screenCapturePermissionGranted &&
-        accessibilityPermissionGranted &&
-        overlayPermissionGranted &&
-        batteryOptimizationIgnored;
+    return screenCapturePermissionGranted && accessibilityPermissionGranted;
   }
+
+  bool get controlledViewReady =>
+      supportsControlledRole &&
+      supported &&
+      vntConnected &&
+      controlledServiceRunning &&
+      listenerReady &&
+      (!isAndroid || screenCapturePermissionGranted);
 
   bool get controlledReady {
     if (!supportsControlledRole) {
       return false;
     }
     if (isAndroid) {
-      return supported &&
-          vntConnected &&
-          controlledServiceRunning &&
-          listenerReady &&
-          permissionsReady;
+      return controlledViewReady && accessibilityPermissionGranted;
     }
     return supported &&
         vntConnected &&
@@ -339,9 +363,11 @@ class RemoteAssistHealthStatus {
   bool get needsAndroidPermissionGuidance =>
       isAndroid &&
       supportsControlledRole &&
+      (!screenCapturePermissionGranted || !accessibilityPermissionGranted);
+
+  bool get hasAndroidRecommendations =>
+      isAndroid &&
       (!notificationPermissionGranted ||
-          !screenCapturePermissionGranted ||
-          !accessibilityPermissionGranted ||
           !overlayPermissionGranted ||
           !batteryOptimizationIgnored);
 

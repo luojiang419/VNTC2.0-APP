@@ -136,13 +136,8 @@ public class MainActivity extends FlutterActivity {
     private void startNotificationService() {
         try {
             Intent serviceIntent = new Intent(this, VntNotificationService.class);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                // Android 8.0+ 使用 startForegroundService
-                startForegroundService(serviceIntent);
-            } else {
-                startService(serviceIntent);
-            }
-            Log.d(TAG, "常驻通知服务已启动");
+            startService(serviceIntent);
+            Log.d(TAG, "通知状态服务已启动");
         } catch (Exception e) {
             Log.e(TAG, "启动通知服务失败: " + e.getMessage(), e);
             // 不要让通知服务启动失败阻止应用运行
@@ -623,6 +618,7 @@ public class MainActivity extends FlutterActivity {
             notifyRustdeskStateChange("media", false);
             notifyRustdeskStateChange("input", isRustdeskInputEnabled());
             if (requestPermissionIfNeeded) {
+                com.carriez.flutter_hbb.MainService.markProjectionRequestStarted();
                 Intent intent = new Intent(
                         this,
                         com.carriez.flutter_hbb.PermissionRequestTransparentActivity.class
@@ -632,19 +628,12 @@ public class MainActivity extends FlutterActivity {
             }
             return;
         }
-
-        Intent serviceIntent = new Intent(this, com.carriez.flutter_hbb.MainService.class);
-        serviceIntent.setAction("INIT_MEDIA_PROJECTION_AND_SERVICE");
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(serviceIntent);
-        } else {
-            startService(serviceIntent);
-        }
+        // MediaProjection 令牌只能用于一次会话。服务已就绪时不得用缺少令牌的 Intent 重启它。
         notifyRustdeskServiceState();
     }
 
     private void stopRustdeskControlledService() {
-        stopService(new Intent(this, com.carriez.flutter_hbb.MainService.class));
+        com.carriez.flutter_hbb.MainService.stop(this);
         notifyRustdeskStateChange("media", false);
         notifyRustdeskStateChange("input", isRustdeskInputEnabled());
     }
@@ -681,7 +670,7 @@ public class MainActivity extends FlutterActivity {
         } else {
             // 已有权限，直接启动
             Intent serviceIntent = new Intent(this, MyVpnService.class);
-            startService(serviceIntent);
+            ContextCompat.startForegroundService(this, serviceIntent);
         }
     }
 
@@ -699,7 +688,7 @@ public class MainActivity extends FlutterActivity {
         } else if (requestCode == VPN_REQUEST_CODE) {
             if (resultCode == RESULT_OK) {
                 Intent serviceIntent = new Intent(this, MyVpnService.class);
-                startService(serviceIntent);
+                ContextCompat.startForegroundService(this, serviceIntent);
             } else {
                 FlutterMethodChannel.callError("User denied VPN authorization", null);
             }

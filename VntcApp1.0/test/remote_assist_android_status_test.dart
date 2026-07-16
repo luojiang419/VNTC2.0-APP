@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/remote_assist/remote_assist_android_bridge.dart';
 
@@ -46,5 +48,74 @@ void main() {
     expect(status.accessibilitySettingEnabled, isTrue);
     expect(status.accessibilityPermissionGranted, isFalse);
     expect(status.permissionsReady, isFalse);
+  });
+
+  test('Android 录屏授权请求状态与可用状态分开解析', () {
+    final requesting = RemoteAssistAndroidStatus.fromMap(
+      const <String, dynamic>{
+        'screenCapturePermissionGranted': false,
+        'screenCaptureState': 'requesting',
+        'screenCaptureRequestPending': true,
+      },
+    );
+    final ready = RemoteAssistAndroidStatus.fromMap(
+      const <String, dynamic>{
+        'screenCapturePermissionGranted': true,
+        'screenCaptureState': 'ready',
+        'screenCaptureRequestPending': false,
+      },
+    );
+
+    expect(requesting.screenCapturePermissionGranted, isFalse);
+    expect(requesting.screenCaptureRequestPending, isTrue);
+    expect(requesting.screenCaptureState, 'requesting');
+    expect(ready.screenCapturePermissionGranted, isTrue);
+    expect(ready.screenCaptureRequestPending, isFalse);
+    expect(ready.screenCaptureState, 'ready');
+  });
+
+  test('Android 录屏失败原因会保留给界面诊断', () {
+    final status = RemoteAssistAndroidStatus.fromMap(
+      const <String, dynamic>{
+        'screenCaptureState': 'error',
+        'screenCaptureError': 'projection_init_failed',
+      },
+    );
+
+    expect(status.screenCaptureState, 'error');
+    expect(status.screenCaptureError, 'projection_init_failed');
+  });
+
+  test('Android 远程输入回执会区分服务连接与手势执行结果', () {
+    final status = RemoteAssistAndroidStatus.fromMap(
+      const <String, dynamic>{
+        'accessibilityPermissionGranted': true,
+        'inputDispatchState': 'failed',
+        'lastInputDispatchAtEpochMs': 123456,
+        'inputDispatchError': '系统拒绝分发远程手势',
+      },
+    );
+
+    expect(status.accessibilityPermissionGranted, isTrue);
+    expect(status.inputDispatchState, 'failed');
+    expect(status.lastInputDispatchAtEpochMs, 123456);
+    expect(status.inputDispatchError, '系统拒绝分发远程手势');
+  });
+
+  test('Android 受控启动会串行等待录屏与 49999 监听真正就绪', () {
+    final runtime = File(
+      'lib/remote_assist/remote_assist_android_runtime.dart',
+    ).readAsStringSync();
+    final nativeService = File(
+      'vntcrustdesk-src/flutter/android/app/src/main/kotlin/'
+      'com/carriez/flutter_hbb/MainService.kt',
+    ).readAsStringSync();
+
+    expect(runtime, contains('_controlledStartCompleter'));
+    expect(runtime, contains('if (!hbb_common.gFFI.serverModel.isStart)'));
+    expect(runtime, contains('await _waitForControlledRuntime()'));
+    expect(runtime, contains('status.listenerReady'));
+    expect(
+        nativeService, contains('Intent(this, VntMainActivity::class.java)'));
   });
 }

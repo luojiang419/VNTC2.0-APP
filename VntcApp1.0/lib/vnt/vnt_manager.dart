@@ -403,6 +403,28 @@ class VntManager {
       return pending;
     }
 
+    if (!supportMultiple()) {
+      _removeClosedConnections();
+      final activeEntry = map.entries
+          .where((entry) => entry.key != key && !entry.value.isClosed())
+          .firstOrNull;
+      if (activeEntry != null) {
+        return Future<VntBox>.error(
+          StateError(
+            '移动端仅支持一个 VPN 通道，请先断开“${activeEntry.value.networkConfig.configName}”',
+          ),
+        );
+      }
+      final pendingKey = _pendingCreates.keys
+          .where((pendingKey) => pendingKey != key)
+          .firstOrNull;
+      if (pendingKey != null) {
+        return Future<VntBox>.error(
+          StateError('移动端已有其他 VPN 配置正在连接，请稍后重试'),
+        );
+      }
+    }
+
     _connectionGate.begin(key);
     final completer = Completer<VntBox>();
     _pendingCreates[key] = completer.future;

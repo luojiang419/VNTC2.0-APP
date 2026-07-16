@@ -66,8 +66,15 @@ class RemoteAssistAndroidStatus {
   const RemoteAssistAndroidStatus({
     required this.notificationPermissionGranted,
     required this.screenCapturePermissionGranted,
+    required this.screenCaptureActive,
+    required this.screenCaptureState,
+    required this.screenCaptureError,
+    required this.screenCaptureRequestPending,
     required this.accessibilityPermissionGranted,
     required this.accessibilitySettingEnabled,
+    required this.inputDispatchState,
+    required this.lastInputDispatchAtEpochMs,
+    required this.inputDispatchError,
     required this.overlayPermissionGranted,
     required this.batteryOptimizationIgnored,
     required this.controllerAvailable,
@@ -85,8 +92,15 @@ class RemoteAssistAndroidStatus {
 
   final bool notificationPermissionGranted;
   final bool screenCapturePermissionGranted;
+  final bool screenCaptureActive;
+  final String screenCaptureState;
+  final String screenCaptureError;
+  final bool screenCaptureRequestPending;
   final bool accessibilityPermissionGranted;
   final bool accessibilitySettingEnabled;
+  final String inputDispatchState;
+  final int lastInputDispatchAtEpochMs;
+  final String inputDispatchError;
   final bool overlayPermissionGranted;
   final bool batteryOptimizationIgnored;
   final bool controllerAvailable;
@@ -120,13 +134,31 @@ class RemoteAssistAndroidStatus {
       return fallback;
     }
 
+    int readInt(String key) {
+      final value = map[key];
+      if (value is int) {
+        return value;
+      }
+      if (value is num) {
+        return value.toInt();
+      }
+      return int.tryParse(value?.toString() ?? '') ?? 0;
+    }
+
     return RemoteAssistAndroidStatus(
       notificationPermissionGranted: readBool('notificationPermissionGranted'),
       screenCapturePermissionGranted:
           readBool('screenCapturePermissionGranted'),
+      screenCaptureActive: readBool('screenCaptureActive'),
+      screenCaptureState: (map['screenCaptureState'] ?? 'idle').toString(),
+      screenCaptureError: (map['screenCaptureError'] ?? '').toString(),
+      screenCaptureRequestPending: readBool('screenCaptureRequestPending'),
       accessibilityPermissionGranted:
           readBool('accessibilityPermissionGranted'),
       accessibilitySettingEnabled: readBool('accessibilitySettingEnabled'),
+      inputDispatchState: (map['inputDispatchState'] ?? 'idle').toString(),
+      lastInputDispatchAtEpochMs: readInt('lastInputDispatchAtEpochMs'),
+      inputDispatchError: (map['inputDispatchError'] ?? '').toString(),
       overlayPermissionGranted: readBool('overlayPermissionGranted'),
       batteryOptimizationIgnored: readBool('batteryOptimizationIgnored'),
       controllerAvailable: readBool('controllerAvailable'),
