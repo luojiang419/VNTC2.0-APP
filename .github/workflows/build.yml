@@ -617,6 +617,7 @@ jobs:
           rustup set auto-self-update disable
           rustup toolchain install "${RUST_VERSION}"
           rustup default "${RUST_VERSION}"
+          rustup component add rustfmt
           rustup target add aarch64-linux-android
           cargo install cargo-ndk --version "${RUSTDESK_CARGO_NDK_VERSION}" --locked
           cargo install flutter_rust_bridge_codegen \

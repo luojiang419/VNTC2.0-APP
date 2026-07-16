@@ -123,6 +123,7 @@ void main() {
     expect(workflow, contains('build-rustdesk-android-arm64:'));
     expect(workflow, contains('rustdesk-android-arm64-native'));
     expect(workflow, contains('RUSTDESK_FRB_CODEGEN_VERSION: 1.80.1'));
+    expect(workflow, contains('rustup component add rustfmt'));
     expect(workflow, contains('flutter_rust_bridge_codegen'));
     expect(workflow, contains('test -s src/bridge_generated.rs'));
     expect(workflow, contains('test -s src/bridge_generated.io.rs'));
