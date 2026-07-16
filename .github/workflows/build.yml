@@ -351,7 +351,7 @@ jobs:
           rustup set auto-self-update disable
           rustup toolchain install "${RUST_VERSION}"
           rustup default "${RUST_VERSION}"
-          rustup component add rust-src --toolchain "${RUST_VERSION}"
+          rustup component add rust-src rustfmt --toolchain "${RUST_VERSION}"
           rustup target add aarch64-apple-darwin
           rustup target add x86_64-apple-darwin
           rustc -V
