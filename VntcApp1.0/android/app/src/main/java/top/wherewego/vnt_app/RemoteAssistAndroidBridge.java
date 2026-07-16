@@ -14,22 +14,18 @@ import android.text.TextUtils;
 import androidx.core.content.ContextCompat;
 
 import java.io.File;
-import java.io.BufferedReader;
-import java.io.FileReader;
 import java.io.IOException;
 import java.util.HashMap;
-import java.util.Locale;
 import java.util.Map;
 import java.util.zip.ZipFile;
 
+import ffi.FFI;
 import io.flutter.embedding.engine.FlutterEngine;
 import io.flutter.plugin.common.MethodCall;
 import io.flutter.plugin.common.MethodChannel;
 
 public class RemoteAssistAndroidBridge {
     private static final String CHANNEL = "top.wherewego.vnt/remote_assist_android";
-    private static final int DIRECT_ACCESS_PORT = 49999;
-
     private final MainActivity activity;
 
     public RemoteAssistAndroidBridge(MainActivity activity, FlutterEngine flutterEngine) {
@@ -119,7 +115,8 @@ public class RemoteAssistAndroidBridge {
         boolean controllerAvailable = hasBundledRustdeskController();
         boolean controlledServiceRunning =
                 com.carriez.flutter_hbb.MainService.Companion.isServiceRunning();
-        boolean portListening = controlledServiceRunning && isTcpPortListening(DIRECT_ACCESS_PORT);
+        boolean portListening = controlledServiceRunning
+                && FFI.INSTANCE.isDirectServerListening();
         status.put("notificationPermissionGranted", hasNotificationPermission());
         status.put("screenCapturePermissionGranted", screenCaptureGranted);
         status.put("screenCaptureActive", screenCaptureActive);
@@ -148,32 +145,6 @@ public class RemoteAssistAndroidBridge {
         status.put("serviceRunning", controlledServiceRunning);
         status.put("portListening", portListening);
         return status;
-    }
-
-    private boolean isTcpPortListening(int port) {
-        String expectedPort = String.format(Locale.US, "%04X", port);
-        return isTcpPortListeningIn("/proc/self/net/tcp", expectedPort)
-                || isTcpPortListeningIn("/proc/self/net/tcp6", expectedPort);
-    }
-
-    private boolean isTcpPortListeningIn(String path, String expectedPort) {
-        try (BufferedReader reader = new BufferedReader(new FileReader(path))) {
-            String line;
-            while ((line = reader.readLine()) != null) {
-                String[] columns = line.trim().split("\\s+");
-                if (columns.length < 4) {
-                    continue;
-                }
-                String localAddress = columns[1].toUpperCase(Locale.US);
-                String state = columns[3];
-                if ("0A".equals(state) && localAddress.endsWith(":" + expectedPort)) {
-                    return true;
-                }
-            }
-        } catch (IOException ignored) {
-            // procfs 不可读时保持未就绪，避免把前台服务误报成端口监听。
-        }
-        return false;
     }
 
     private void requestPermission(String permission, boolean startServiceAfterGrant) {

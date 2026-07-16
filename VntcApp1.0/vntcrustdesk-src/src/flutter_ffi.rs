@@ -3060,4 +3060,12 @@ pub mod server_side {
     ) -> jboolean {
         jboolean::from(crate::server::is_clipboard_service_ok())
     }
+
+    #[no_mangle]
+    pub unsafe extern "system" fn Java_ffi_FFI_isDirectServerListening(
+        _env: JNIEnv,
+        _class: JClass,
+    ) -> jboolean {
+        jboolean::from(crate::rendezvous_mediator::is_direct_server_listening())
+    }
 }

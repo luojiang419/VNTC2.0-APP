@@ -129,13 +129,6 @@ class RemoteAssistAndroidRuntime {
         await _waitForControlledRuntime();
         completer.complete();
       } catch (error, stackTrace) {
-        if (hbb_common.gFFI.serverModel.isStart) {
-          try {
-            await hbb_common.gFFI.serverModel.stopService();
-          } catch (_) {
-            // 保留原始启动错误，清理失败会在下一次健康检查中继续暴露。
-          }
-        }
         completer.completeError(error, stackTrace);
       } finally {
         if (identical(_controlledStartCompleter, completer)) {

@@ -68,9 +68,9 @@ class Rustup {
 
     final res = runCommand("rustup", ['toolchain', 'list']);
 
-    // To list all non-custom toolchains, we need to filter out lines that
-    // don't start with "stable", "beta", or "nightly".
-    Pattern nonCustom = RegExp(r"^(stable|beta|nightly)");
+    // Keep named channels and pinned numeric releases, while excluding custom
+    // toolchains that may not support `rustup target list`.
+    Pattern nonCustom = RegExp(r"^(stable|beta|nightly|\d+\.\d+\.\d+)(-|$)");
     final lines = res.stdout
         .toString()
         .split('\n')

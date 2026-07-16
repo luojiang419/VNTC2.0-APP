@@ -15,6 +15,17 @@ void main() {
     expect(options, contains('- output/**'));
   });
 
+  test('Cargokit recognizes pinned numeric Rust toolchains as installed', () {
+    final rustup = _readProjectFile(
+      'rust_builder/cargokit/build_tool/lib/src/rustup.dart',
+    );
+
+    expect(
+      rustup,
+      contains(r'^(stable|beta|nightly|\d+\.\d+\.\d+)(-|$)'),
+    );
+  });
+
   test('Android FileProvider paths stay app scoped', () {
     final paths = _readProjectFile(
       'android/app/src/main/res/xml/file_paths.xml',

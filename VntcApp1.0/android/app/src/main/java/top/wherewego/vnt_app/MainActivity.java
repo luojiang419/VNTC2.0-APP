@@ -2,7 +2,9 @@ package top.wherewego.vnt_app;
 
 import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.os.Environment;
 import android.net.Uri;
 import android.net.VpnService;
@@ -21,8 +23,12 @@ import androidx.core.content.FileProvider;
 
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.IOException;
 import java.io.OutputStream;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.util.HashMap;
+import java.util.Locale;
 import java.util.Map;
 
 import io.flutter.embedding.android.FlutterActivity;
@@ -52,6 +58,8 @@ public class MainActivity extends FlutterActivity {
     private static final String RUSTDESK_KEY_START_ON_BOOT_OPT = "KEY_START_ON_BOOT_OPT";
     private static final String RUSTDESK_KEY_APP_DIR_CONFIG_PATH = "KEY_APP_DIR_CONFIG_PATH";
     private static final String RUSTDESK_KEY_IS_SUPPORT_VOICE_CALL = "KEY_IS_SUPPORT_VOICE_CALL";
+    private static final String ANDROID_OFFICIAL_CERT_SHA256 =
+            "83EF92B147643697EA8EFAF4B73A9D370875EE0FD1CBA10A7AC03E184F44D8C7";
     private static volatile MethodChannel rustdeskEventChannel;
     private MethodChannel fileChannel;
     private MethodChannel rustdeskChannel;
@@ -384,18 +392,13 @@ public class MainActivity extends FlutterActivity {
             return;
         }
 
-        File apkFile = new File(filePath);
-        if (!apkFile.exists()) {
-            result.error("APK_NOT_FOUND", "APK file not found: " + filePath, null);
-            return;
-        }
-
         if (pendingInstallResult != null) {
             result.error("REQUEST_IN_PROGRESS", "安装授权请求正在进行", null);
             return;
         }
 
         try {
+            File apkFile = verifyDownloadedApk(filePath);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
                     && !getPackageManager().canRequestPackageInstalls()) {
                 pendingInstallApkPath = apkFile.getAbsolutePath();
@@ -408,6 +411,9 @@ public class MainActivity extends FlutterActivity {
                 return;
             }
             openApkInstaller(apkFile, result);
+        } catch (ApkVerificationException error) {
+            clearPendingInstallRequest();
+            result.error(error.code, error.getMessage(), null);
         } catch (Exception error) {
             clearPendingInstallRequest();
             result.error("INSTALL_APK_FAILED", error.getMessage(), null);
@@ -426,17 +432,139 @@ public class MainActivity extends FlutterActivity {
             return;
         }
 
-        File apkFile = new File(pendingInstallApkPath);
+        String apkPath = pendingInstallApkPath;
         MethodChannel.Result result = pendingInstallResult;
         clearPendingInstallRequest();
-        if (!apkFile.exists()) {
-            result.error("APK_NOT_FOUND", "APK file not found: " + apkFile.getAbsolutePath(), null);
-            return;
-        }
         try {
+            File apkFile = verifyDownloadedApk(apkPath);
             openApkInstaller(apkFile, result);
+        } catch (ApkVerificationException error) {
+            result.error(error.code, error.getMessage(), null);
         } catch (Exception error) {
             result.error("INSTALL_APK_FAILED", error.getMessage(), null);
+        }
+    }
+
+    @NonNull
+    private File verifyDownloadedApk(@NonNull String filePath)
+            throws IOException, NoSuchAlgorithmException, ApkVerificationException {
+        File apkFile = new File(filePath).getCanonicalFile();
+        if (!apkFile.isFile() || apkFile.length() <= 0L) {
+            throw new ApkVerificationException(
+                    "APK_NOT_FOUND",
+                    "APK 文件不存在或为空：" + apkFile.getAbsolutePath()
+            );
+        }
+        if (!apkFile.getName().toLowerCase(Locale.ROOT).endsWith(".apk")) {
+            throw new ApkVerificationException("APK_FILE_TYPE_INVALID", "更新文件不是 APK");
+        }
+        if (!isInsideAppUpdateDirectory(apkFile)) {
+            throw new ApkVerificationException(
+                    "APK_PATH_REJECTED",
+                    "更新 APK 必须位于应用私有更新目录"
+            );
+        }
+
+        PackageManager packageManager = getPackageManager();
+        int signingFlag = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? PackageManager.GET_SIGNING_CERTIFICATES
+                : PackageManager.GET_SIGNATURES;
+        PackageInfo archiveInfo = packageManager.getPackageArchiveInfo(
+                apkFile.getAbsolutePath(),
+                signingFlag
+        );
+        if (archiveInfo == null) {
+            throw new ApkVerificationException("APK_PACKAGE_INVALID", "无法解析更新 APK");
+        }
+        if (!getPackageName().equals(archiveInfo.packageName)) {
+            throw new ApkVerificationException(
+                    "APK_PACKAGE_MISMATCH",
+                    "更新 APK 包名不匹配：" + archiveInfo.packageName
+            );
+        }
+
+        PackageInfo installedInfo;
+        try {
+            installedInfo = packageManager.getPackageInfo(getPackageName(), 0);
+        } catch (PackageManager.NameNotFoundException error) {
+            throw new ApkVerificationException(
+                    "INSTALLED_PACKAGE_NOT_FOUND",
+                    "无法读取当前安装版本"
+            );
+        }
+        long incomingVersionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? archiveInfo.getLongVersionCode()
+                : archiveInfo.versionCode;
+        long installedVersionCode = Build.VERSION.SDK_INT >= Build.VERSION_CODES.P
+                ? installedInfo.getLongVersionCode()
+                : installedInfo.versionCode;
+        if (incomingVersionCode <= installedVersionCode) {
+            throw new ApkVerificationException(
+                    "APK_VERSION_NOT_NEWER",
+                    "更新 APK 版本必须高于当前版本：" + incomingVersionCode
+                            + " <= " + installedVersionCode
+            );
+        }
+
+        Signature[] signatures;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            signatures = archiveInfo.signingInfo == null
+                    ? null
+                    : archiveInfo.signingInfo.getApkContentsSigners();
+        } else {
+            signatures = archiveInfo.signatures;
+        }
+        if (signatures == null || signatures.length != 1) {
+            throw new ApkVerificationException(
+                    "APK_SIGNER_INVALID",
+                    "更新 APK 必须且只能包含一个签名者"
+            );
+        }
+        String signerSha256 = certificateSha256(signatures[0]);
+        if (!ANDROID_OFFICIAL_CERT_SHA256.equals(signerSha256)) {
+            throw new ApkVerificationException(
+                    "APK_SIGNER_MISMATCH",
+                    "更新 APK 不是 VNT 官方签名：" + signerSha256
+            );
+        }
+        return apkFile;
+    }
+
+    private boolean isInsideAppUpdateDirectory(@NonNull File apkFile) throws IOException {
+        return isInsideDirectory(apkFile, getCacheDir())
+                || isInsideDirectory(apkFile, getExternalCacheDir())
+                || isInsideDirectory(apkFile, getFilesDir())
+                || isInsideDirectory(apkFile, getExternalFilesDir(null));
+    }
+
+    private boolean isInsideDirectory(@NonNull File file, @Nullable File directory)
+            throws IOException {
+        if (directory == null) {
+            return false;
+        }
+        String filePath = file.getCanonicalPath();
+        String directoryPath = directory.getCanonicalPath();
+        return filePath.equals(directoryPath)
+                || filePath.startsWith(directoryPath + File.separator);
+    }
+
+    @NonNull
+    private String certificateSha256(@NonNull Signature signature)
+            throws NoSuchAlgorithmException {
+        byte[] digest = MessageDigest.getInstance("SHA-256").digest(signature.toByteArray());
+        StringBuilder result = new StringBuilder(digest.length * 2);
+        for (byte value : digest) {
+            result.append(String.format(Locale.ROOT, "%02X", value & 0xFF));
+        }
+        return result.toString();
+    }
+
+    private static final class ApkVerificationException extends Exception {
+        final String code;
+
+        ApkVerificationException(@NonNull String code, @NonNull String message) {
+            super(message);
+            this.code = code;
         }
     }
 

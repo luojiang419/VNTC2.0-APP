@@ -842,6 +842,14 @@ jobs:
           [ordered]@{
             platform = 'android'
             signingMode = 'official-fixed-certificate'
+            packageName = 'top.wherewego.vnt_app'
+            versionName = '${{ needs.meta.outputs.client_version }}'
+            versionCode = '${{ needs.meta.outputs.client_build_number }}'
+            releaseTag = 'v${{ needs.meta.outputs.client_version }}'
+            assetName = $targetName
+            assetSize = (Get-Item -LiteralPath $targetApk).Length
+            sourceCommit = $Env:GITHUB_SHA
+            workflowRun = "$Env:GITHUB_SERVER_URL/$Env:GITHUB_REPOSITORY/actions/runs/$Env:GITHUB_RUN_ID"
             certificateSha256 = $actualCertificate
             sha256 = $hash
           } | ConvertTo-Json | Set-Content -LiteralPath $reportPath -Encoding UTF8

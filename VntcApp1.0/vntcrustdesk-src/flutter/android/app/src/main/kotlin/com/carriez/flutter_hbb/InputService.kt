@@ -84,15 +84,6 @@ class InputService : AccessibilityService() {
         val lastGestureError: String
             get() = _lastGestureError
 
-        fun disconnect() {
-            val service = ctx
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
-                service?.disableSelf()
-            }
-            ctx = null
-            VntMainActivity.notifyRustdeskStateChange("input", false)
-        }
-
         private fun markGesturePending() {
             _lastGestureState = "pending"
             _lastGestureAtEpochMs = System.currentTimeMillis()

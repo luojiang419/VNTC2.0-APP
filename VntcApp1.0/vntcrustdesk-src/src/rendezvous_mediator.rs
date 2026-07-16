@@ -41,6 +41,11 @@ lazy_static::lazy_static! {
 static SHOULD_EXIT: AtomicBool = AtomicBool::new(false);
 static MANUAL_RESTARTED: AtomicBool = AtomicBool::new(false);
 static SENT_REGISTER_PK: AtomicBool = AtomicBool::new(false);
+static DIRECT_SERVER_LISTENING: AtomicBool = AtomicBool::new(false);
+
+pub fn is_direct_server_listening() -> bool {
+    DIRECT_SERVER_LISTENING.load(Ordering::SeqCst)
+}
 
 #[derive(Clone)]
 pub struct RendezvousMediator {
@@ -769,22 +774,28 @@ fn get_direct_port() -> i32 {
 async fn direct_server(server: ServerPtr) {
     let mut listener = None;
     let mut port = 0;
+    DIRECT_SERVER_LISTENING.store(false, Ordering::SeqCst);
     loop {
         let disabled = !option2bool(
             OPTION_DIRECT_SERVER,
             &Config::get_option(OPTION_DIRECT_SERVER),
         ) || option2bool("stop-service", &Config::get_option("stop-service"));
+        if disabled {
+            DIRECT_SERVER_LISTENING.store(false, Ordering::SeqCst);
+        }
         if !disabled && listener.is_none() {
             port = get_direct_port();
             match hbb_common::tcp::listen_any(port as _).await {
                 Ok(l) => {
                     listener = Some(l);
+                    DIRECT_SERVER_LISTENING.store(true, Ordering::SeqCst);
                     log::info!(
                         "Direct server listening on: {:?}",
                         listener.as_ref().map(|l| l.local_addr())
                     );
                 }
                 Err(err) => {
+                    DIRECT_SERVER_LISTENING.store(false, Ordering::SeqCst);
                     // to-do: pass to ui
                     log::error!(
                         "Failed to start direct server on port: {}, error: {}",
@@ -803,6 +814,7 @@ async fn direct_server(server: ServerPtr) {
         if let Some(l) = listener.as_mut() {
             if disabled || port != get_direct_port() {
                 log::info!("Exit direct access listen");
+                DIRECT_SERVER_LISTENING.store(false, Ordering::SeqCst);
                 listener = None;
                 continue;
             }

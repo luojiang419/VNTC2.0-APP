@@ -439,7 +439,14 @@ class MainService : Service() {
     }
 
     private fun initializeMediaProjection(resultIntent: Intent): Boolean {
-        releaseMediaProjection(stopProjection = true)
+        if (mediaProjection != null ||
+            virtualDisplay != null ||
+            imageReader != null ||
+            videoEncoder != null ||
+            surface != null
+        ) {
+            releaseMediaProjection(stopProjection = true)
+        }
         return try {
             val manager = getSystemService(MEDIA_PROJECTION_SERVICE) as MediaProjectionManager
             val projection = manager.getMediaProjection(Activity.RESULT_OK, resultIntent)

@@ -1,4 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vnt_app/chat/chat_constants.dart';
 import 'package:vnt_app/chat/chat_manager.dart';
 
 void main() {
@@ -42,6 +43,15 @@ void main() {
       buildChatStartupIssueMessage(),
       isNull,
     );
+  });
+
+  test('chat listeners use private ports outside Android reserved range', () {
+    expect(ChatConstants.presencePort, 61018);
+    expect(ChatConstants.transportPort, 61019);
+    expect(ChatConstants.presencePort, greaterThanOrEqualTo(49152));
+    expect(ChatConstants.transportPort, greaterThanOrEqualTo(49152));
+    expect(ChatConstants.chatRuleNameUdp, contains('61018'));
+    expect(ChatConstants.chatRuleNameTcp, contains('61019'));
   });
 
   test('chat startup issue message combines listener failures', () {

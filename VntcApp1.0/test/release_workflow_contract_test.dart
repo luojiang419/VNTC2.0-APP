@@ -59,4 +59,22 @@ void main() {
       expect(match.group(1), matches(RegExp(r'^[0-9a-f]{40}$')));
     }
   });
+
+  test('Android 发布证明绑定资产、版本、包名和源码提交', () {
+    expect(workflow, contains("packageName = 'top.wherewego.vnt_app'"));
+    expect(
+        workflow,
+        contains(
+            'versionName = \'\${{ needs.meta.outputs.client_version }}\''));
+    expect(
+        workflow,
+        contains(
+            'versionCode = \'\${{ needs.meta.outputs.client_build_number }}\''));
+    expect(workflow, contains('assetName = \$targetName'));
+    expect(workflow, contains('sourceCommit = \$Env:GITHUB_SHA'));
+    expect(
+        workflow,
+        contains(
+            'releaseTag = \'v\${{ needs.meta.outputs.client_version }}\''));
+  });
 }

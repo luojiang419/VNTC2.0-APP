@@ -600,11 +600,13 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                 isDark,
                 label: health.supportsControlledRole
                     ? (health.accessibilityPermissionGranted
-                        ? '无障碍已开启'
-                        : '无障碍未开启')
+                        ? '无障碍已连接'
+                        : (health.accessibilitySettingEnabled
+                            ? '无障碍已授权'
+                            : '无障碍未开启'))
                     : '仅控制端已接入',
                 isActive: health.supportsControlledRole
-                    ? health.accessibilityPermissionGranted
+                    ? health.accessibilitySettingEnabled
                     : health.controllerReady,
               ),
             ],
@@ -697,7 +699,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           _buildPermissionTile(
             isDark,
             title: '无障碍控制',
-            granted: health.accessibilityPermissionGranted,
+            granted: health.accessibilitySettingEnabled,
             actionLabel: '设置',
             onTap: () => _manager.openSystemSettings(
               RemoteAssistConstants.androidSettingsAccessibility,

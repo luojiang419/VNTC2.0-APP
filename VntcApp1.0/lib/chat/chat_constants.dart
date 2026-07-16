@@ -1,8 +1,9 @@
 class ChatConstants {
   ChatConstants._();
 
-  static const int presencePort = 50018;
-  static const int transportPort = 50019;
+  // 使用 IANA 动态/私有端口，避开部分 Android 内核保留的 500xx 端口段。
+  static const int presencePort = 61018;
+  static const int transportPort = 61019;
   static const int smallAttachmentMaxBytes = 10 * 1024 * 1024;
   static const int maxTransportPacketBytes = 16 * 1024 * 1024;
   static const int syncBatchSize = 100;
@@ -18,6 +19,6 @@ class ChatConstants {
   static const Duration syncInterval = Duration(seconds: 12);
 
   static const String presencePacketType = 'vnt_chat_presence_v1';
-  static const String chatRuleNameTcp = 'VNTC Chat TCP 50019';
-  static const String chatRuleNameUdp = 'VNTC Chat UDP 50018';
+  static const String chatRuleNameTcp = 'VNTC Chat TCP 61019';
+  static const String chatRuleNameUdp = 'VNTC Chat UDP 61018';
 }
