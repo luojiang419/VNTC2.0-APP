@@ -122,6 +122,10 @@ void main() {
     expect(verifier, contains('DEFAULT_MINIMUM_ALIGNMENT = 16 * 1024'));
     expect(workflow, contains('build-rustdesk-android-arm64:'));
     expect(workflow, contains('rustdesk-android-arm64-native'));
+    expect(workflow, contains('RUSTDESK_FRB_CODEGEN_VERSION: 1.80.1'));
+    expect(workflow, contains('flutter_rust_bridge_codegen'));
+    expect(workflow, contains('test -s src/bridge_generated.rs'));
+    expect(workflow, contains('test -s src/bridge_generated.io.rs'));
     expect(workflow, contains('CargoKit 会在此步骤重编主业务'));
     expect(workflow,
         contains('RUSTFLAGS: -C link-arg=-Wl,-z,max-page-size=16384'));

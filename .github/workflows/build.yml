@@ -34,6 +34,7 @@ env:
   CLIENT_ANDROID_BUILD_TOOLS_VERSION: 36.0.0
   CLIENT_ANDROID_NDK_VERSION: 28.2.13676358
   RUSTDESK_CARGO_NDK_VERSION: 3.1.2
+  RUSTDESK_FRB_CODEGEN_VERSION: 1.80.1
   RUSTDESK_VCPKG_COMMIT_ID: 120deac3062162151622ca4860575a33844ba10b
   RUST_VERSION: 1.88.0
 
@@ -618,8 +619,13 @@ jobs:
           rustup default "${RUST_VERSION}"
           rustup target add aarch64-linux-android
           cargo install cargo-ndk --version "${RUSTDESK_CARGO_NDK_VERSION}" --locked
+          cargo install flutter_rust_bridge_codegen \
+            --version "${RUSTDESK_FRB_CODEGEN_VERSION}" \
+            --features uuid \
+            --locked
           rustc -V
           cargo ndk --version
+          flutter_rust_bridge_codegen --version
 
       - name: 设置固定 vcpkg
         uses: lukka/run-vcpkg@b1a0dd252f06b9e25b3c022a9a03bd7a427fb6a2 # v11.6
@@ -637,6 +643,19 @@ jobs:
           set -euo pipefail
           chmod +x flutter/build_android_deps.sh
           ./flutter/build_android_deps.sh arm64-v8a
+
+      - name: 生成 RustDesk Flutter Rust Bridge
+        shell: bash
+        working-directory: VntcApp1.0/vntcrustdesk-src
+        run: |
+          set -euo pipefail
+          flutter_rust_bridge_codegen \
+            --rust-input src/flutter_ffi.rs \
+            --dart-output "${RUNNER_TEMP}/rustdesk-generated-bridge.dart" \
+            --c-output "${RUNNER_TEMP}/rustdesk-bridge-generated.h"
+          test -s src/bridge_generated.rs
+          test -s src/bridge_generated.io.rs
+          grep -q 'IntoIntoDart<EventToUI>' src/bridge_generated.rs
 
       - name: 构建 16KB 对齐 RustDesk 原生库
         shell: bash
