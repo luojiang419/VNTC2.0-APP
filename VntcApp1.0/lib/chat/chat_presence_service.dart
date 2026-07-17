@@ -181,6 +181,7 @@ class ChatPresenceService {
             virtualIp: context.virtualIp,
             rooms: context.rooms,
             sentAtEpochMs: DateTime.now().millisecondsSinceEpoch,
+            transportPort: ChatConstants.transportPort,
           ).toJson(),
         ),
       );

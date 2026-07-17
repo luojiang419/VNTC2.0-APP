@@ -33,21 +33,161 @@ class ChatTransportService {
   ChatTransportService({
     int? maxPacketBytes,
     Duration? readTimeout,
+    Duration? connectTimeout,
+    Duration? portCacheTtl,
+    Duration? probeRetryDelay,
+    List<int>? transportPortCandidates,
   })  : _maxPacketBytes =
             maxPacketBytes ?? ChatConstants.maxTransportPacketBytes,
-        _readTimeout = readTimeout ?? ChatConstants.transportReadTimeout;
+        _readTimeout = readTimeout ?? ChatConstants.transportReadTimeout,
+        _connectTimeout =
+            connectTimeout ?? ChatConstants.transportConnectTimeout,
+        _portCacheTtl = portCacheTtl ?? ChatConstants.transportPortCacheTtl,
+        _probeRetryDelay =
+            probeRetryDelay ?? ChatConstants.transportProbeRetryDelay,
+        _transportPortCandidates = List<int>.unmodifiable(
+          transportPortCandidates ?? ChatConstants.transportPortCandidates,
+        );
 
   final int _maxPacketBytes;
   final Duration _readTimeout;
+  final Duration _connectTimeout;
+  final Duration _portCacheTtl;
+  final Duration _probeRetryDelay;
+  final List<int> _transportPortCandidates;
   ServerSocket? _server;
   ChatPacketHandler? _handler;
   ChatAttachmentStreamHandler? _attachmentStreamHandler;
   final Map<String, _AttachmentAcknowledgementWaiter>
       _attachmentAcknowledgements = {};
   final Map<String, Future<void>> _attachmentTransfers = {};
+  final Map<String, _TransportPortCacheEntry> _transportPortCache = {};
+  final Map<String, DateTime> _transportProbeFailures = {};
+  final Map<String, Future<int?>> _transportPortProbes = {};
 
   bool get isRunning => _server != null;
   int? get listeningPort => _server?.port;
+
+  int? cachedTransportPortFor(String targetIp) {
+    final normalizedTarget = targetIp.trim();
+    final cached = _transportPortCache[normalizedTarget];
+    if (cached == null) {
+      return null;
+    }
+    if (cached.expiresAt.isBefore(DateTime.now())) {
+      _transportPortCache.remove(normalizedTarget);
+      return null;
+    }
+    return cached.port;
+  }
+
+  bool isTransportProbeCoolingDown(String targetIp) {
+    final failedAt = _transportProbeFailures[targetIp.trim()];
+    if (failedAt == null) {
+      return false;
+    }
+    return DateTime.now().difference(failedAt) < _probeRetryDelay;
+  }
+
+  void rememberTransportPort(String targetIp, int port) {
+    final normalizedTarget = targetIp.trim();
+    if (normalizedTarget.isEmpty || !_transportPortCandidates.contains(port)) {
+      return;
+    }
+    _transportPortCache[normalizedTarget] = _TransportPortCacheEntry(
+      port: port,
+      expiresAt: DateTime.now().add(_portCacheTtl),
+    );
+    _transportProbeFailures.remove(normalizedTarget);
+  }
+
+  void invalidateTransportPort(String targetIp, int port) {
+    final normalizedTarget = targetIp.trim();
+    if (_transportPortCache[normalizedTarget]?.port == port) {
+      _transportPortCache.remove(normalizedTarget);
+    }
+  }
+
+  Future<int?> resolveTransportPort({
+    required String targetIp,
+    bool retryUnavailable = false,
+  }) async {
+    final normalizedTarget = targetIp.trim();
+    if (normalizedTarget.isEmpty) {
+      return null;
+    }
+    final cachedPort = cachedTransportPortFor(normalizedTarget);
+    if (cachedPort != null) {
+      return cachedPort;
+    }
+    if (!retryUnavailable && isTransportProbeCoolingDown(normalizedTarget)) {
+      return null;
+    }
+    final existingProbe = _transportPortProbes[normalizedTarget];
+    if (existingProbe != null) {
+      return existingProbe;
+    }
+    final probe = _probeTransportPorts(normalizedTarget);
+    _transportPortProbes[normalizedTarget] = probe;
+    try {
+      return await probe;
+    } finally {
+      if (_transportPortProbes[normalizedTarget] == probe) {
+        _transportPortProbes.remove(normalizedTarget);
+      }
+    }
+  }
+
+  Future<int?> _probeTransportPorts(String targetIp) async {
+    final firstAvailablePort = Completer<int?>();
+    var pendingProbes = _transportPortCandidates.length;
+    if (pendingProbes == 0) {
+      return null;
+    }
+    for (final port in _transportPortCandidates) {
+      unawaited(
+        _probeTransportPort(targetIp: targetIp, port: port).then(
+          (availablePort) {
+            pendingProbes -= 1;
+            if (availablePort != null && !firstAvailablePort.isCompleted) {
+              firstAvailablePort.complete(availablePort);
+              return;
+            }
+            if (pendingProbes == 0 && !firstAvailablePort.isCompleted) {
+              firstAvailablePort.complete(null);
+            }
+          },
+        ),
+      );
+    }
+    final availablePort = await firstAvailablePort.future;
+    if (availablePort != null) {
+      rememberTransportPort(targetIp, availablePort);
+    } else {
+      _transportProbeFailures[targetIp] = DateTime.now();
+    }
+    return availablePort;
+  }
+
+  Future<int?> _probeTransportPort({
+    required String targetIp,
+    required int port,
+  }) async {
+    Socket? socket;
+    try {
+      socket = await Socket.connect(
+        targetIp,
+        port,
+        timeout: _connectTimeout,
+      );
+      await socket.close();
+      return port;
+    } catch (_) {
+      return null;
+    } finally {
+      socket?.destroy();
+    }
+  }
 
   String _attachmentAcknowledgementKey(String targetIp, String messageId) =>
       '$targetIp|$messageId';
@@ -98,6 +238,7 @@ class ChatTransportService {
     final socket = await Socket.connect(
       targetIp,
       port ?? ChatConstants.transportPort,
+      timeout: _connectTimeout,
     );
     try {
       var sentBytes = 0;
@@ -178,6 +319,7 @@ class ChatTransportService {
       socket = await Socket.connect(
         targetIp,
         port ?? ChatConstants.transportPort,
+        timeout: _connectTimeout,
       );
       final streamHeader = ChatTransportPacket(
         type: packet.type,
@@ -389,4 +531,14 @@ class ChatTransportService {
 class _AttachmentAcknowledgementWaiter {
   final Completer<int> resumeOffset = Completer<int>();
   final Completer<void> completed = Completer<void>();
+}
+
+class _TransportPortCacheEntry {
+  const _TransportPortCacheEntry({
+    required this.port,
+    required this.expiresAt,
+  });
+
+  final int port;
+  final DateTime expiresAt;
 }

@@ -2,11 +2,35 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
+import 'package:vnt_app/chat/chat_constants.dart';
 import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/chat/chat_presence_service.dart';
 
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
+
+  test('在线状态报文声明聊天端口并兼容旧版缺省字段', () {
+    const announcement = ChatPresenceAnnouncement(
+      hallId: 'hall:test',
+      hallTitle: '测试大厅',
+      displayName: '本机',
+      virtualIp: '10.0.0.2',
+      rooms: <ChatRoomDescriptor>[],
+      sentAtEpochMs: 1717286400000,
+      transportPort: ChatConstants.transportPort,
+    );
+
+    expect(
+      ChatPresenceAnnouncement.fromJson(announcement.toJson()).transportPort,
+      ChatConstants.transportPort,
+    );
+    final legacyPacket = Map<String, dynamic>.from(announcement.toJson())
+      ..remove('transportPort');
+    expect(
+      ChatPresenceAnnouncement.fromJson(legacyPacket).transportPort,
+      isNull,
+    );
+  });
 
   test('在线状态UDP报文远端地址与声明身份不一致时会被丢弃', () async {
     final service = ChatPresenceService(listenPort: 0);

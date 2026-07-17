@@ -1519,7 +1519,24 @@ class _ChatPageState extends State<ChatPage>
                             : AppTheme.lightTextSecondary,
                       ),
                     ),
-                    if (message.status == ChatMessageStatus.failed) ...[
+                    if (message.status == ChatMessageStatus.sending) ...[
+                      SizedBox(width: context.spacingXSmall),
+                      SizedBox.square(
+                        dimension: 12,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 1.5,
+                          color: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                      SizedBox(width: context.spacingXXSmall),
+                      Text(
+                        '发送中',
+                        style: TextStyle(
+                          fontSize: context.fontXSmall,
+                          color: Theme.of(context).primaryColor,
+                        ),
+                      ),
+                    ] else if (message.status == ChatMessageStatus.failed) ...[
                       SizedBox(width: context.spacingXSmall),
                       Text(
                         '发送失败',

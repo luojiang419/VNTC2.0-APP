@@ -229,6 +229,114 @@ void main() {
     }
   });
 
+  test('聊天传输服务会并行探测候选端口并缓存可用端口', () async {
+    final receiver = ChatTransportService();
+    await receiver.start(
+      onPacket: (packet, remoteAddress) async {},
+      listenPort: 0,
+    );
+    final availablePort = receiver.listeningPort!;
+    final temporaryListener = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final unavailablePort = temporaryListener.port;
+    await temporaryListener.close();
+    final resolver = ChatTransportService(
+      connectTimeout: const Duration(milliseconds: 200),
+      transportPortCandidates: <int>[unavailablePort, availablePort],
+    );
+
+    try {
+      final resolvedPort = await resolver.resolveTransportPort(
+        targetIp: InternetAddress.loopbackIPv4.address,
+      );
+
+      expect(resolvedPort, availablePort);
+      expect(
+        resolver.cachedTransportPortFor(
+          InternetAddress.loopbackIPv4.address,
+        ),
+        availablePort,
+      );
+    } finally {
+      await receiver.stop();
+    }
+  });
+
+  test('聊天传输端口缓存只接受受支持的候选端口', () {
+    final service = ChatTransportService(
+      transportPortCandidates: const <int>[61019, 50019],
+    );
+
+    service.rememberTransportPort('10.0.0.2', 12345);
+    expect(service.cachedTransportPortFor('10.0.0.2'), isNull);
+
+    service.rememberTransportPort('10.0.0.2', 50019);
+    expect(service.cachedTransportPortFor('10.0.0.2'), 50019);
+    service.invalidateTransportPort('10.0.0.2', 50019);
+    expect(service.cachedTransportPortFor('10.0.0.2'), isNull);
+  });
+
+  test('失败端口进入冷却且用户发送可以强制快速复探', () async {
+    final firstTemporaryListener = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final firstUnavailablePort = firstTemporaryListener.port;
+    await firstTemporaryListener.close();
+    final secondTemporaryListener = await ServerSocket.bind(
+      InternetAddress.loopbackIPv4,
+      0,
+    );
+    final recoveredPort = secondTemporaryListener.port;
+    await secondTemporaryListener.close();
+    final service = ChatTransportService(
+      connectTimeout: const Duration(milliseconds: 200),
+      probeRetryDelay: const Duration(minutes: 1),
+      transportPortCandidates: <int>[
+        firstUnavailablePort,
+        recoveredPort,
+      ],
+    );
+
+    expect(
+      await service.resolveTransportPort(
+        targetIp: InternetAddress.loopbackIPv4.address,
+      ),
+      isNull,
+    );
+    expect(
+      service.isTransportProbeCoolingDown(
+        InternetAddress.loopbackIPv4.address,
+      ),
+      isTrue,
+    );
+
+    final receiver = ChatTransportService();
+    await receiver.start(
+      onPacket: (packet, remoteAddress) async {},
+      listenPort: recoveredPort,
+    );
+    try {
+      expect(
+        await service.resolveTransportPort(
+          targetIp: InternetAddress.loopbackIPv4.address,
+        ),
+        isNull,
+      );
+      expect(
+        await service.resolveTransportPort(
+          targetIp: InternetAddress.loopbackIPv4.address,
+          retryUnavailable: true,
+        ),
+        recoveredPort,
+      );
+    } finally {
+      await receiver.stop();
+    }
+  });
+
   test('聊天TCP传输服务会分块回报发送进度', () async {
     final service = ChatTransportService();
     final completer = Completer<ChatTransportPacket>();

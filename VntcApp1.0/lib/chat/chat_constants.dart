@@ -10,6 +10,9 @@ class ChatConstants {
     transportPort,
     legacyTransportPort,
   ];
+  static const Duration transportConnectTimeout = Duration(seconds: 1);
+  static const Duration transportPortCacheTtl = Duration(minutes: 10);
+  static const Duration transportProbeRetryDelay = Duration(seconds: 15);
   static const int smallAttachmentMaxBytes = 10 * 1024 * 1024;
   static const int maxTransportPacketBytes = 16 * 1024 * 1024;
   static const int syncBatchSize = 100;

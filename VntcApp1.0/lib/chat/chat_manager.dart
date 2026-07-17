@@ -103,6 +103,25 @@ Map<String, Map<String, int>> canonicalizeChatSyncSummary({
   return normalized;
 }
 
+typedef ChatRecipientSendOutcome = ({String recipient, Object? error});
+
+@visibleForTesting
+Future<List<ChatRecipientSendOutcome>> sendChatRecipientsConcurrently({
+  required Iterable<String> recipients,
+  required Future<void> Function(String recipient) sendToRecipient,
+}) async {
+  Future<ChatRecipientSendOutcome> sendOne(String recipient) async {
+    try {
+      await sendToRecipient(recipient);
+      return (recipient: recipient, error: null);
+    } catch (error) {
+      return (recipient: recipient, error: error);
+    }
+  }
+
+  return Future.wait(recipients.map(sendOne));
+}
+
 class ChatManager extends ChangeNotifier {
   ChatManager._();
 
@@ -561,34 +580,20 @@ class ChatManager extends ChangeNotifier {
     required String targetIp,
     required ChatTransportPacket packet,
     required _LocalHallNode localNode,
+    bool retryUnavailable = false,
     void Function(int sentBytes, int totalBytes)? onProgress,
   }) async {
-    Object? firstError;
-    var sent = false;
-    final packets = <ChatTransportPacket>[packet];
-    for (var index = 0; index < packets.length; index += 1) {
-      final candidate = packets[index];
-      for (final port in ChatConstants.transportPortCandidates) {
-        try {
-          await _transportService.sendPacket(
-            targetIp: targetIp,
-            packet: candidate,
-            port: port,
-            onProgress: index == 0 ? onProgress : null,
-          );
-          sent = true;
-          break;
-        } catch (error) {
-          firstError ??= error;
-          await ChatLog.write(
-            '聊天报文端口尝试失败 target=$targetIp port=$port error=$error',
-          );
-        }
-      }
-    }
-    if (!sent) {
-      throw firstError ?? StateError('聊天报文发送失败');
-    }
+    await _sendUsingResolvedTransportPort(
+      targetIp: targetIp,
+      retryUnavailable: retryUnavailable,
+      retryAfterSendFailure: true,
+      sendAtPort: (port) => _transportService.sendPacket(
+        targetIp: targetIp,
+        packet: packet,
+        port: port,
+        onProgress: onProgress,
+      ),
+    );
   }
 
   Future<void> _sendAttachmentStreamWithHallCompatibility({
@@ -597,46 +602,87 @@ class ChatManager extends ChangeNotifier {
     required File sourceFile,
     required int totalBytes,
     required _LocalHallNode localNode,
+    bool retryUnavailable = false,
     ChatPacketProgressCallback? onProgress,
   }) async {
     Object? firstError;
     var sent = false;
-    final packets = <ChatTransportPacket>[packet];
-    for (var index = 0; index < packets.length; index += 1) {
-      for (var attempt = 1;
-          attempt <= ChatConstants.attachmentTransferMaxAttempts;
-          attempt += 1) {
-        for (final port in ChatConstants.transportPortCandidates) {
-          try {
-            await _transportService.sendAttachmentStream(
-              targetIp: targetIp,
-              packet: packets[index],
-              sourceFactory: (startOffset) => sourceFile.openRead(startOffset),
-              totalBytes: totalBytes,
-              port: port,
-              onProgress: index == 0 ? onProgress : null,
-            );
-            sent = true;
-            break;
-          } catch (error) {
-            firstError ??= error;
-            await ChatLog.write(
-              '附件流发送未确认 target=$targetIp port=$port message=${packets[index].message?.id ?? "-"} attempt=$attempt/${ChatConstants.attachmentTransferMaxAttempts} error=$error',
-            );
-          }
-        }
-        if (sent) {
-          break;
-        }
-        if (attempt < ChatConstants.attachmentTransferMaxAttempts) {
-          await Future<void>.delayed(
-            ChatConstants.attachmentTransferRetryDelay * attempt,
-          );
-        }
+    for (var attempt = 1;
+        attempt <= ChatConstants.attachmentTransferMaxAttempts;
+        attempt += 1) {
+      try {
+        await _sendUsingResolvedTransportPort(
+          targetIp: targetIp,
+          retryUnavailable: retryUnavailable || attempt > 1,
+          retryAfterSendFailure: false,
+          sendAtPort: (port) => _transportService.sendAttachmentStream(
+            targetIp: targetIp,
+            packet: packet,
+            sourceFactory: (startOffset) => sourceFile.openRead(startOffset),
+            totalBytes: totalBytes,
+            port: port,
+            onProgress: onProgress,
+          ),
+        );
+        sent = true;
+        break;
+      } catch (error) {
+        firstError ??= error;
+        await ChatLog.write(
+          '附件流发送未确认 target=$targetIp message=${packet.message?.id ?? "-"} attempt=$attempt/${ChatConstants.attachmentTransferMaxAttempts} error=$error',
+        );
+      }
+      if (attempt < ChatConstants.attachmentTransferMaxAttempts) {
+        await Future<void>.delayed(
+          ChatConstants.attachmentTransferRetryDelay * attempt,
+        );
       }
     }
     if (!sent) {
       throw firstError ?? StateError('附件流发送失败');
+    }
+  }
+
+  Future<void> _sendUsingResolvedTransportPort({
+    required String targetIp,
+    required bool retryUnavailable,
+    required bool retryAfterSendFailure,
+    required Future<void> Function(int port) sendAtPort,
+  }) async {
+    final port = await _transportService.resolveTransportPort(
+      targetIp: targetIp,
+      retryUnavailable: retryUnavailable,
+    );
+    if (port == null) {
+      throw StateError('目标聊天端口未就绪 target=$targetIp');
+    }
+    try {
+      await sendAtPort(port);
+      _transportService.rememberTransportPort(targetIp, port);
+      return;
+    } catch (error) {
+      _transportService.invalidateTransportPort(targetIp, port);
+      await ChatLog.write(
+        '聊天已知端口发送失败 target=$targetIp port=$port error=$error',
+      );
+      if (!retryAfterSendFailure) {
+        rethrow;
+      }
+    }
+
+    final recoveredPort = await _transportService.resolveTransportPort(
+      targetIp: targetIp,
+      retryUnavailable: true,
+    );
+    if (recoveredPort == null) {
+      throw StateError('目标聊天端口重新探测失败 target=$targetIp');
+    }
+    try {
+      await sendAtPort(recoveredPort);
+      _transportService.rememberTransportPort(targetIp, recoveredPort);
+    } catch (error) {
+      _transportService.invalidateTransportPort(targetIp, recoveredPort);
+      rethrow;
     }
   }
 
@@ -1377,50 +1423,6 @@ class ChatManager extends ChangeNotifier {
       localNode.hall.localVirtualIp,
     );
     final recipients = _resolveRecipients(conversation);
-    var deliveredRecipients = 0;
-    var failedRecipients = 0;
-    final outboundPacket = ChatTransportPacket(
-      type: 'message',
-      message: ChatMessageRecord(
-        id: _uuid.v4(),
-        conversationId: conversation.id,
-        hallId: conversation.hallId,
-        conversationType: conversation.type,
-        senderVirtualIp: localNode.hall.localVirtualIp,
-        senderName: localNode.displayName,
-        senderSeq: senderSeq,
-        direction: ChatMessageDirection.outgoing,
-        contentType: ChatMessageContentType.text,
-        status: ChatMessageStatus.sent,
-        text: trimmed,
-        isSyncMessage: false,
-        isRead: true,
-        sentAtEpochMs: now,
-        createdAtEpochMs: now,
-        metadataJson: '{}',
-        peerVirtualIp: conversation.peerVirtualIp,
-        roomId: conversation.roomId,
-      ),
-    );
-    for (final recipient in recipients) {
-      try {
-        await _sendPacketWithHallCompatibility(
-          targetIp: recipient,
-          packet: outboundPacket,
-          localNode: localNode,
-        );
-        deliveredRecipients += 1;
-      } catch (error) {
-        failedRecipients += 1;
-        await ChatLog.write(
-          '文本消息发送失败 conversation=${conversation.id} target=$recipient error=$error',
-        );
-      }
-    }
-    final finalStatus = deliveredRecipients > 0
-        ? ChatMessageStatus.sent
-        : ChatMessageStatus.failed;
-
     final localMessage = ChatMessageRecord(
       id: _uuid.v4(),
       conversationId: conversation.id,
@@ -1431,7 +1433,7 @@ class ChatManager extends ChangeNotifier {
       senderSeq: senderSeq,
       direction: ChatMessageDirection.outgoing,
       contentType: ChatMessageContentType.text,
-      status: finalStatus,
+      status: ChatMessageStatus.sending,
       text: trimmed,
       isSyncMessage: false,
       isRead: true,
@@ -1444,6 +1446,43 @@ class ChatManager extends ChangeNotifier {
     await _storage.upsertMessage(localMessage);
     await loadConversationMessages(conversation.id);
     await reloadFromStorage(notify: false);
+    notifyListeners();
+
+    final outboundPacket = ChatTransportPacket(
+      type: 'message',
+      message: localMessage.copyWith(status: ChatMessageStatus.sent),
+    );
+    final outcomes = await sendChatRecipientsConcurrently(
+      recipients: recipients,
+      sendToRecipient: (recipient) => _sendPacketWithHallCompatibility(
+        targetIp: recipient,
+        packet: outboundPacket,
+        localNode: localNode,
+        retryUnavailable: true,
+      ),
+    );
+    final deliveredRecipients =
+        outcomes.where((outcome) => outcome.error == null).length;
+    final failedOutcomes = outcomes
+        .where((outcome) => outcome.error != null)
+        .toList(growable: false);
+    for (final outcome in failedOutcomes) {
+      await ChatLog.write(
+        '文本消息发送失败 conversation=${conversation.id} target=${outcome.recipient} error=${outcome.error}',
+      );
+    }
+    final failedRecipients = failedOutcomes.length;
+    final finalStatus = deliveredRecipients > 0
+        ? ChatMessageStatus.sent
+        : ChatMessageStatus.failed;
+    if (!_locallyDeletedMessageIds.contains(localMessage.id)) {
+      await _storage.upsertMessage(
+        localMessage.copyWith(status: finalStatus),
+      );
+      await loadConversationMessages(conversation.id);
+      await reloadFromStorage(notify: false);
+    }
+    _locallyDeletedMessageIds.remove(localMessage.id);
     notifyListeners();
     final result = ChatSendResult(
       conversationId: conversation.id,
@@ -1628,6 +1667,7 @@ class ChatManager extends ChangeNotifier {
             sourceFile: sourceFile,
             totalBytes: sizeBytes,
             localNode: localNode,
+            retryUnavailable: true,
             onProgress: (sentBytes, totalBytes) {
               final elapsedMilliseconds = uploadStopwatch.elapsedMilliseconds;
               final shouldUpdate = shouldPublishAttachmentProgress(
@@ -2072,6 +2112,12 @@ class ChatManager extends ChangeNotifier {
       if (localNode == null) {
         continue;
       }
+      final transportPort = await _transportService.resolveTransportPort(
+        targetIp: peer.virtualIp,
+      );
+      if (transportPort == null) {
+        continue;
+      }
       final conversationIds = <String>{
         peer.hallId,
         buildDirectConversationId(
@@ -2215,7 +2261,15 @@ class ChatManager extends ChangeNotifier {
             .map((room) => _canonicalizeRoomDescriptor(room, localHallId))
             .toList(growable: false),
         sentAtEpochMs: announcement.sentAtEpochMs,
+        transportPort: announcement.transportPort,
       );
+      final advertisedPort = normalizedAnnouncement.transportPort;
+      if (advertisedPort != null) {
+        _transportService.rememberTransportPort(
+          normalizedAnnouncement.virtualIp,
+          advertisedPort,
+        );
+      }
       normalizedSnapshot[buildPresencePeerKey(
             hallId: localHallId,
             virtualIp: announcement.virtualIp,
@@ -2262,6 +2316,27 @@ class ChatManager extends ChangeNotifier {
       return left.virtualIp.compareTo(right.virtualIp);
     });
     _onlinePeers = peers;
+    _prewarmTransportPorts(peers);
+  }
+
+  void _prewarmTransportPorts(Iterable<ChatPeerPresence> peers) {
+    for (final peer in peers) {
+      if (_transportService.cachedTransportPortFor(peer.virtualIp) != null ||
+          _transportService.isTransportProbeCoolingDown(peer.virtualIp)) {
+        continue;
+      }
+      unawaited(
+        _transportService
+            .resolveTransportPort(targetIp: peer.virtualIp)
+            .then((port) async {
+          if (port != null) {
+            await ChatLog.write(
+              '聊天端口已预热 target=${peer.virtualIp} port=$port',
+            );
+          }
+        }),
+      );
+    }
   }
 
   List<String> _resolveRecipients(ChatConversation conversation) {

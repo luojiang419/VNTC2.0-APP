@@ -921,6 +921,7 @@ class ChatPresenceAnnouncement {
     required this.virtualIp,
     required this.rooms,
     required this.sentAtEpochMs,
+    this.transportPort,
   });
 
   final String hallId;
@@ -929,6 +930,7 @@ class ChatPresenceAnnouncement {
   final String virtualIp;
   final List<ChatRoomDescriptor> rooms;
   final int sentAtEpochMs;
+  final int? transportPort;
 
   Map<String, dynamic> toJson() {
     return {
@@ -939,6 +941,7 @@ class ChatPresenceAnnouncement {
       'virtualIp': virtualIp,
       'rooms': rooms.map((room) => room.toTransportJson()).toList(),
       'sentAtEpochMs': sentAtEpochMs,
+      if (transportPort != null) 'transportPort': transportPort,
     };
   }
 
@@ -965,6 +968,9 @@ class ChatPresenceAnnouncement {
       virtualIp: (map['virtualIp'] ?? '').toString(),
       rooms: rooms,
       sentAtEpochMs: int.tryParse('${map['sentAtEpochMs']}') ?? 0,
+      transportPort: map['transportPort'] == null
+          ? null
+          : int.tryParse('${map['transportPort']}'),
     );
   }
 }
