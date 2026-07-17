@@ -4,6 +4,12 @@ class ChatConstants {
   // 使用 IANA 动态/私有端口，避开部分 Android 内核保留的 500xx 端口段。
   static const int presencePort = 61018;
   static const int transportPort = 61019;
+  // 旧版桌面客户端仍监听此端口；仅用于出站兼容，不在 Android 上绑定。
+  static const int legacyTransportPort = 50019;
+  static const List<int> transportPortCandidates = <int>[
+    transportPort,
+    legacyTransportPort,
+  ];
   static const int smallAttachmentMaxBytes = 10 * 1024 * 1024;
   static const int maxTransportPacketBytes = 16 * 1024 * 1024;
   static const int syncBatchSize = 100;

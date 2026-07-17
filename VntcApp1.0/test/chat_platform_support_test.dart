@@ -48,6 +48,11 @@ void main() {
   test('chat listeners use private ports outside Android reserved range', () {
     expect(ChatConstants.presencePort, 61018);
     expect(ChatConstants.transportPort, 61019);
+    expect(ChatConstants.legacyTransportPort, 50019);
+    expect(
+      ChatConstants.transportPortCandidates,
+      <int>[61019, 50019],
+    );
     expect(ChatConstants.presencePort, greaterThanOrEqualTo(49152));
     expect(ChatConstants.transportPort, greaterThanOrEqualTo(49152));
     expect(ChatConstants.chatRuleNameUdp, contains('61018'));

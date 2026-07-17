@@ -568,15 +568,22 @@ class ChatManager extends ChangeNotifier {
     final packets = <ChatTransportPacket>[packet];
     for (var index = 0; index < packets.length; index += 1) {
       final candidate = packets[index];
-      try {
-        await _transportService.sendPacket(
-          targetIp: targetIp,
-          packet: candidate,
-          onProgress: index == 0 ? onProgress : null,
-        );
-        sent = true;
-      } catch (error) {
-        firstError ??= error;
+      for (final port in ChatConstants.transportPortCandidates) {
+        try {
+          await _transportService.sendPacket(
+            targetIp: targetIp,
+            packet: candidate,
+            port: port,
+            onProgress: index == 0 ? onProgress : null,
+          );
+          sent = true;
+          break;
+        } catch (error) {
+          firstError ??= error;
+          await ChatLog.write(
+            '聊天报文端口尝试失败 target=$targetIp port=$port error=$error',
+          );
+        }
       }
     }
     if (!sent) {
@@ -596,31 +603,35 @@ class ChatManager extends ChangeNotifier {
     var sent = false;
     final packets = <ChatTransportPacket>[packet];
     for (var index = 0; index < packets.length; index += 1) {
-      for (
-        var attempt = 1;
-        attempt <= ChatConstants.attachmentTransferMaxAttempts;
-        attempt += 1
-      ) {
-        try {
-          await _transportService.sendAttachmentStream(
-            targetIp: targetIp,
-            packet: packets[index],
-            sourceFactory: (startOffset) => sourceFile.openRead(startOffset),
-            totalBytes: totalBytes,
-            onProgress: index == 0 ? onProgress : null,
-          );
-          sent = true;
-          break;
-        } catch (error) {
-          firstError ??= error;
-          await ChatLog.write(
-            '附件流发送未确认 target=$targetIp message=${packets[index].message?.id ?? "-"} attempt=$attempt/${ChatConstants.attachmentTransferMaxAttempts} error=$error',
-          );
-          if (attempt < ChatConstants.attachmentTransferMaxAttempts) {
-            await Future<void>.delayed(
-              ChatConstants.attachmentTransferRetryDelay * attempt,
+      for (var attempt = 1;
+          attempt <= ChatConstants.attachmentTransferMaxAttempts;
+          attempt += 1) {
+        for (final port in ChatConstants.transportPortCandidates) {
+          try {
+            await _transportService.sendAttachmentStream(
+              targetIp: targetIp,
+              packet: packets[index],
+              sourceFactory: (startOffset) => sourceFile.openRead(startOffset),
+              totalBytes: totalBytes,
+              port: port,
+              onProgress: index == 0 ? onProgress : null,
+            );
+            sent = true;
+            break;
+          } catch (error) {
+            firstError ??= error;
+            await ChatLog.write(
+              '附件流发送未确认 target=$targetIp port=$port message=${packets[index].message?.id ?? "-"} attempt=$attempt/${ChatConstants.attachmentTransferMaxAttempts} error=$error',
             );
           }
+        }
+        if (sent) {
+          break;
+        }
+        if (attempt < ChatConstants.attachmentTransferMaxAttempts) {
+          await Future<void>.delayed(
+            ChatConstants.attachmentTransferRetryDelay * attempt,
+          );
         }
       }
     }
