@@ -17,6 +17,24 @@ const String remoteAssistConnectHintText =
     '点击需要控制的设备，输入密码即可链接，或者不输入密码等待对方接受即可远程连接';
 
 @visibleForTesting
+const Color remoteAssistWindowsConnectButtonColor = Color(0xFF2563EB);
+
+@visibleForTesting
+ButtonStyle? remoteAssistConnectButtonStyle(TargetPlatform platform) {
+  if (platform != TargetPlatform.windows) {
+    return null;
+  }
+  return FilledButton.styleFrom(
+    backgroundColor: remoteAssistWindowsConnectButtonColor,
+    foregroundColor: Colors.white,
+    disabledBackgroundColor: const Color(0xFF475569),
+    disabledForegroundColor: const Color(0xFFCBD5E1),
+    elevation: 4,
+    shadowColor: const Color(0x992563EB),
+  );
+}
+
+@visibleForTesting
 class RemotePeerConnectRequest {
   const RemotePeerConnectRequest({
     required this.password,
@@ -208,6 +226,7 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
                     rememberPassword: rememberPassword,
                   ),
                 ),
+                style: remoteAssistConnectButtonStyle(defaultTargetPlatform),
                 icon: const Icon(Icons.link),
                 label: const Text('连接'),
               ),

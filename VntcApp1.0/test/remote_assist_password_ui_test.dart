@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:vnt_app/pages/remote_assist_page.dart';
 
@@ -21,6 +22,28 @@ void main() {
 
     expect(request.password, 'peer-password');
     expect(request.rememberPassword, isTrue);
+  });
+
+  test('Windows 连接按钮使用独立高亮色且不影响其他平台', () {
+    final windowsStyle =
+        remoteAssistConnectButtonStyle(TargetPlatform.windows)!;
+
+    expect(
+      windowsStyle.backgroundColor!.resolve(<WidgetState>{}),
+      remoteAssistWindowsConnectButtonColor,
+    );
+    expect(
+      windowsStyle.foregroundColor!.resolve(<WidgetState>{}),
+      Colors.white,
+    );
+    expect(
+      remoteAssistConnectButtonStyle(TargetPlatform.android),
+      isNull,
+    );
+    expect(
+      remoteAssistConnectButtonStyle(TargetPlatform.macOS),
+      isNull,
+    );
   });
 
   test('Android 不再使用手动 IP 连接栏', () {
