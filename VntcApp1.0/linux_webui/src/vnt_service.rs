@@ -402,6 +402,8 @@ pub fn to_core_config(config: &VntConfig) -> Result<CoreConfig> {
         mtu: Some(config.mtu),
         port_mapping,
         allow_port_mapping: config.allow_port_mapping,
+        allow_wire_guard: false,
+        wireguard_p2p: None,
         udp_stun: normalize_stun(&config.udp_stun, 3478),
         tcp_stun: normalize_stun(&config.tcp_stun, 443),
         tunnel_port: config.tunnel_port,
@@ -500,6 +502,8 @@ mod tests {
         assert_eq!(core.input.len(), 1);
         assert_eq!(core.output.len(), 1);
         assert!(!core.no_punch);
+        assert!(!core.allow_wire_guard);
+        assert!(core.wireguard_p2p.is_none());
     }
 
     #[test]
