@@ -865,6 +865,49 @@ jobs:
             artifacts/VNT_App_${{ needs.meta.outputs.client_version }}_Android_arm64.signature.json
           if-no-files-found: error
 
+  build-client-linux-webui:
+    name: Linux WebUI 客户端
+    needs:
+      - meta
+      - validate-release-signing
+      - test-client
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set auto-self-update disable
+          rustup toolchain install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup component add rustfmt --toolchain "${RUST_VERSION}"
+          rustc -V
+
+      - name: 测试并构建 Linux WebUI 客户端
+        shell: bash
+        working-directory: VntcApp1.0
+        run: |
+          set -euo pipefail
+          chmod +x ./scripts/build_linux_webui.sh
+          ./scripts/build_linux_webui.sh \
+            --version "${{ needs.meta.outputs.client_version }}" \
+            --no-advance
+
+      - name: 上传 Linux WebUI 客户端产物
+        uses: actions/upload-artifact@v4
+        with:
+          name: client-linux-webui
+          path: |
+            VntcApp1.0/release/linux_webui/VNTC_Linux_WebUI_${{ needs.meta.outputs.client_version }}_ubuntu24.04_x86_64.tar.gz
+            VntcApp1.0/release/linux_webui/VNTC_Linux_WebUI_${{ needs.meta.outputs.client_version }}_ubuntu24.04_x86_64.tar.gz.sha256
+          if-no-files-found: error
+
   build-server-windows-light:
     name: Windows 服务端轻量版
     needs:
@@ -1013,6 +1056,7 @@ jobs:
       - build-client-windows
       - build-client-macos
       - build-client-android
+      - build-client-linux-webui
       - build-server-windows-light
       - build-server-windows-console
       - build-server-linux
@@ -1109,6 +1153,7 @@ jobs:
             - Windows 客户端安装版
             - macOS 客户端
             - Android 客户端
+            - Linux WebUI 客户端
             - Windows 服务端轻量版
             - Windows 服务端增强版
             - Linux 服务端

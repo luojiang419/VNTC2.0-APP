@@ -419,15 +419,22 @@ async fn stop(State(state): State<Arc<ApiState>>) -> Json<ApiMessage> {
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct SettingsPayload {
+    #[serde(default = "default_experience_mode")]
+    experience_mode: String,
     theme_mode: String,
     theme_accent: String,
     refresh_interval_seconds: u64,
     auto_connect: bool,
 }
 
+fn default_experience_mode() -> String {
+    "minimal".to_string()
+}
+
 async fn get_settings(State(state): State<Arc<ApiState>>) -> Json<SettingsPayload> {
     let settings = state.settings.read().await.clone();
     Json(SettingsPayload {
+        experience_mode: settings.experience_mode,
         theme_mode: settings.theme_mode,
         theme_accent: settings.theme_accent,
         refresh_interval_seconds: settings.refresh_interval_seconds,
@@ -441,6 +448,7 @@ async fn update_settings(
 ) -> Result<Json<ApiMessage>, ApiError> {
     let _mutation = state.mutation.lock().await;
     let settings = AppSettings {
+        experience_mode: payload.experience_mode,
         theme_mode: payload.theme_mode,
         theme_accent: payload.theme_accent,
         refresh_interval_seconds: payload.refresh_interval_seconds,
@@ -620,7 +628,7 @@ struct AboutInfo {
 async fn about() -> Json<AboutInfo> {
     Json(AboutInfo {
         product: "VNTC Linux WebUI",
-        version: env!("CARGO_PKG_VERSION"),
+        version: app_version(),
         vnt_core_version: "2.0.0",
         platform: format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
         run_mode: if PathBuf::from("/.dockerenv").exists() {
@@ -635,6 +643,10 @@ async fn about() -> Json<AboutInfo> {
         },
         build_time: option_env!("VNTC_BUILD_TIME").unwrap_or("构建时未注入"),
     })
+}
+
+fn app_version() -> &'static str {
+    option_env!("VNTC_APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
 async fn authorize(
@@ -891,7 +903,16 @@ mod tests {
     #[tokio::test]
     async fn settings_persist_and_backup_excludes_access_token() {
         let (directory, state) = persistent_test_state();
+        let legacy_payload: SettingsPayload = serde_json::from_value(serde_json::json!({
+            "theme_mode": "system",
+            "theme_accent": "blue",
+            "refresh_interval_seconds": 5,
+            "auto_connect": false
+        }))
+        .unwrap();
+        assert_eq!(legacy_payload.experience_mode, "minimal");
         let payload = SettingsPayload {
+            experience_mode: "professional".to_string(),
             theme_mode: "dark".to_string(),
             theme_accent: "green".to_string(),
             refresh_interval_seconds: 10,
@@ -917,6 +938,7 @@ mod tests {
             .await
             .unwrap();
         let text = String::from_utf8(body.to_vec()).unwrap();
+        assert!(text.contains("\"experience_mode\":\"professional\""));
         assert!(text.contains("\"theme_mode\":\"dark\""));
         assert!(!text.contains("access_token"));
     }

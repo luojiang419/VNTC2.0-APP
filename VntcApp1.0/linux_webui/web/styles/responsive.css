@@ -19,5 +19,6 @@
   .password-footer { align-items: stretch; flex-direction: column; }.password-footer .button { width: 100%; }
   .panel { padding: 17px; border-radius: 14px; }.toast-region { left: 15px; right: 15px; bottom: 88px; }.toast { width: 100%; min-width: 0; }
 }
+@media (max-width: 680px) { html[data-experience="minimal"] .main-content { padding-bottom: 32px; } }
 @media (max-width: 420px) { .topbar-actions { gap: 6px; }.icon-button { width: 37px; height: 37px; }.status-summary { flex-direction: column; align-items: flex-end; gap: 2px; }.status-uptime { font-size: 8px; }.modal-layer { padding: 10px; }.modal-header, .modal-body, .modal-footer { padding: 17px; }.metric-grid { grid-template-columns: 1fr; }.compact-details { grid-template-columns: 1fr 1fr; } }
 @media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; transition-duration: .01ms !important; } }

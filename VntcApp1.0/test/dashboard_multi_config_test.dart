@@ -75,6 +75,8 @@ void main() {
     );
     expect(find.text('配置 A'), findsOneWidget);
     expect(find.text('配置 B'), findsOneWidget);
+    expect(find.text('新建配置'), findsOneWidget);
+    expect(find.text('导入配置'), findsOneWidget);
     expect(
       find.byKey(const ValueKey('dashboard-config-drag-config-a')),
       findsOneWidget,

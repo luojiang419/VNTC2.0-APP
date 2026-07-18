@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 #[derive(Clone, Debug, Deserialize, Serialize)]
 #[serde(default, deny_unknown_fields)]
 pub struct AppSettings {
+    pub experience_mode: String,
     pub theme_mode: String,
     pub theme_accent: String,
     pub refresh_interval_seconds: u64,
@@ -15,6 +16,7 @@ pub struct AppSettings {
 impl Default for AppSettings {
     fn default() -> Self {
         Self {
+            experience_mode: "minimal".to_string(),
             theme_mode: "system".to_string(),
             theme_accent: "blue".to_string(),
             refresh_interval_seconds: 5,
@@ -44,6 +46,9 @@ impl AppSettings {
     }
 
     pub fn validate(&self) -> Result<()> {
+        if !["minimal", "professional"].contains(&self.experience_mode.as_str()) {
+            bail!("experience_mode 必须是 minimal 或 professional");
+        }
         if !["light", "dark", "system"].contains(&self.theme_mode.as_str()) {
             bail!("theme_mode 必须是 light、dark 或 system");
         }
@@ -77,6 +82,9 @@ mod tests {
     #[test]
     fn validates_supported_appearance_and_intervals() {
         assert!(AppSettings::default().validate().is_ok());
+        let mut invalid_mode = AppSettings::default();
+        invalid_mode.experience_mode = "unknown".to_string();
+        assert!(invalid_mode.validate().is_err());
         let mut invalid = AppSettings::default();
         invalid.refresh_interval_seconds = 3;
         assert!(invalid.validate().is_err());

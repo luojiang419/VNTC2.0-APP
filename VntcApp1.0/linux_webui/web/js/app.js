@@ -16,6 +16,10 @@ function applyAppearance(settings = state.settings) {
   document.documentElement.dataset.accent = localStorage.getItem(accentKey) || settings?.theme_accent || "blue";
 }
 
+function applyExperienceMode(settings = state.settings) {
+  document.documentElement.dataset.experience = settings?.experience_mode || "minimal";
+}
+
 function configureRefreshTimer() {
   const interval = (state.settings?.refresh_interval_seconds || 5) * 1000;
   if (state.refreshTimer && state.refreshIntervalMs === interval) return;
@@ -37,6 +41,7 @@ async function refreshStatus(silent = true) {
     state.profileMeta = { defaultId: profileData.default_profile_id, activeId: profileData.active_profile_id };
     state.settings = settings;
     applyAppearance(settings);
+    applyExperienceMode(settings);
     configureRefreshTimer();
     updateTraffic(traffic);
     renderStatusChip(state.status);
@@ -55,7 +60,7 @@ async function refreshStatus(silent = true) {
 function bindShell() {
   $("refreshButton").addEventListener("click", () => refreshStatus(false));
   document.addEventListener("vntc:refresh", () => refreshStatus(true));
-  document.addEventListener("vntc:settings", () => { applyAppearance(); configureRefreshTimer(); });
+  document.addEventListener("vntc:settings", () => { applyAppearance(); applyExperienceMode(); configureRefreshTimer(); });
   $("themeToggle").addEventListener("click", async () => {
     const current = document.documentElement.dataset.theme;
     const next = current === "dark" ? "light" : "dark";
@@ -77,6 +82,7 @@ function bindShell() {
 
 async function boot() {
   applyAppearance();
+  applyExperienceMode();
   registerRoute("dashboard", renderDashboard);
   registerRoute("link-status", renderLinkStatus);
   registerRoute("configs", renderConfigs);

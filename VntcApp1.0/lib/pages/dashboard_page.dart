@@ -10,15 +10,18 @@ import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_quality/packet_loss_sample.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
+import 'package:vnt_app/widgets/app_glow_surface.dart';
 import 'package:vnt_app/widgets/dashboard_config_panel.dart';
 import 'package:fl_chart/fl_chart.dart';
 
 /// 仪表盘页面
 class DashboardPage extends StatefulWidget {
-  final VoidCallback? onNavigateToConfig;
   final Future<void> Function()? onEditDefaultConfig;
   final Future<NetworkConfig?> Function(NetworkConfig config)? onEditConfig;
   final VoidCallback? onNavigateToSettings;
+  final Future<void> Function()? onCreateConfig;
+  final Future<void> Function()? onImportConfig;
+  final ValueChanged<bool>? onProfessionalModeChanged;
   final VoidCallback? onDisconnect;
   final VoidCallback? onConnect;
   final DashboardConfigAction? onConnectConfig;
@@ -28,13 +31,16 @@ class DashboardPage extends StatefulWidget {
       List<NetworkConfig> configs)? onConnectAll;
   final VoidCallback? onConfigsChanged;
   final int configRevision;
+  final bool isProfessionalMode;
 
   const DashboardPage({
     super.key,
-    this.onNavigateToConfig,
     this.onEditDefaultConfig,
     this.onEditConfig,
     this.onNavigateToSettings,
+    this.onCreateConfig,
+    this.onImportConfig,
+    this.onProfessionalModeChanged,
     this.onDisconnect,
     this.onConnect,
     this.onConnectConfig,
@@ -43,6 +49,7 @@ class DashboardPage extends StatefulWidget {
     this.onConnectAll,
     this.onConfigsChanged,
     this.configRevision = 0,
+    this.isProfessionalMode = false,
   });
 
   @override
@@ -75,6 +82,7 @@ class _DashboardPageState extends State<DashboardPage> {
   String? _lastPersistedDefaultKey; // 上次从持久化存储读取的defaultKey，用于检测变化
   String _activeConnectionFingerprint = '';
   List<NetworkConfig> _configs = <NetworkConfig>[];
+  bool _configsLoaded = false;
   bool _isBatchConnecting = false;
   final DataPersistence _dataPersistence = DataPersistence();
 
@@ -226,6 +234,7 @@ class _DashboardPageState extends State<DashboardPage> {
         : configs.where((config) => config.itemKey == defaultKey).firstOrNull;
     setState(() {
       _configs = List<NetworkConfig>.from(configs);
+      _configsLoaded = true;
       _defaultConfigKey = defaultConfig?.itemKey ?? '';
       _defaultConfigName = defaultConfig?.configName ?? '';
     });
@@ -254,15 +263,15 @@ class _DashboardPageState extends State<DashboardPage> {
       debugPrint('Has default config, calling onConnect');
       widget.onConnect?.call();
     } else {
-      // 没有默认配置，跳转到配置页面
-      debugPrint('No default config, calling onNavigateToConfig');
-      widget.onNavigateToConfig?.call();
+      // 没有默认配置，直接打开添加配置面板。
+      debugPrint('No default config, opening config panel');
+      _showConfigPanel();
     }
   }
 
   Future<void> _handleEditDefaultConfig() async {
     if (_defaultConfigKey.isEmpty) {
-      widget.onNavigateToConfig?.call();
+      await _showConfigPanel();
       return;
     }
     await widget.onEditDefaultConfig?.call();
@@ -273,7 +282,7 @@ class _DashboardPageState extends State<DashboardPage> {
 
   Future<void> _handleConnectAll() async {
     if (_configs.isEmpty) {
-      widget.onNavigateToConfig?.call();
+      await _showConfigPanel();
       return;
     }
     if (_isBatchConnecting) {
@@ -394,7 +403,7 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   Future<void> _showConfigPanel() async {
-    await showDialog<void>(
+    final action = await showDialog<DashboardConfigPanelAction>(
       context: context,
       builder: (dialogContext) => DashboardConfigPanel(
         configs: _configs,
@@ -412,6 +421,16 @@ class _DashboardPageState extends State<DashboardPage> {
         isConnected: _isConfigConnected,
       ),
     );
+    switch (action) {
+      case DashboardConfigPanelAction.create:
+        await widget.onCreateConfig?.call();
+        break;
+      case DashboardConfigPanelAction.import:
+        await widget.onImportConfig?.call();
+        break;
+      case null:
+        break;
+    }
     if (mounted) {
       await _loadDefaultConfig();
     }
@@ -715,100 +734,290 @@ class _DashboardPageState extends State<DashboardPage> {
     final hasConnection = _visibleConnectionCount > 0;
     final primaryColor = Theme.of(context).primaryColor;
 
+    if (!_configsLoaded) {
+      return Scaffold(
+        backgroundColor: context.canvasBackground,
+        body: const SizedBox.expand(),
+      );
+    }
+
+    if (!widget.isProfessionalMode && _configs.isEmpty) {
+      return Scaffold(
+        backgroundColor: context.canvasBackground,
+        body: SafeArea(child: _buildEmptyConfigState()),
+      );
+    }
+
     return Scaffold(
       backgroundColor: context.canvasBackground,
       body: SafeArea(
-        child: RefreshIndicator(
-          onRefresh: () async => _updateStats(),
-          color: primaryColor,
-          child: SingleChildScrollView(
-            physics: const AlwaysScrollableScrollPhysics(),
-            padding: EdgeInsets.all(
-                isWideScreen ? context.spacingXLarge : context.spacingMedium),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 页面头部（所有平台都显示）
-                _buildHeader(isDark),
-                const SizedBox(height: 16),
+        child: LayoutBuilder(
+          builder: (context, viewport) {
+            if (!widget.isProfessionalMode &&
+                isWideScreen &&
+                viewport.maxHeight >= 500) {
+              return _buildRegularCompactDashboard(
+                isDark,
+                hasConnection,
+                primaryColor,
+              );
+            }
 
-                // 连接状态卡片
-                _buildConnectionStatusCard(isDark, hasConnection),
-                const SizedBox(height: 20),
-
-                // 网络速度、质量、流量统计
-                if (isWideScreen)
-                  Row(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Expanded(child: _buildSpeedCard(isDark)),
-                      const SizedBox(width: 16),
-                      Expanded(child: _buildQualityCard(isDark)),
-                      const SizedBox(width: 16),
-                      Expanded(child: _buildTrafficCard(isDark)),
-                    ],
-                  )
-                else ...[
-                  _buildSpeedCard(isDark),
-                  const SizedBox(height: 16),
-                  Row(
-                    children: [
-                      Expanded(child: _buildQualityCard(isDark)),
-                      const SizedBox(width: 12),
-                      Expanded(child: _buildTrafficCard(isDark)),
-                    ],
-                  ),
-                ],
-                const SizedBox(height: 20),
-
-                // 信息卡片网格
-                _buildInfoCardsGrid(isDark, isWideScreen, hasConnection),
-                const SizedBox(height: 24),
-
-                // 快捷操作
-                _buildQuickActions(isDark),
-              ],
-            ),
-          ),
+            return _buildScrollableDashboard(
+              isDark,
+              hasConnection,
+              primaryColor,
+              isWideScreen,
+              compact: !widget.isProfessionalMode,
+            );
+          },
         ),
       ),
     );
   }
 
-  Widget _buildHeader(bool isDark) {
+  Widget _buildEmptyConfigState() {
+    final primaryColor = Theme.of(context).colorScheme.primary;
+    final tokens = context.themeTokens;
+
+    return Center(
+      child: Column(
+        key: const ValueKey('regular-dashboard-empty-state'),
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Semantics(
+            button: true,
+            label: '添加配置',
+            child: AppGlowSurface(
+              key: const ValueKey('regular-dashboard-empty-add-button'),
+              active: true,
+              pulse: true,
+              raised: true,
+              onTap: _createConfigFromEmptyState,
+              borderRadius: BorderRadius.circular(context.radius(72)),
+              padding: EdgeInsets.all(context.spacing(28)),
+              child: Icon(
+                Icons.add_rounded,
+                color: primaryColor,
+                size: context.iconSize(72),
+              ),
+            ),
+          ),
+          SizedBox(height: context.spacing(28)),
+          Text(
+            '请点击 + 号添加配置',
+            key: const ValueKey('regular-dashboard-empty-prompt'),
+            textAlign: TextAlign.center,
+            style: TextStyle(
+              color: tokens.textPrimary,
+              fontSize: context.sp(22),
+              fontWeight: FontWeight.w700,
+              letterSpacing: 0.5,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _createConfigFromEmptyState() async {
+    await widget.onCreateConfig?.call();
+    if (mounted) {
+      await _loadDefaultConfig();
+    }
+  }
+
+  /// 常规模式桌面布局：速度卡占据主区域，质量和流量卡在右侧上下排列。
+  /// 使用 SliverFillRemaining 消化默认窗口的剩余高度，避免页面底部大块空白。
+  Widget _buildRegularCompactDashboard(
+    bool isDark,
+    bool hasConnection,
+    Color primaryColor,
+  ) {
+    final pagePadding = context.spacing(12);
+    final sectionGap = context.spacing(10);
+    final cardGap = context.spacing(12);
+
+    return Padding(
+      key: const ValueKey('regular-dashboard-compact-layout'),
+      padding: EdgeInsets.all(pagePadding),
+      child: RefreshIndicator(
+        onRefresh: () async => _updateStats(),
+        color: primaryColor,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            SliverToBoxAdapter(child: _buildHeader(isDark, compact: true)),
+            SliverToBoxAdapter(child: SizedBox(height: context.spacing(8))),
+            SliverToBoxAdapter(
+              child: _buildConnectionStatusCard(
+                isDark,
+                hasConnection,
+                compact: true,
+              ),
+            ),
+            SliverToBoxAdapter(child: SizedBox(height: sectionGap)),
+            SliverFillRemaining(
+              hasScrollBody: false,
+              child: Row(
+                key: const ValueKey('regular-dashboard-bento-grid'),
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    flex: 5,
+                    child: _buildSpeedCard(
+                      isDark,
+                      compact: true,
+                      fillHeight: true,
+                    ),
+                  ),
+                  SizedBox(width: cardGap),
+                  Expanded(
+                    flex: 3,
+                    child: Column(
+                      children: [
+                        Expanded(
+                          child: _buildQualityCard(
+                            isDark,
+                            compact: true,
+                            fillHeight: true,
+                          ),
+                        ),
+                        SizedBox(height: cardGap),
+                        Expanded(
+                          child: _buildTrafficCard(
+                            isDark,
+                            compact: true,
+                            fillHeight: true,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 专业模式与窄屏回退布局保持可滚动，避免小高度窗口发生溢出。
+  Widget _buildScrollableDashboard(
+    bool isDark,
+    bool hasConnection,
+    Color primaryColor,
+    bool isWideScreen, {
+    required bool compact,
+  }) {
+    final pagePadding = compact
+        ? context.spacing(isWideScreen ? 12 : 8)
+        : isWideScreen
+            ? context.spacingXLarge
+            : context.spacingMedium;
+    final headerGap = compact ? context.spacing(8) : context.spacing(16);
+    final sectionGap = compact ? context.spacing(12) : context.spacing(20);
+    final cardGap = compact ? context.spacing(10) : context.spacing(16);
+
+    return RefreshIndicator(
+      onRefresh: () async => _updateStats(),
+      color: primaryColor,
+      child: SingleChildScrollView(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: EdgeInsets.all(pagePadding),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            _buildHeader(isDark, compact: compact),
+            SizedBox(height: headerGap),
+            _buildConnectionStatusCard(
+              isDark,
+              hasConnection,
+              compact: compact,
+            ),
+            SizedBox(height: sectionGap),
+            if (isWideScreen)
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Expanded(child: _buildSpeedCard(isDark, compact: compact)),
+                  SizedBox(width: cardGap),
+                  Expanded(child: _buildQualityCard(isDark, compact: compact)),
+                  SizedBox(width: cardGap),
+                  Expanded(child: _buildTrafficCard(isDark, compact: compact)),
+                ],
+              )
+            else ...[
+              _buildSpeedCard(isDark, compact: compact),
+              SizedBox(height: cardGap),
+              Row(
+                children: [
+                  Expanded(
+                    child: _buildQualityCard(isDark, compact: compact),
+                  ),
+                  SizedBox(width: cardGap),
+                  Expanded(
+                    child: _buildTrafficCard(isDark, compact: compact),
+                  ),
+                ],
+              ),
+            ],
+            if (widget.isProfessionalMode) ...[
+              SizedBox(height: sectionGap),
+              _buildInfoCardsGrid(isDark, isWideScreen, hasConnection),
+              const SizedBox(height: 24),
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(bool isDark, {bool compact = false}) {
     final primaryColor = Theme.of(context).primaryColor;
-    return Row(
+    final title = Row(
       children: [
         Container(
-          width: context.w(48),
-          height: context.w(48),
+          width: context.w(compact ? 40 : 48),
+          height: context.w(compact ? 40 : 48),
           decoration: BoxDecoration(
             color: primaryColor,
-            borderRadius: BorderRadius.circular(context.radius(12)),
+            borderRadius:
+                BorderRadius.circular(context.radius(compact ? 10 : 12)),
           ),
           child: Icon(
             Icons.dashboard_outlined,
             color: Colors.white,
-            size: context.iconSize(28),
+            size: context.iconSize(compact ? 24 : 28),
           ),
         ),
-        SizedBox(width: context.spacing(16)),
+        SizedBox(width: context.spacing(compact ? 12 : 16)),
         Expanded(
           child: Text(
             '仪表盘',
             style: TextStyle(
-              fontSize: context.sp(28),
+              fontSize: context.sp(compact ? 24 : 28),
               fontWeight: FontWeight.bold,
               color:
                   isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
             ),
           ),
         ),
+      ],
+    );
+
+    final actions = Wrap(
+      spacing: compact ? context.spacingXSmall : context.spacingSmall,
+      runSpacing: compact ? context.spacingXSmall : context.spacingSmall,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      alignment: WrapAlignment.end,
+      children: [
         OutlinedButton.icon(
           key: const ValueKey('dashboard-configs-button'),
           onPressed: _showConfigPanel,
-          icon: const Icon(Icons.layers_outlined),
-          label: Text('${_configs.length} 个配置'),
+          icon: const Icon(Icons.add_link),
+          label: const Text('添加配置'),
           style: OutlinedButton.styleFrom(
             foregroundColor: primaryColor,
             padding: EdgeInsets.symmetric(
@@ -817,14 +1026,76 @@ class _DashboardPageState extends State<DashboardPage> {
             ),
           ),
         ),
+        AppGlowSurface(
+          active: widget.isProfessionalMode,
+          pulse: true,
+          raised: true,
+          borderRadius: BorderRadius.circular(24),
+          padding: EdgeInsets.only(left: context.spacingSmall),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                widget.isProfessionalMode ? '专业模式' : '极简模式',
+                style: TextStyle(
+                  color: isDark
+                      ? AppTheme.darkTextPrimary
+                      : AppTheme.lightTextPrimary,
+                  fontSize: context.fontSmall,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+              Switch(
+                key: const ValueKey('dashboard-professional-mode-switch'),
+                value: widget.isProfessionalMode,
+                onChanged: widget.onProfessionalModeChanged,
+                activeThumbColor: primaryColor,
+              ),
+            ],
+          ),
+        ),
+        IconButton.outlined(
+          key: const ValueKey('dashboard-settings-button'),
+          onPressed: widget.onNavigateToSettings,
+          tooltip: '设置',
+          icon: const Icon(Icons.settings_outlined),
+        ),
       ],
+    );
+
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        if (constraints.maxWidth < 540) {
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              title,
+              SizedBox(height: context.spacingSmall),
+              Align(alignment: Alignment.centerRight, child: actions),
+            ],
+          );
+        }
+        return Row(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            Expanded(child: title),
+            SizedBox(width: context.spacingMedium),
+            actions,
+          ],
+        );
+      },
     );
   }
 
-  Widget _buildConnectionStatusCard(bool isDark, bool hasConnection) {
+  Widget _buildConnectionStatusCard(
+    bool isDark,
+    bool hasConnection, {
+    bool compact = false,
+  }) {
     final primaryColor = Theme.of(context).primaryColor;
     final tokens = context.themeTokens;
     final foregroundColor = hasConnection ? Colors.white : tokens.textPrimary;
+    final cardRadius = context.radius(compact ? 16 : 20);
     final hasConfigsToConnect = _configs.any(
       (config) =>
           !_isConfigConnected(config) &&
@@ -833,10 +1104,10 @@ class _DashboardPageState extends State<DashboardPage> {
     return InkWell(
       onTap:
           hasConnection ? () => _showConnectionDialog(isDark) : _handleConnect,
-      borderRadius: BorderRadius.circular(context.radius(20)),
+      borderRadius: BorderRadius.circular(cardRadius),
       child: Container(
         width: double.infinity,
-        padding: ResponsiveUtils.padding(context, all: 24),
+        padding: ResponsiveUtils.padding(context, all: compact ? 16 : 24),
         decoration: BoxDecoration(
           gradient: LinearGradient(
             colors: hasConnection
@@ -861,7 +1132,7 @@ class _DashboardPageState extends State<DashboardPage> {
             begin: Alignment.topLeft,
             end: Alignment.bottomRight,
           ),
-          borderRadius: BorderRadius.circular(context.radius(20)),
+          borderRadius: BorderRadius.circular(cardRadius),
           border: Border.all(
             color: hasConnection
                 ? primaryColor.withValues(alpha: 0.5)
@@ -885,21 +1156,22 @@ class _DashboardPageState extends State<DashboardPage> {
         child: Row(
           children: [
             Container(
-              width: context.w(56),
-              height: context.w(56),
+              width: context.w(compact ? 48 : 56),
+              height: context.w(compact ? 48 : 56),
               decoration: BoxDecoration(
                 color: foregroundColor.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(context.radius(12)),
+                borderRadius:
+                    BorderRadius.circular(context.radius(compact ? 10 : 12)),
               ),
               child: Icon(
                 hasConnection
                     ? Icons.check_circle_outline
                     : Icons.cloud_off_outlined,
                 color: foregroundColor,
-                size: context.iconSize(32),
+                size: context.iconSize(compact ? 28 : 32),
               ),
             ),
-            SizedBox(width: context.spacing(16)),
+            SizedBox(width: context.spacing(compact ? 12 : 16)),
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -907,27 +1179,25 @@ class _DashboardPageState extends State<DashboardPage> {
                   Text(
                     hasConnection ? '已连接' : '未连接',
                     style: TextStyle(
-                      fontSize: context.sp(28),
+                      fontSize: context.sp(compact ? 24 : 28),
                       fontWeight: FontWeight.bold,
                       color: foregroundColor,
                     ),
                   ),
-                  SizedBox(height: context.spacing(4)),
+                  SizedBox(height: context.spacing(compact ? 2 : 4)),
                   Text(
                     hasConnection
                         ? (_visibleConfigName.isNotEmpty
                             ? _visibleConfigName
                             : '未知配置名')
-                        : (_configs.isNotEmpty
-                            ? '已添加 ${_configs.length} 个配置，可一键连接全部'
-                            : '点击新建配置'),
+                        : (_configs.isNotEmpty ? '点击卡片即可链接全部添加的服务器' : '点击新建配置'),
                     style: TextStyle(
-                      fontSize: context.sp(16),
+                      fontSize: context.sp(compact ? 14 : 16),
                       color: foregroundColor.withValues(alpha: 0.82),
                     ),
                   ),
                   if (hasConnection) ...[
-                    SizedBox(height: context.spacing(8)),
+                    SizedBox(height: context.spacing(compact ? 6 : 8)),
                     Row(
                       children: [
                         Icon(Icons.link,
@@ -1137,15 +1407,26 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // 网络速度卡片（带折线图）
-  Widget _buildSpeedCard(bool isDark) {
+  Widget _buildSpeedCard(
+    bool isDark, {
+    bool compact = false,
+    bool fillHeight = false,
+  }) {
     final primaryColor = Theme.of(context).primaryColor;
     return InkWell(
       onTap: () => _showNetworkSpeedDialog(isDark),
       borderRadius:
           BorderRadius.circular(ResponsiveUtils.getCardRadius(context)),
       child: Container(
-        height: ResponsiveUtils.getCardHeight(context, baseHeight: 240.0),
-        padding: ResponsiveUtils.getCardPadding(context),
+        height: fillHeight
+            ? null
+            : ResponsiveUtils.getCardHeight(
+                context,
+                baseHeight: compact ? 220.0 : 240.0,
+              ),
+        padding: compact
+            ? ResponsiveUtils.padding(context, all: 12)
+            : ResponsiveUtils.getCardPadding(context),
         decoration: BoxDecoration(
           color: isDark
               ? AppTheme.darkCardBackground
@@ -1182,11 +1463,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ],
             ),
-            SizedBox(height: context.spacing(16)),
+            SizedBox(height: context.spacing(compact ? 10 : 16)),
             Expanded(
               child: _buildSpeedChart(isDark),
             ),
-            SizedBox(height: context.spacing(12)),
+            SizedBox(height: context.spacing(compact ? 8 : 12)),
             // 数值显示在折线图下方，上下两行
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -1432,15 +1713,26 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // 网络质量卡片（带环形图）
-  Widget _buildQualityCard(bool isDark) {
+  Widget _buildQualityCard(
+    bool isDark, {
+    bool compact = false,
+    bool fillHeight = false,
+  }) {
     final primaryColor = Theme.of(context).primaryColor;
     return InkWell(
       onTap: () => _showNetworkQualityDialog(isDark),
       borderRadius:
           BorderRadius.circular(ResponsiveUtils.getCardRadius(context)),
       child: Container(
-        height: ResponsiveUtils.getCardHeight(context, baseHeight: 240.0),
-        padding: ResponsiveUtils.getCardPadding(context),
+        height: fillHeight
+            ? null
+            : ResponsiveUtils.getCardHeight(
+                context,
+                baseHeight: compact ? 220.0 : 240.0,
+              ),
+        padding: compact
+            ? ResponsiveUtils.padding(context, all: 12)
+            : ResponsiveUtils.getCardPadding(context),
         decoration: BoxDecoration(
           color: isDark
               ? AppTheme.darkCardBackground
@@ -1477,7 +1769,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ],
             ),
-            SizedBox(height: context.spacing(16)),
+            SizedBox(height: context.spacing(compact ? 10 : 16)),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -1491,14 +1783,17 @@ class _DashboardPageState extends State<DashboardPage> {
 
                   return Row(
                     children: [
-                      // 环形图居左，响应式大小
-                      SizedBox(
-                        width: chartSize,
-                        height: chartSize,
-                        child: _buildQualityPieChart(context, isDark),
+                      // 在卡片左边缘和右侧图例之间居中，避免紧贴边缘。
+                      Expanded(
+                        child: Center(
+                          child: SizedBox(
+                            width: chartSize,
+                            height: chartSize,
+                            child: _buildQualityPieChart(context, isDark),
+                          ),
+                        ),
                       ),
-                      // 使用Spacer推动文字描述到右边
-                      const Spacer(),
+                      SizedBox(width: context.spacingSmall),
                       // 文字描述整体靠右，但内部左对齐
                       Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -1639,15 +1934,26 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   // 流量统计卡片（带环形图）
-  Widget _buildTrafficCard(bool isDark) {
+  Widget _buildTrafficCard(
+    bool isDark, {
+    bool compact = false,
+    bool fillHeight = false,
+  }) {
     final primaryColor = Theme.of(context).primaryColor;
     return InkWell(
       onTap: () => _showTrafficStatisticsDialog(isDark),
       borderRadius:
           BorderRadius.circular(ResponsiveUtils.getCardRadius(context)),
       child: Container(
-        height: ResponsiveUtils.getCardHeight(context, baseHeight: 240.0),
-        padding: ResponsiveUtils.getCardPadding(context),
+        height: fillHeight
+            ? null
+            : ResponsiveUtils.getCardHeight(
+                context,
+                baseHeight: compact ? 220.0 : 240.0,
+              ),
+        padding: compact
+            ? ResponsiveUtils.padding(context, all: 12)
+            : ResponsiveUtils.getCardPadding(context),
         decoration: BoxDecoration(
           color: isDark
               ? AppTheme.darkCardBackground
@@ -1684,7 +1990,7 @@ class _DashboardPageState extends State<DashboardPage> {
                 ),
               ],
             ),
-            SizedBox(height: context.spacing(16)),
+            SizedBox(height: context.spacing(compact ? 10 : 16)),
             Expanded(
               child: LayoutBuilder(
                 builder: (context, constraints) {
@@ -1698,14 +2004,17 @@ class _DashboardPageState extends State<DashboardPage> {
 
                   return Row(
                     children: [
-                      // 环形图居左，响应式大小
-                      SizedBox(
-                        width: chartSize,
-                        height: chartSize,
-                        child: _buildTrafficPieChart(context, isDark),
+                      // 在卡片左边缘和右侧图例之间居中，避免紧贴边缘。
+                      Expanded(
+                        child: Center(
+                          child: SizedBox(
+                            width: chartSize,
+                            height: chartSize,
+                            child: _buildTrafficPieChart(context, isDark),
+                          ),
+                        ),
                       ),
-                      // 使用Spacer推动文字描述到右边
-                      const Spacer(),
+                      SizedBox(width: context.spacingSmall),
                       // 文字描述整体靠右，但内部左对齐
                       Column(
                         mainAxisAlignment: MainAxisAlignment.center,
@@ -2741,81 +3050,6 @@ class _DashboardPageState extends State<DashboardPage> {
     }
 
     return cardContent;
-  }
-
-  Widget _buildQuickActions(bool isDark) {
-    return Row(
-      children: [
-        Expanded(
-          child: _buildActionButton(
-            isDark,
-            icon: Icons.add_circle_outline,
-            label: '新建配置',
-            onTap: widget.onNavigateToConfig,
-          ),
-        ),
-        const SizedBox(width: 12),
-        Expanded(
-          child: _buildActionButton(
-            isDark,
-            icon: Icons.settings,
-            label: '系统设置',
-            onTap: widget.onNavigateToSettings,
-          ),
-        ),
-      ],
-    );
-  }
-
-  Widget _buildActionButton(
-    bool isDark, {
-    required IconData icon,
-    required String label,
-    VoidCallback? onTap,
-  }) {
-    final primaryColor = Theme.of(context).primaryColor;
-    return InkWell(
-      onTap: onTap,
-      borderRadius: BorderRadius.circular(16),
-      child: Container(
-        padding: EdgeInsets.symmetric(
-            vertical: context.spacingLarge, horizontal: context.spacingMedium),
-        decoration: BoxDecoration(
-          color: isDark
-              ? AppTheme.darkCardBackground
-              : AppTheme.lightCardBackground,
-          borderRadius: BorderRadius.circular(16),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: isDark ? 0.2 : 0.08),
-              blurRadius: 10,
-              offset: const Offset(0, 4),
-            ),
-          ],
-        ),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.center,
-          children: [
-            Icon(
-              icon,
-              color: primaryColor,
-              size: context.iconMedium,
-            ),
-            const SizedBox(width: 12),
-            Text(
-              label,
-              style: TextStyle(
-                fontSize: context.fontMedium,
-                fontWeight: FontWeight.w600,
-                color: isDark
-                    ? AppTheme.darkTextPrimary
-                    : AppTheme.lightTextPrimary,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
   }
 
   // 显示网络速度监控弹窗

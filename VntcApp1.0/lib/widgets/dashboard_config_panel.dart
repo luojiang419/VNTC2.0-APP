@@ -67,6 +67,11 @@ typedef DashboardConfigAction = Future<DashboardConfigActionResult> Function(
   NetworkConfig config,
 );
 
+enum DashboardConfigPanelAction {
+  create,
+  import,
+}
+
 /// 仪表盘的多配置控制面板。
 ///
 /// 配置顺序以传入列表为唯一数据源，拖拽后通过 [onReorder] 交给上层持久化。
@@ -252,7 +257,7 @@ class _DashboardConfigPanelState extends State<DashboardConfigPanel> {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        '多配置连接',
+                        '添加与管理配置',
                         style: TextStyle(
                           color: tokens.textPrimary,
                           fontSize: context.fontLarge,
@@ -260,7 +265,7 @@ class _DashboardConfigPanelState extends State<DashboardConfigPanel> {
                         ),
                       ),
                       Text(
-                        '拖动左侧手柄可调整配置顺序',
+                        '新建、导入或管理已有组网配置',
                         style: TextStyle(
                           color: tokens.textSecondary,
                           fontSize: context.fontSmall,
@@ -274,6 +279,32 @@ class _DashboardConfigPanelState extends State<DashboardConfigPanel> {
                   onPressed: () => Navigator.of(context).pop(),
                   tooltip: '关闭',
                   icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            SizedBox(height: context.spacingMedium),
+            Row(
+              children: [
+                Expanded(
+                  child: FilledButton.icon(
+                    key: const ValueKey('dashboard-config-panel-create'),
+                    onPressed: () => Navigator.of(context).pop(
+                      DashboardConfigPanelAction.create,
+                    ),
+                    icon: const Icon(Icons.add),
+                    label: const Text('新建配置'),
+                  ),
+                ),
+                SizedBox(width: context.spacingSmall),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    key: const ValueKey('dashboard-config-panel-import'),
+                    onPressed: () => Navigator.of(context).pop(
+                      DashboardConfigPanelAction.import,
+                    ),
+                    icon: const Icon(Icons.file_download_outlined),
+                    label: const Text('导入配置'),
+                  ),
                 ),
               ],
             ),
@@ -314,7 +345,7 @@ class _DashboardConfigPanelState extends State<DashboardConfigPanel> {
               child: _configs.isEmpty
                   ? Center(
                       child: Text(
-                        '暂无配置，请先到配置管理中添加。',
+                        '暂无配置，请点击上方按钮新建或导入。',
                         style: TextStyle(color: tokens.textSecondary),
                       ),
                     )

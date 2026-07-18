@@ -120,6 +120,10 @@ impl Command {
 fn print_help() {
     println!(
         "vntc-linux-webui {}\n\n用法：\n  vntc-linux-webui --config <路径>\n  vntc-linux-webui --config <路径> --check-config\n\n参数：\n  -c, --config <路径>  JSON 配置文件，默认 config.json\n      --check-config    校验配置后退出\n  -h, --help            显示帮助",
-        env!("CARGO_PKG_VERSION")
+        app_version()
     );
+}
+
+fn app_version() -> &'static str {
+    option_env!("VNTC_APP_VERSION").unwrap_or(env!("CARGO_PKG_VERSION"))
 }

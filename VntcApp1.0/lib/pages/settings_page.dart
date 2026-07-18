@@ -18,6 +18,7 @@ import 'package:vnt_app/app_version.dart';
 import 'package:vnt_app/update/app_update_preferences.dart';
 import 'package:vnt_app/update/update_dialog.dart';
 import 'package:vnt_app/windows_startup_manager.dart';
+import 'package:vnt_app/widgets/app_glow_surface.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -25,6 +26,8 @@ class SettingsPage extends StatefulWidget {
   final void Function(ThemeMode) onThemeModeChanged;
   final VoidCallback? onDataChanged;
   final void Function(VoidCallback)? onRefreshCallback;
+  final VoidCallback? onBack;
+  final bool isProfessionalMode;
 
   const SettingsPage({
     super.key,
@@ -32,6 +35,8 @@ class SettingsPage extends StatefulWidget {
     required this.onThemeModeChanged,
     this.onDataChanged,
     this.onRefreshCallback,
+    this.onBack,
+    this.isProfessionalMode = true,
   });
 
   @override
@@ -354,18 +359,20 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildSectionTitle(isDark, '应用'),
               SizedBox(height: context.spacingSmall),
               _buildAppSettings(isDark),
-              SizedBox(height: context.spacingLarge),
+              if (widget.isProfessionalMode) ...[
+                SizedBox(height: context.spacingLarge),
 
-              // 数据管理
-              _buildSectionTitle(isDark, '数据管理'),
-              SizedBox(height: context.spacingSmall),
-              _buildDataSettings(isDark),
+                // 数据管理
+                _buildSectionTitle(isDark, '数据管理'),
+                SizedBox(height: context.spacingSmall),
+                _buildDataSettings(isDark),
 
-              // 日志（所有平台）
-              SizedBox(height: context.spacingLarge),
-              _buildSectionTitle(isDark, '调试'),
-              SizedBox(height: context.spacingSmall),
-              _buildDebugSettings(isDark),
+                // 调试与日志仅在专业模式展示。
+                SizedBox(height: context.spacingLarge),
+                _buildSectionTitle(isDark, '调试'),
+                SizedBox(height: context.spacingSmall),
+                _buildDebugSettings(isDark),
+              ],
             ],
           ),
         ),
@@ -377,6 +384,15 @@ class _SettingsPageState extends State<SettingsPage> {
     final primaryColor = Theme.of(context).primaryColor;
     return Row(
       children: [
+        if (widget.onBack != null) ...[
+          IconButton.outlined(
+            key: const ValueKey('settings-back-button'),
+            onPressed: widget.onBack,
+            tooltip: '返回仪表盘',
+            icon: const Icon(Icons.arrow_back),
+          ),
+          SizedBox(width: context.spacingSmall),
+        ],
         Container(
           width: context.iconXLarge,
           height: context.iconXLarge,
@@ -461,8 +477,10 @@ class _SettingsPageState extends State<SettingsPage> {
       child: Column(
         children: [
           _buildThemeSelector(isDark),
-          _buildDivider(isDark),
-          _buildColorSelector(isDark, customColor),
+          if (widget.isProfessionalMode) ...[
+            _buildDivider(isDark),
+            _buildColorSelector(isDark, customColor),
+          ],
         ],
       ),
     );
@@ -633,7 +651,7 @@ class _SettingsPageState extends State<SettingsPage> {
                       ? '写入 ~/.config/autostart 实现开机自启'
                       : '下次开机时自动启动应用',
               trailing: Platform.isWindows
-                  ? Switch(
+                  ? _buildGlowSwitch(
                       value: _autoStart,
                       onChanged: (value) async {
                         final succeeded = await _setWindowsAutoStart(
@@ -656,9 +674,8 @@ class _SettingsPageState extends State<SettingsPage> {
                           );
                         }
                       },
-                      activeThumbColor: Theme.of(context).primaryColor,
                     )
-                  : Switch(
+                  : _buildGlowSwitch(
                       value: _autoStart,
                       onChanged: (value) async {
                         if (Platform.isLinux) {
@@ -676,17 +693,17 @@ class _SettingsPageState extends State<SettingsPage> {
                           );
                         }
                       },
-                      activeThumbColor: Theme.of(context).primaryColor,
                     ),
             ),
             _buildDivider(isDark),
-            if (Platform.isWindows || Platform.isLinux) ...[
+            if (widget.isProfessionalMode &&
+                (Platform.isWindows || Platform.isLinux)) ...[
               _buildSettingItem(
                 isDark,
                 icon: Icons.visibility_off,
                 title: '静默启动',
                 subtitle: '开机自启时不显示窗口，最小化到系统托盘',
-                trailing: Switch(
+                trailing: _buildGlowSwitch(
                   value: _silentStart,
                   onChanged: (value) async {
                     await _dataPersistence.saveSilentStart(value);
@@ -702,29 +719,29 @@ class _SettingsPageState extends State<SettingsPage> {
                       }
                     }
                   },
-                  activeThumbColor: Theme.of(context).primaryColor,
                 ),
               ),
               _buildDivider(isDark),
             ],
           ],
-          _buildSettingItem(
-            isDark,
-            icon: Icons.autorenew,
-            title: '自动连接',
-            subtitle: '启动时自动连接默认配置',
-            trailing: Switch(
-              value: _autoConnect,
-              onChanged: (value) async {
-                await _dataPersistence.saveAutoConnect(value);
-                setState(() {
-                  _autoConnect = value;
-                });
-              },
-              activeThumbColor: Theme.of(context).primaryColor,
+          if (widget.isProfessionalMode) ...[
+            _buildSettingItem(
+              isDark,
+              icon: Icons.autorenew,
+              title: '自动连接',
+              subtitle: '启动时自动连接默认配置',
+              trailing: _buildGlowSwitch(
+                value: _autoConnect,
+                onChanged: (value) async {
+                  await _dataPersistence.saveAutoConnect(value);
+                  setState(() {
+                    _autoConnect = value;
+                  });
+                },
+              ),
             ),
-          ),
-          _buildDivider(isDark),
+            _buildDivider(isDark),
+          ],
           if (AppVersion.updateEnabled) ...[
             _buildSettingItem(
               isDark,
@@ -778,12 +795,30 @@ class _SettingsPageState extends State<SettingsPage> {
             ),
             _buildDivider(isDark),
           ],
-          _buildDefaultConfigSelector(isDark),
+          if (widget.isProfessionalMode) _buildDefaultConfigSelector(isDark),
           if (Platform.isWindows || Platform.isLinux) ...[
-            _buildDivider(isDark),
+            if (widget.isProfessionalMode || !AppVersion.updateEnabled)
+              _buildDivider(isDark),
             _buildCloseBehaviorSelector(isDark),
           ],
         ],
+      ),
+    );
+  }
+
+  Widget _buildGlowSwitch({
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return AppGlowSurface(
+      active: value,
+      pulse: true,
+      raised: true,
+      borderRadius: BorderRadius.circular(28),
+      child: Switch(
+        value: value,
+        onChanged: onChanged,
+        activeThumbColor: Theme.of(context).primaryColor,
       ),
     );
   }

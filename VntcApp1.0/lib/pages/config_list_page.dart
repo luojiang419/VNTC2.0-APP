@@ -23,12 +23,14 @@ import 'package:vnt_app/vnt/virtual_network_adapter_manager.dart';
 class ConfigListPage extends StatefulWidget {
   final Function(NetworkConfig)? onConfigSelected;
   final Function(VoidCallback)? onRefreshCallback;
+  final void Function(Future<void> Function())? onImportCallback;
   final VoidCallback? onDataChanged;
 
   const ConfigListPage({
     super.key,
     this.onConfigSelected,
     this.onRefreshCallback,
+    this.onImportCallback,
     this.onDataChanged,
   });
 
@@ -49,11 +51,15 @@ class _ConfigListPageState extends State<ConfigListPage> {
     _loadConfigs();
     // 将刷新方法传递给父组件
     widget.onRefreshCallback?.call(_loadConfigs);
+    widget.onImportCallback?.call(_importSingleConfig);
   }
 
   @override
   void didUpdateWidget(ConfigListPage oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.onImportCallback != widget.onImportCallback) {
+      widget.onImportCallback?.call(_importSingleConfig);
+    }
     // 当页面重新显示时，重新加载配置
     _loadConfigs();
   }
@@ -1128,6 +1134,7 @@ class _ConfigListPageState extends State<ConfigListPage> {
           showTopToast(context, '导入成功', isSuccess: true);
           // 重新加载配置列表以实时显示导入的配置
           await _loadConfigs();
+          widget.onDataChanged?.call();
           // 同步更新通知栏、磁贴、小组件（导入可能影响默认配置）
           VntAppCall.updateWidgetAndTile(false);
           // 更新系统托盘（配置列表变化）

@@ -1,10 +1,13 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:screen_retriever/screen_retriever.dart';
+import 'package:window_manager/window_manager.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/theme/app_theme_tokens.dart';
 import 'package:vnt_app/theme/theme_provider.dart';
 import 'package:vnt_app/app_version.dart';
+import 'package:vnt_app/app_experience_mode.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_config_input_page.dart';
 import 'package:vnt_app/data_persistence.dart';
@@ -19,6 +22,7 @@ import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
+import 'package:vnt_app/utils/dashboard_window_sizing.dart';
 import 'dart:isolate';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/widgets/custom_title_bar.dart';
@@ -44,7 +48,11 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   NetworkConfig? _selectedConfig;
   VoidCallback? _refreshConfigList;
   VoidCallback? _refreshSettings;
+  Future<void> Function()? _importSingleConfig;
   int _configRevision = 0;
+  final AppExperiencePreferences _experiencePreferences =
+      AppExperiencePreferences();
+  AppExperienceMode _experienceMode = AppExperienceMode.regular;
 
   bool get _showChatPage => true;
   bool get _showRemoteAssistPage =>
@@ -101,7 +109,168 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   @override
   void initState() {
     super.initState();
+    _loadExperienceMode();
     _autoConnect();
+  }
+
+  Future<void> _loadExperienceMode() async {
+    final mode = await _experiencePreferences.loadMode();
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _experienceMode = mode;
+      if (!mode.isProfessional) {
+        _selectedIndex = 0;
+      }
+    });
+    await _applyExperienceWindowProfile(
+      mode,
+      resizeRegular: !mode.isProfessional,
+    );
+  }
+
+  Future<void> _changeProfessionalMode(bool enableProfessionalMode) async {
+    if (enableProfessionalMode && !_experienceMode.isProfessional) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (dialogContext) => AlertDialog(
+          title: const Text('切换到专业模式'),
+          content: const Text(
+            '除非你知道自己在做什么，否则最纯粹的虚拟组网体验更适合你',
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(false),
+              child: const Text('保持极简模式'),
+            ),
+            FilledButton(
+              onPressed: () => Navigator.of(dialogContext).pop(true),
+              child: const Text('进入专业模式'),
+            ),
+          ],
+        ),
+      );
+      if (confirmed != true) {
+        return;
+      }
+    }
+
+    final mode = enableProfessionalMode
+        ? AppExperienceMode.professional
+        : AppExperienceMode.regular;
+    await _experiencePreferences.saveMode(mode);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _experienceMode = mode;
+      _selectedIndex = 0;
+    });
+    await _applyExperienceWindowProfile(
+      mode,
+      resizeRegular: !mode.isProfessional,
+    );
+  }
+
+  Future<void> _applyExperienceWindowProfile(
+    AppExperienceMode mode, {
+    bool resizeRegular = false,
+  }) async {
+    if (!Platform.isWindows) {
+      return;
+    }
+
+    try {
+      if (mode.isProfessional) {
+        await windowManager.setMinimumSize(
+          DashboardWindowSizing.professionalMinimumSize,
+        );
+        final currentSize = await windowManager.getSize();
+        if (currentSize.width <
+                DashboardWindowSizing.professionalMinimumSize.width ||
+            currentSize.height <
+                DashboardWindowSizing.professionalMinimumSize.height) {
+          final display = await _getCurrentWindowDisplay();
+          await _setWindowSizeOnDisplay(
+            DashboardWindowSizing.professionalPreferredSize,
+            display,
+          );
+        }
+        return;
+      }
+
+      await windowManager.setMinimumSize(
+        DashboardWindowSizing.regularMinimumSize,
+      );
+      if (resizeRegular) {
+        final configs = await DataPersistence().loadData();
+        if (configs.isNotEmpty) {
+          await _resizeRegularDashboardWindow();
+        }
+      }
+    } catch (error) {
+      debugPrint('应用仪表盘窗口尺寸失败: $error');
+    }
+  }
+
+  Future<void> _resizeRegularDashboardWindow() async {
+    if (!Platform.isWindows) {
+      return;
+    }
+
+    try {
+      final display = await _getCurrentWindowDisplay();
+      final targetSize = DashboardWindowSizing.regularSizeForDisplay(
+        display.size,
+        scaleFactor: display.scaleFactor,
+      );
+      await windowManager.setMinimumSize(
+        DashboardWindowSizing.regularMinimumSize,
+      );
+      await _setWindowSizeOnDisplay(targetSize, display);
+    } catch (error) {
+      debugPrint('调整常规仪表盘窗口尺寸失败: $error');
+    }
+  }
+
+  Future<Display> _getCurrentWindowDisplay() async {
+    final primaryDisplay = await screenRetriever.getPrimaryDisplay();
+    final displays = await screenRetriever.getAllDisplays();
+    final windowCenter = (await windowManager.getBounds()).center;
+
+    return displays.firstWhere(
+      (display) {
+        final position = display.visiblePosition ?? Offset.zero;
+        final size = display.visibleSize ?? display.size;
+        return Rect.fromLTWH(
+          position.dx,
+          position.dy,
+          size.width,
+          size.height,
+        ).contains(windowCenter);
+      },
+      orElse: () => primaryDisplay,
+    );
+  }
+
+  Future<void> _setWindowSizeOnDisplay(Size size, Display display) async {
+    final visiblePosition = display.visiblePosition ?? Offset.zero;
+    final visibleSize = display.visibleSize ?? display.size;
+    final position = Offset(
+      visiblePosition.dx + (visibleSize.width - size.width) / 2,
+      visiblePosition.dy + (visibleSize.height - size.height) / 2,
+    );
+
+    await windowManager.setBounds(
+      null,
+      position: position,
+      size: size,
+      animate: true,
+    );
+    final dataPersistence = DataPersistence();
+    await dataPersistence.saveWindowSize(size);
+    await dataPersistence.saveWindowPosition(position);
   }
 
   /// 自动连接逻辑
@@ -185,29 +354,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     await _editConfigFromDashboard(config);
   }
 
-  Future<NetworkConfig?> _editConfigFromDashboard(
-    NetworkConfig config,
-  ) async {
-    if (vntManager.hasConnectionItem(config.itemKey)) {
-      showTopToast(context, '连接中的配置不能修改，请先断开连接', isSuccess: false);
-      return null;
-    }
-
-    final dataPersistence = DataPersistence();
-    final configs = await dataPersistence.loadData();
-    final configIndex = configs.indexWhere(
-      (item) => item.itemKey == config.itemKey,
-    );
-    if (!mounted) {
-      return null;
-    }
-    if (configIndex < 0) {
-      showTopToast(context, '配置不存在，请刷新后重试', isSuccess: false);
-      return null;
-    }
-
+  Future<NetworkConfig?> _openConfigEditor(NetworkConfig? config) async {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    final result = await showDialog<NetworkConfig>(
+    return showDialog<NetworkConfig>(
       context: context,
       barrierDismissible: false,
       builder: (dialogContext) => Dialog(
@@ -229,6 +378,64 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         ),
       ),
     );
+  }
+
+  Future<void> _createConfigFromDashboard() async {
+    final result = await _openConfigEditor(null);
+    if (result == null || !mounted) {
+      return;
+    }
+
+    final dataPersistence = DataPersistence();
+    final configs = await dataPersistence.loadData();
+    final wasEmpty = configs.isEmpty;
+    configs.add(result);
+    await dataPersistence.saveData(configs);
+    if (!mounted) {
+      return;
+    }
+    _notifyConfigDataChanged();
+    if (wasEmpty && !_experienceMode.isProfessional) {
+      await _resizeRegularDashboardWindow();
+    }
+    VntAppCall.updateWidgetAndTile(false);
+    await SystemTrayManager().updateMenu();
+    if (mounted) {
+      showTopToast(context, '配置“${result.configName}”已添加', isSuccess: true);
+    }
+  }
+
+  Future<void> _importConfigFromDashboard() async {
+    final importConfig = _importSingleConfig;
+    if (importConfig == null) {
+      showTopToast(context, '配置导入功能正在初始化，请稍后重试', isSuccess: false);
+      return;
+    }
+    await importConfig();
+  }
+
+  Future<NetworkConfig?> _editConfigFromDashboard(
+    NetworkConfig config,
+  ) async {
+    if (vntManager.hasConnectionItem(config.itemKey)) {
+      showTopToast(context, '连接中的配置不能修改，请先断开连接', isSuccess: false);
+      return null;
+    }
+
+    final dataPersistence = DataPersistence();
+    final configs = await dataPersistence.loadData();
+    final configIndex = configs.indexWhere(
+      (item) => item.itemKey == config.itemKey,
+    );
+    if (!mounted) {
+      return null;
+    }
+    if (configIndex < 0) {
+      showTopToast(context, '配置不存在，请刷新后重试', isSuccess: false);
+      return null;
+    }
+
+    final result = await _openConfigEditor(config);
     if (result == null || !mounted) {
       return null;
     }
@@ -694,7 +901,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final screenWidth = MediaQuery.of(context).size.width;
     final isWideScreen = screenWidth > 800;
     final isMediumScreen = screenWidth > 600 && screenWidth <= 800;
-    final useCompactBottomDock = !isWideScreen && !isMediumScreen;
+    final showProfessionalNavigation = _experienceMode.isProfessional;
+    final useCompactBottomDock =
+        showProfessionalNavigation && !isWideScreen && !isMediumScreen;
 
     // 设置状态栏颜色以适配当前主题（仅移动端）
     if (Platform.isAndroid || Platform.isIOS) {
@@ -721,7 +930,8 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
             child: Row(
               children: [
                 // 侧边导航栏（宽屏显示）
-                if (isWideScreen || isMediumScreen)
+                if (showProfessionalNavigation &&
+                    (isWideScreen || isMediumScreen))
                   _buildSideNavigation(isDark, isWideScreen),
 
                 // 主内容区域
@@ -1119,10 +1329,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         // 0: 仪表盘
         DashboardPage(
           configRevision: _configRevision,
-          onNavigateToConfig: () =>
-              setState(() => _selectedIndex = _configIndex),
           onEditDefaultConfig: _editDefaultConfigFromDashboard,
           onEditConfig: _editConfigFromDashboard,
+          onCreateConfig: _createConfigFromDashboard,
+          onImportConfig: _importConfigFromDashboard,
+          isProfessionalMode: _experienceMode.isProfessional,
+          onProfessionalModeChanged: _changeProfessionalMode,
           onConnectConfig: (config) => _connectToConfigDirectly(
             config,
             showProgressDialog: false,
@@ -1207,6 +1419,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
           onRefreshCallback: (callback) {
             _refreshConfigList = callback;
           },
+          onImportCallback: (callback) {
+            _importSingleConfig = callback;
+          },
           onDataChanged: () {
             // 当配置数据改变时，刷新设置页面
             if (mounted) {
@@ -1218,6 +1433,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         // 5: 设置
         SettingsPage(
           themeMode: themeProvider?.themeMode ?? ThemeMode.system,
+          isProfessionalMode: _experienceMode.isProfessional,
+          onBack: _experienceMode.isProfessional
+              ? null
+              : () => setState(() => _selectedIndex = 0),
           onThemeModeChanged: (mode) {
             themeProvider?.setThemeMode(mode);
           },

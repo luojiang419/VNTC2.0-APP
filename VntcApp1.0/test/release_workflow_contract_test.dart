@@ -77,4 +77,20 @@ void main() {
         contains(
             'releaseTag = \'v\${{ needs.meta.outputs.client_version }}\''));
   });
+
+  test('Linux WebUI 客户端使用同一版本构建并进入正式 Release', () {
+    expect(workflow, contains('build-client-linux-webui:'));
+    expect(workflow, contains('name: Linux WebUI 客户端'));
+    expect(
+      workflow,
+      contains('--version "\${{ needs.meta.outputs.client_version }}"'),
+    );
+    expect(
+      workflow,
+      contains(
+        'VNTC_Linux_WebUI_\${{ needs.meta.outputs.client_version }}_ubuntu24.04_x86_64.tar.gz',
+      ),
+    );
+    expect(workflow, contains('      - build-client-linux-webui'));
+  });
 }

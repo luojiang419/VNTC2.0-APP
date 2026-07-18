@@ -53,6 +53,7 @@ grep -q '仪表盘' <<<"$index"
 grep -q '链接状态' <<<"$index"
 grep -q '"default_profile_id"' <<<"$profiles"
 grep -q '"refresh_interval_seconds":5' <<<"$settings"
+grep -q '"experience_mode":"minimal"' <<<"$settings"
 grep -q '"version":"4.5.0"' <<<"$about"
 grep -q '"schema_version":1' <<<"$backup"
 
