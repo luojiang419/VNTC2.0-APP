@@ -1,6 +1,8 @@
 use super::db::{
     self, EncryptedWireGuardIdentity, insert_wireguard_server_identity_if_absent_with_pool,
-    load_wireguard_server_identity_with_pool, replace_wireguard_server_identity_with_pool,
+    load_wireguard_server_identity_with_pool,
+    replace_wireguard_identity_and_peer_secrets_with_pool,
+    replace_wireguard_server_identity_with_pool,
 };
 use anyhow::{Context, ensure};
 use chacha20poly1305::{
@@ -66,7 +68,7 @@ pub(crate) async fn rotate_identity(master_key_file: &Path) -> anyhow::Result<Id
     rotate_identity_with_pool(db::db_pool()?, &master_key).await
 }
 
-fn load_master_key(path: &Path) -> anyhow::Result<Zeroizing<[u8; MASTER_KEY_LENGTH]>> {
+pub(super) fn load_master_key(path: &Path) -> anyhow::Result<Zeroizing<[u8; MASTER_KEY_LENGTH]>> {
     let bytes = Zeroizing::new(std::fs::read(path).with_context(|| {
         format!(
             "Failed to read WireGuard master key file: {}",
@@ -225,7 +227,21 @@ async fn rotate_master_key_with_pool(
         current.created_at,
         unix_timestamp()?,
     )?;
-    replace_wireguard_server_identity_with_pool(pool, &current, &replacement).await?;
+    let peer_secrets = super::wireguard_profile::reencrypt_all_peer_secrets_with_pool(
+        pool,
+        current_master_key,
+        new_master_key,
+        new_version,
+        replacement.updated_at,
+    )
+    .await?;
+    replace_wireguard_identity_and_peer_secrets_with_pool(
+        pool,
+        &current,
+        &replacement,
+        &peer_secrets,
+    )
+    .await?;
 
     Ok(MasterKeyRotation {
         public_key: identity.public_key(),

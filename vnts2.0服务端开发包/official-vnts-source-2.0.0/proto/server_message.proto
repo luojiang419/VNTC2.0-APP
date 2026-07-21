@@ -12,6 +12,11 @@ message ServerMessage {
     ServerForwardData forward_data = 6;
     ServerClientInfoRequest client_info_req = 7;
     ServerClientInfoResponse client_info_res = 8;
+    ServerLeaseAcquireRequest lease_acquire_req = 9;
+    ServerLeaseAcquireResponse lease_acquire_res = 10;
+    ServerLeaseReleaseRequest lease_release_req = 11;
+    ServerLeaseReleaseResponse lease_release_res = 12;
+    ServerBroadcastData broadcast_data = 13;
   }
 }
 
@@ -22,15 +27,35 @@ message ServerForwardData {
   bool source_is_wireguard = 3; // WireGuardRelay 的源节点类型；旧服务端默认 false
 }
 
+message ServerBroadcastData {
+  string network_code = 1;
+  bytes data = 2; // 已解密的原始 IPv4 包
+  fixed32 source_ip = 3;
+  string broadcast_id = 4;
+  string origin_server_id = 5;
+  uint32 hops_remaining = 6;
+  bool source_is_wireguard = 7;
+}
+
 // 服务端认证请求
 message ServerAuthRequest {
   string token_hash = 1; // SHA256(token)
+  string server_id = 2; // 集群内稳定且唯一；空值表示旧版/仅路由节点
+  uint32 protocol_version = 3;
+  uint64 capabilities = 4;
+  string network_config_digest = 5;
+  string lease_authority = 6;
 }
 
 // 服务端认证响应
 message ServerAuthResponse {
   bool success = 1;
   string message = 2;
+  string server_id = 3;
+  uint32 protocol_version = 4;
+  uint64 capabilities = 5;
+  string network_config_digest = 6;
+  string lease_authority = 7;
 }
 
 message NetworkInfo {
@@ -41,6 +66,7 @@ message NetworkInfo {
 message ClientLatencyInfo {
   fixed32 ip = 1;
   uint32 latency_ms = 2; // 客户端到本服务器的延迟（毫秒），目前用默认值
+  bool is_wireguard = 3; // 仅在对端声明 WireGuard endpoint sync 能力时信任
 }
 
 // Ping请求（用于探测服务器间延迟）
@@ -62,4 +88,42 @@ message ServerClientInfoRequest {
 // 客户端信息响应
 message ServerClientInfoResponse {
   repeated NetworkInfo networks = 1; // 返回请求的网络信息
+}
+
+message ServerLeaseAcquireRequest {
+  string request_id = 1;
+  string network_code = 2;
+  string owner_type = 3;
+  string owner_id = 4;
+  fixed32 requested_ip = 5;
+  bool has_requested_ip = 6;
+  fixed32 network_base = 7;
+  uint32 prefix_len = 8;
+  fixed32 gateway = 9;
+  uint64 lease_duration_secs = 10;
+  bool static_reservation = 11;
+  string origin_server_id = 12;
+}
+
+message ServerLeaseAcquireResponse {
+  string request_id = 1;
+  bool success = 2;
+  string message = 3;
+  fixed32 ip = 4;
+  uint64 revision = 5;
+  int64 expires_at = 6;
+}
+
+message ServerLeaseReleaseRequest {
+  string request_id = 1;
+  string network_code = 2;
+  string owner_type = 3;
+  string owner_id = 4;
+}
+
+message ServerLeaseReleaseResponse {
+  string request_id = 1;
+  bool success = 2;
+  string message = 3;
+  uint64 revision = 4;
 }

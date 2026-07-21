@@ -58,6 +58,30 @@ struct TestRegRequest {
     wireguard_p2p_public_key: Vec<u8>,
     #[prost(uint32, tag = "12")]
     wireguard_p2p_port: u32,
+    #[prost(uint64, tag = "13")]
+    client_capabilities: u64,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct TestClientSimpleInfo {
+    #[prost(fixed32, tag = "1")]
+    ip: u32,
+    #[prost(bool, tag = "2")]
+    online: bool,
+    #[prost(int32, tag = "3")]
+    node_type: i32,
+}
+
+#[derive(Clone, PartialEq, Message)]
+struct TestClientSimpleInfoList {
+    #[prost(uint64, tag = "1")]
+    data_version: u64,
+    #[prost(message, repeated, tag = "2")]
+    list: Vec<TestClientSimpleInfo>,
+    #[prost(bool, tag = "3")]
+    is_all: bool,
+    #[prost(int64, tag = "4")]
+    time: i64,
 }
 
 #[derive(Clone, PartialEq, Message)]
@@ -446,6 +470,19 @@ fn reserve_ip(address: SocketAddr, token: &str, peer_id: &str, ip: &str) {
     ));
 }
 
+fn update_peer_routes(address: SocketAddr, token: &str, peer_id: &str, routes_json: &str) {
+    let body = format!(
+        r#"{{"network_code":"network-a","peer_id":"{peer_id}","persistent_keepalive":25,"routes":{routes_json}}}"#
+    );
+    assert_api_ok(&http_request(
+        address,
+        "PUT",
+        "/api/wireguard/peers/profile",
+        Some(token),
+        Some(&body),
+    ));
+}
+
 fn release_ip(address: SocketAddr, token: &str, peer_id: &str) {
     assert_api_ok(&http_request(
         address,
@@ -520,6 +557,29 @@ fn ipv4_packet_to(source: [u8; 4], destination: [u8; 4], length: usize) -> Vec<u
     packet[12..16].copy_from_slice(&source);
     packet[16..20].copy_from_slice(&destination);
     packet
+}
+
+fn icmp_echo_request(source: [u8; 4], destination: [u8; 4]) -> Vec<u8> {
+    let mut packet = ipv4_packet_to(source, destination, 28);
+    packet[9] = 1;
+    packet[20] = 8;
+    packet[24..28].copy_from_slice(&[0x12, 0x34, 0, 1]);
+    packet
+}
+
+fn internet_checksum(packet: &[u8]) -> u16 {
+    let mut sum = 0_u32;
+    let mut chunks = packet.chunks_exact(2);
+    for chunk in &mut chunks {
+        sum += u32::from(u16::from_be_bytes([chunk[0], chunk[1]]));
+    }
+    if let Some(last) = chunks.remainder().first() {
+        sum += u32::from(*last) << 8;
+    }
+    while sum >> 16 != 0 {
+        sum = (sum & 0xffff) + (sum >> 16);
+    }
+    !(sum as u16)
 }
 
 fn send_inner_ipv4(socket: &UdpSocket, server: SocketAddr, tunnel: &mut Tunn, ipv4: &[u8]) {
@@ -618,6 +678,7 @@ fn connect_vnt_with_p2p(
             allow_wire_guard,
             wireguard_p2p_public_key,
             wireguard_p2p_port,
+            client_capabilities: if allow_wire_guard { 0b11 } else { 0 },
         })),
     }
     .encode_to_vec();
@@ -662,6 +723,41 @@ fn wireguard_relay(ipv4: &[u8], source: [u8; 4], destination: [u8; 4]) -> Vec<u8
     relay[12..16].copy_from_slice(&destination);
     relay[16..].copy_from_slice(ipv4);
     relay
+}
+
+fn wireguard_broadcast_relay(ipv4: &[u8], source: [u8; 4], outer_destination: [u8; 4]) -> Vec<u8> {
+    let mut relay = vec![0; 16 + ipv4.len()];
+    relay[0] = 0x80 | 22;
+    relay[1] = 0x55;
+    relay[8..12].copy_from_slice(&source);
+    relay[12..16].copy_from_slice(&outer_destination);
+    relay[16..].copy_from_slice(ipv4);
+    relay
+}
+
+fn wireguard_subnet_relay(
+    ipv4: &[u8],
+    vnt_gateway: [u8; 4],
+    wireguard_destination: [u8; 4],
+) -> Vec<u8> {
+    let mut relay = vec![0; 16 + ipv4.len()];
+    relay[0] = 0x80 | 21;
+    relay[1] = 0x55;
+    relay[8..12].copy_from_slice(&vnt_gateway);
+    relay[12..16].copy_from_slice(&wireguard_destination);
+    relay[16..].copy_from_slice(ipv4);
+    relay
+}
+
+fn client_list_request(source: [u8; 4], gateway: [u8; 4]) -> Vec<u8> {
+    let mut packet = vec![0; 32];
+    packet[0] = 0x80 | 7;
+    packet[1] = 0x55;
+    packet[2] = 0x40;
+    packet[8..12].copy_from_slice(&source);
+    packet[12..16].copy_from_slice(&gateway);
+    packet[24..32].copy_from_slice(&u64::MAX.to_be_bytes());
+    packet
 }
 
 fn ipv6_packet() -> Vec<u8> {
@@ -907,6 +1003,29 @@ fn capable_vnt_and_wireguard_exchange_raw_ipv4_without_legacy_downgrade() {
     assert_eq!(&relay[12..16], &[10, 26, 0, 10]);
     assert_eq!(&relay[16..], wireguard_to_vnt.as_slice());
 
+    let wireguard_broadcast = ipv4_packet_to([10, 26, 0, 3], [10, 26, 0, 255], 128);
+    send_inner_ipv4(
+        &wireguard_socket,
+        wireguard,
+        &mut wireguard_client,
+        &wireguard_broadcast,
+    );
+    let relay = read_frame(&mut capable_vnt).unwrap();
+    assert_eq!(relay[0] & 0x7f, 22);
+    assert_eq!(&relay[8..12], &[10, 26, 0, 3]);
+    assert_eq!(&relay[12..16], &[10, 26, 0, 10]);
+    assert_eq!(&relay[16..], wireguard_broadcast.as_slice());
+
+    let vnt_broadcast = ipv4_packet_to([10, 26, 0, 10], [10, 26, 0, 255], 96);
+    write_frame(
+        &mut capable_vnt,
+        &wireguard_broadcast_relay(&vnt_broadcast, [10, 26, 0, 10], [255, 255, 255, 255]),
+    );
+    assert_eq!(
+        receive_inner_ipv4(&wireguard_socket, wireguard, &mut wireguard_client),
+        vnt_broadcast
+    );
+
     let mut legacy_vnt = connect_vnt(vnt_tcp, "legacy-vnt", [10, 26, 0, 11], false);
     legacy_vnt
         .sock
@@ -1074,6 +1193,12 @@ fn cross_server_bridge_preserves_origin_and_capability_boundaries() {
         true,
     );
     reserve_ip(http_b, &token_b, "cross-wireguard", "10.26.0.3");
+    update_peer_routes(
+        http_b,
+        &token_b,
+        "cross-wireguard",
+        r#"[{"lan_network":"192.168.10.0/24","vnt_cli_ip":"10.26.0.10"}]"#,
+    );
 
     let wireguard_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     wireguard_socket
@@ -1109,6 +1234,18 @@ fn cross_server_bridge_preserves_origin_and_capability_boundaries() {
         "peer-server route must carry capable VNT traffic to WireGuard"
     );
 
+    write_frame(
+        &mut capable_vnt,
+        &client_list_request([10, 26, 0, 10], [10, 26, 0, 1]),
+    );
+    let client_list_frame = read_frame(&mut capable_vnt).unwrap();
+    assert_eq!(client_list_frame[0] & 0x7f, 13);
+    let client_list = TestClientSimpleInfoList::decode(&client_list_frame[16..]).unwrap();
+    assert!(client_list.is_all);
+    assert!(client_list.list.iter().any(|client| {
+        client.ip == u32::from_be_bytes([10, 26, 0, 3]) && client.online && client.node_type == 1
+    }));
+
     capable_vnt
         .sock
         .set_read_timeout(Some(Duration::from_millis(250)))
@@ -1136,6 +1273,60 @@ fn cross_server_bridge_preserves_origin_and_capability_boundaries() {
     assert_eq!(&relay_to_vnt[8..12], &[10, 26, 0, 3]);
     assert_eq!(&relay_to_vnt[12..16], &[10, 26, 0, 10]);
     assert_eq!(&relay_to_vnt[16..], wireguard_to_vnt.as_slice());
+
+    let subnet_packet = ipv4_packet_to([10, 26, 0, 3], [192, 168, 10, 25], 192);
+    send_inner_ipv4(
+        &wireguard_socket,
+        wireguard_b,
+        &mut wireguard_client,
+        &subnet_packet,
+    );
+    let subnet_relay = read_frame(&mut capable_vnt).unwrap();
+    assert_eq!(subnet_relay[0] & 0x7f, 21);
+    assert_eq!(&subnet_relay[8..12], &[10, 26, 0, 3]);
+    assert_eq!(&subnet_relay[12..16], &[10, 26, 0, 10]);
+    assert_eq!(&subnet_relay[16..], subnet_packet.as_slice());
+
+    let subnet_reply = ipv4_packet_to([192, 168, 10, 25], [10, 26, 0, 3], 176);
+    write_frame(
+        &mut capable_vnt,
+        &wireguard_subnet_relay(&subnet_reply, [10, 26, 0, 10], [10, 26, 0, 3]),
+    );
+    assert_eq!(
+        receive_inner_ipv4(&wireguard_socket, wireguard_b, &mut wireguard_client),
+        subnet_reply,
+        "VNT LAN reply must return through the owning WireGuard peer route"
+    );
+    let unauthorized_subnet_reply = ipv4_packet_to([192, 168, 11, 25], [10, 26, 0, 3], 64);
+    write_frame(
+        &mut capable_vnt,
+        &wireguard_subnet_relay(&unauthorized_subnet_reply, [10, 26, 0, 10], [10, 26, 0, 3]),
+    );
+    assert_no_udp_response(&wireguard_socket);
+
+    let wireguard_broadcast = ipv4_packet_to([10, 26, 0, 3], [10, 26, 0, 255], 144);
+    send_inner_ipv4(
+        &wireguard_socket,
+        wireguard_b,
+        &mut wireguard_client,
+        &wireguard_broadcast,
+    );
+    let relay_to_vnt = read_frame(&mut capable_vnt).unwrap();
+    assert_eq!(relay_to_vnt[0] & 0x7f, 22);
+    assert_eq!(&relay_to_vnt[8..12], &[10, 26, 0, 3]);
+    assert_eq!(&relay_to_vnt[12..16], &[10, 26, 0, 10]);
+    assert_eq!(&relay_to_vnt[16..], wireguard_broadcast.as_slice());
+
+    let vnt_broadcast = ipv4_packet_to([10, 26, 0, 10], [10, 26, 0, 255], 112);
+    write_frame(
+        &mut capable_vnt,
+        &wireguard_broadcast_relay(&vnt_broadcast, [10, 26, 0, 10], [255, 255, 255, 255]),
+    );
+    assert_eq!(
+        receive_inner_ipv4(&wireguard_socket, wireguard_b, &mut wireguard_client),
+        vnt_broadcast,
+        "peer-server broadcast must reach remote WireGuard"
+    );
 
     legacy_vnt
         .sock
@@ -1256,6 +1447,15 @@ fn real_udp_runtime_enforces_peer_dispatch_capacity_revocation_and_cookie_limit(
     );
     assert!(receiver_a <= 0x00ff_ffff && receiver_b <= 0x00ff_ffff);
 
+    let ping = icmp_echo_request([10, 26, 0, 2], [10, 26, 0, 1]);
+    send_inner_ipv4(&socket_a, wireguard, &mut client_a, &ping);
+    let pong = receive_inner_ipv4(&socket_a, wireguard, &mut client_a);
+    assert_eq!(&pong[12..16], &[10, 26, 0, 1]);
+    assert_eq!(&pong[16..20], &[10, 26, 0, 2]);
+    assert_eq!(pong[20], 0, "gateway must answer with ICMP Echo Reply");
+    assert_eq!(internet_checksum(&pong[..20]), 0);
+    assert_eq!(internet_checksum(&pong[20..]), 0);
+
     let maximum = ipv4_packet_to([10, 26, 0, 2], [10, 26, 0, 3], 1420);
     send_inner_ipv4(&socket_a, wireguard, &mut client_a, &maximum);
     assert_eq!(
@@ -1278,7 +1478,11 @@ fn real_udp_runtime_enforces_peer_dispatch_capacity_revocation_and_cookie_limit(
 
     let multicast = ipv4_packet_to([10, 26, 0, 2], [224, 0, 0, 1], 20);
     send_inner_ipv4(&socket_a, wireguard, &mut client_a, &multicast);
-    assert_no_udp_response(&socket_b);
+    assert_eq!(
+        receive_inner_ipv4(&socket_b, wireguard, &mut client_b),
+        multicast,
+        "WireGuard multicast must fan out to other WireGuard peers"
+    );
 
     let mut capacity = client_tunnel(private_capacity.clone(), server_public, 12);
     assert_no_handshake(&socket_a, wireguard, &mut capacity);

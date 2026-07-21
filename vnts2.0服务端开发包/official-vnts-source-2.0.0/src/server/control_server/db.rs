@@ -8,7 +8,7 @@ use sqlx_core::{query::query, row::Row};
 use sqlx_sqlite::{SqlitePool, SqlitePoolOptions, SqliteRow};
 use std::fs::{File, OpenOptions};
 use std::io::ErrorKind;
-use std::net::Ipv4Addr;
+use std::net::{IpAddr, Ipv4Addr};
 use std::path::Path;
 
 mod migrations;
@@ -107,6 +107,38 @@ pub struct PeerServerRecord {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterLeaseRequest {
+    pub network_code: String,
+    pub owner_type: String,
+    pub owner_id: String,
+    pub requested_ip: Option<Ipv4Addr>,
+    pub network: Ipv4Net,
+    pub gateway: Ipv4Addr,
+    pub lease_duration_secs: u64,
+    pub static_reservation: bool,
+    pub authority_id: String,
+    pub origin_server_id: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ClusterLeaseGrant {
+    pub ip: Ipv4Addr,
+    pub revision: u64,
+    pub expires_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LocalIpAllocation {
+    pub network_code: String,
+    pub owner_type: String,
+    pub owner_id: String,
+    pub ip: Ipv4Addr,
+    pub network: Ipv4Net,
+    pub gateway: Ipv4Addr,
+    pub lease_duration_secs: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireGuardPeerIpAllocation {
     pub peer_id: String,
     pub ip: Ipv4Addr,
@@ -122,12 +154,44 @@ pub struct WireGuardPeerRecord {
     pub updated_at: i64,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WireGuardPeerRouteRecord {
+    pub lan_network: Ipv4Net,
+    pub vnt_cli_ip: Ipv4Addr,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct WireGuardPeerProfileRecord {
+    pub network_code: String,
+    pub peer_id: String,
+    pub dns_servers: Option<Vec<IpAddr>>,
+    pub persistent_keepalive: u16,
+    pub routes: Vec<WireGuardPeerRouteRecord>,
+    pub config_available: bool,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct EncryptedWireGuardPeerSecret {
+    pub network_code: String,
+    pub peer_id: String,
+    pub format_version: i64,
+    pub encryption_key_version: i64,
+    pub nonce: Vec<u8>,
+    pub ciphertext: Vec<u8>,
+    pub public_key: Vec<u8>,
+    pub created_at: i64,
+    pub updated_at: i64,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct WireGuardRuntimePeer {
     pub network_code: String,
     pub peer_id: String,
     pub public_key: [u8; 32],
     pub ip: Ipv4Addr,
+    pub routes: Vec<WireGuardPeerRouteRecord>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -238,13 +302,29 @@ fn acquire_database_process_lock(path: &Path) -> anyhow::Result<File> {
         .with_context(|| format!("Failed to open database process lock: {}", path.display()))?;
     match file.try_lock_exclusive() {
         Ok(()) => Ok(file),
-        Err(error) if error.kind() == ErrorKind::WouldBlock => anyhow::bail!(
+        Err(error) if database_process_lock_is_contended(&error) => anyhow::bail!(
             "Database is already in use by another VNTS process; stop the service before rotation"
         ),
-        Err(error) => {
-            Err(error).with_context(|| format!("Failed to lock database process file: {}", path.display()))
-        }
+        Err(error) => Err(error)
+            .with_context(|| format!("Failed to lock database process file: {}", path.display())),
     }
+}
+
+fn database_process_lock_is_contended(error: &std::io::Error) -> bool {
+    if error.kind() == ErrorKind::WouldBlock {
+        return true;
+    }
+
+    #[cfg(windows)]
+    {
+        // Windows reports a competing LockFileEx region as ERROR_LOCK_VIOLATION
+        // instead of ErrorKind::WouldBlock. ERROR_SHARING_VIOLATION is accepted
+        // as the equivalent whole-file contention signal.
+        return matches!(error.raw_os_error(), Some(32 | 33));
+    }
+
+    #[cfg(not(windows))]
+    false
 }
 
 pub(super) fn db_pool() -> anyhow::Result<&'static SqlitePool> {
@@ -342,6 +422,68 @@ pub(super) async fn replace_wireguard_server_identity_with_pool(
         result.rows_affected() == 1,
         "WireGuard server identity changed concurrently; rotation was not applied"
     );
+    Ok(())
+}
+
+pub(super) async fn replace_wireguard_identity_and_peer_secrets_with_pool(
+    pool: &SqlitePool,
+    current: &EncryptedWireGuardIdentity,
+    replacement: &EncryptedWireGuardIdentity,
+    peer_secrets: &[EncryptedWireGuardPeerSecret],
+) -> anyhow::Result<()> {
+    let mut transaction = pool.begin().await?;
+    let result = query(
+        "UPDATE wireguard_server_identity
+         SET format_version = ?, encryption_key_version = ?, nonce = ?, ciphertext = ?,
+             public_key = ?, created_at = ?, updated_at = ?
+         WHERE id = 1
+           AND format_version = ? AND encryption_key_version = ?
+           AND nonce = ? AND ciphertext = ? AND public_key = ?
+           AND created_at = ? AND updated_at = ?",
+    )
+    .bind(replacement.format_version)
+    .bind(replacement.encryption_key_version)
+    .bind(&replacement.nonce)
+    .bind(&replacement.ciphertext)
+    .bind(&replacement.public_key)
+    .bind(replacement.created_at)
+    .bind(replacement.updated_at)
+    .bind(current.format_version)
+    .bind(current.encryption_key_version)
+    .bind(&current.nonce)
+    .bind(&current.ciphertext)
+    .bind(&current.public_key)
+    .bind(current.created_at)
+    .bind(current.updated_at)
+    .execute(&mut *transaction)
+    .await?;
+    ensure!(
+        result.rows_affected() == 1,
+        "WireGuard server identity changed concurrently; rotation was not applied"
+    );
+    for secret in peer_secrets {
+        let result = query(
+            "UPDATE wireguard_peer_secrets SET
+                 format_version = ?, encryption_key_version = ?, nonce = ?, ciphertext = ?,
+                 public_key = ?, updated_at = ?
+             WHERE network_code = ? AND peer_id = ?",
+        )
+        .bind(secret.format_version)
+        .bind(secret.encryption_key_version)
+        .bind(&secret.nonce)
+        .bind(&secret.ciphertext)
+        .bind(&secret.public_key)
+        .bind(secret.updated_at)
+        .bind(&secret.network_code)
+        .bind(&secret.peer_id)
+        .execute(&mut *transaction)
+        .await?;
+        ensure!(
+            result.rows_affected() == 1,
+            "WireGuard peer secret disappeared during master-key rotation"
+        );
+    }
+    transaction.commit().await?;
     Ok(())
 }
 
@@ -754,22 +896,43 @@ pub async fn load_wireguard_runtime_peer_by_public_key(
     .await
     .context("Failed to load WireGuard runtime peer")?;
 
-    row.map(|row| -> anyhow::Result<_> {
-        let stored_public_key: Vec<u8> = row.try_get("public_key")?;
-        let stored_public_key = stored_public_key
-            .try_into()
-            .map_err(|_| anyhow::anyhow!("Invalid WireGuard peer public key length"))?;
-        let ip_text: String = row.try_get("ip")?;
-        Ok(WireGuardRuntimePeer {
-            network_code: row.try_get("network_code")?,
-            peer_id: row.try_get("peer_id")?,
-            public_key: stored_public_key,
-            ip: ip_text.parse().with_context(|| {
-                format!("Invalid WireGuard runtime peer IPv4 address: {ip_text}")
-            })?,
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let stored_public_key: Vec<u8> = row.try_get("public_key")?;
+    let stored_public_key = stored_public_key
+        .try_into()
+        .map_err(|_| anyhow::anyhow!("Invalid WireGuard peer public key length"))?;
+    let ip_text: String = row.try_get("ip")?;
+    let network_code: String = row.try_get("network_code")?;
+    let peer_id: String = row.try_get("peer_id")?;
+    let mut routes = query(
+        "SELECT lan_network, vnt_cli_ip FROM wireguard_peer_routes
+         WHERE network_code = ? AND peer_id = ? ORDER BY sort_order, lan_network",
+    )
+    .bind(&network_code)
+    .bind(&peer_id)
+    .fetch_all(db_pool()?)
+    .await
+    .context("Failed to load WireGuard runtime peer routes")?
+    .into_iter()
+    .map(|row| {
+        Ok(WireGuardPeerRouteRecord {
+            lan_network: row.get::<String, _>("lan_network").parse()?,
+            vnt_cli_ip: row.get::<String, _>("vnt_cli_ip").parse()?,
         })
     })
-    .transpose()
+    .collect::<anyhow::Result<Vec<_>>>()?;
+    routes.sort_by_key(|route| std::cmp::Reverse(route.lan_network.prefix_len()));
+    Ok(Some(WireGuardRuntimePeer {
+        network_code,
+        peer_id,
+        public_key: stored_public_key,
+        ip: ip_text
+            .parse()
+            .with_context(|| format!("Invalid WireGuard runtime peer IPv4 address: {ip_text}"))?,
+        routes,
+    }))
 }
 
 async fn set_wireguard_peer_enabled_with_pool(
@@ -813,6 +976,21 @@ async fn delete_wireguard_peer_with_pool(
         .begin()
         .await
         .context("Failed to start WireGuard peer deletion transaction")?;
+    query("DELETE FROM wireguard_peer_routes WHERE network_code = ? AND peer_id = ?")
+        .bind(network_code)
+        .bind(peer_id)
+        .execute(&mut *transaction)
+        .await?;
+    query("DELETE FROM wireguard_peer_secrets WHERE network_code = ? AND peer_id = ?")
+        .bind(network_code)
+        .bind(peer_id)
+        .execute(&mut *transaction)
+        .await?;
+    query("DELETE FROM wireguard_peer_profiles WHERE network_code = ? AND peer_id = ?")
+        .bind(network_code)
+        .bind(peer_id)
+        .execute(&mut *transaction)
+        .await?;
     let peer_result = query(
         "DELETE FROM wireguard_peers
          WHERE network_code = ? AND peer_id = ?",
@@ -941,6 +1119,193 @@ pub async fn load_wireguard_peer_ip_allocations(
         return Ok(Vec::new());
     };
     load_wireguard_peer_ip_allocations_with_pool(pool, network_code).await
+}
+
+pub(super) async fn save_wireguard_peer_profile(
+    profile: &WireGuardPeerProfileRecord,
+    secret: Option<&EncryptedWireGuardPeerSecret>,
+) -> anyhow::Result<()> {
+    let mut transaction = db_pool()?.begin().await?;
+    let dns_servers = profile
+        .dns_servers
+        .as_ref()
+        .map(serde_json::to_string)
+        .transpose()
+        .context("Failed to serialize WireGuard DNS servers")?;
+    query(
+        "INSERT INTO wireguard_peer_profiles (
+             network_code, peer_id, dns_servers, persistent_keepalive, created_at, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?)
+         ON CONFLICT(network_code, peer_id) DO UPDATE SET
+             dns_servers = excluded.dns_servers,
+             persistent_keepalive = excluded.persistent_keepalive,
+             updated_at = excluded.updated_at",
+    )
+    .bind(&profile.network_code)
+    .bind(&profile.peer_id)
+    .bind(dns_servers)
+    .bind(i64::from(profile.persistent_keepalive))
+    .bind(profile.created_at)
+    .bind(profile.updated_at)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to save WireGuard peer profile")?;
+    query("DELETE FROM wireguard_peer_routes WHERE network_code = ? AND peer_id = ?")
+        .bind(&profile.network_code)
+        .bind(&profile.peer_id)
+        .execute(&mut *transaction)
+        .await?;
+    for (sort_order, route) in profile.routes.iter().enumerate() {
+        query(
+            "INSERT INTO wireguard_peer_routes (
+                 network_code, peer_id, lan_network, vnt_cli_ip, sort_order
+             ) VALUES (?, ?, ?, ?, ?)",
+        )
+        .bind(&profile.network_code)
+        .bind(&profile.peer_id)
+        .bind(route.lan_network.to_string())
+        .bind(route.vnt_cli_ip.to_string())
+        .bind(sort_order as i64)
+        .execute(&mut *transaction)
+        .await
+        .context("Failed to save WireGuard peer route")?;
+    }
+    if let Some(secret) = secret {
+        query(
+            "INSERT INTO wireguard_peer_secrets (
+                 network_code, peer_id, format_version, encryption_key_version,
+                 nonce, ciphertext, public_key, created_at, updated_at
+             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(network_code, peer_id) DO UPDATE SET
+                 format_version = excluded.format_version,
+                 encryption_key_version = excluded.encryption_key_version,
+                 nonce = excluded.nonce,
+                 ciphertext = excluded.ciphertext,
+                 public_key = excluded.public_key,
+                 updated_at = excluded.updated_at",
+        )
+        .bind(&secret.network_code)
+        .bind(&secret.peer_id)
+        .bind(secret.format_version)
+        .bind(secret.encryption_key_version)
+        .bind(&secret.nonce)
+        .bind(&secret.ciphertext)
+        .bind(&secret.public_key)
+        .bind(secret.created_at)
+        .bind(secret.updated_at)
+        .execute(&mut *transaction)
+        .await
+        .context("Failed to save encrypted WireGuard peer secret")?;
+    }
+    transaction.commit().await?;
+    Ok(())
+}
+
+pub async fn load_wireguard_peer_profile(
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<Option<WireGuardPeerProfileRecord>> {
+    let row = query(
+        "SELECT p.created_at AS peer_created_at, p.updated_at AS peer_updated_at,
+                pr.dns_servers, pr.persistent_keepalive,
+                pr.created_at AS profile_created_at, pr.updated_at AS profile_updated_at,
+                EXISTS(
+                    SELECT 1 FROM wireguard_peer_secrets s
+                    WHERE s.network_code = p.network_code AND s.peer_id = p.peer_id
+                ) AS config_available
+         FROM wireguard_peers p
+         LEFT JOIN wireguard_peer_profiles pr
+           ON pr.network_code = p.network_code AND pr.peer_id = p.peer_id
+         WHERE p.network_code = ? AND p.peer_id = ?",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .fetch_optional(db_pool()?)
+    .await
+    .context("Failed to load WireGuard peer profile")?;
+    let Some(row) = row else {
+        return Ok(None);
+    };
+    let dns_text: Option<String> = row.try_get("dns_servers")?;
+    let dns_servers = dns_text
+        .map(|value| serde_json::from_str::<Vec<IpAddr>>(&value))
+        .transpose()
+        .context("WireGuard peer profile contains invalid DNS data")?;
+    let routes = query(
+        "SELECT lan_network, vnt_cli_ip FROM wireguard_peer_routes
+         WHERE network_code = ? AND peer_id = ? ORDER BY sort_order, lan_network",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .fetch_all(db_pool()?)
+    .await?
+    .into_iter()
+    .map(|row| {
+        Ok(WireGuardPeerRouteRecord {
+            lan_network: row.get::<String, _>("lan_network").parse()?,
+            vnt_cli_ip: row.get::<String, _>("vnt_cli_ip").parse()?,
+        })
+    })
+    .collect::<anyhow::Result<Vec<_>>>()?;
+    let profile_created_at: Option<i64> = row.try_get("profile_created_at")?;
+    let profile_updated_at: Option<i64> = row.try_get("profile_updated_at")?;
+    Ok(Some(WireGuardPeerProfileRecord {
+        network_code: network_code.to_string(),
+        peer_id: peer_id.to_string(),
+        dns_servers,
+        persistent_keepalive: row
+            .try_get::<Option<i64>, _>("persistent_keepalive")?
+            .unwrap_or(25) as u16,
+        routes,
+        config_available: row.get::<i64, _>("config_available") != 0,
+        created_at: profile_created_at.unwrap_or(row.get("peer_created_at")),
+        updated_at: profile_updated_at.unwrap_or(row.get("peer_updated_at")),
+    }))
+}
+
+pub(super) async fn load_wireguard_peer_secret(
+    network_code: &str,
+    peer_id: &str,
+) -> anyhow::Result<Option<EncryptedWireGuardPeerSecret>> {
+    let row = query(
+        "SELECT network_code, peer_id, format_version, encryption_key_version,
+                nonce, ciphertext, public_key, created_at, updated_at
+         FROM wireguard_peer_secrets WHERE network_code = ? AND peer_id = ?",
+    )
+    .bind(network_code)
+    .bind(peer_id)
+    .fetch_optional(db_pool()?)
+    .await?;
+    row.map(encrypted_peer_secret_from_row).transpose()
+}
+
+pub(super) async fn load_all_wireguard_peer_secrets_with_pool(
+    pool: &SqlitePool,
+) -> anyhow::Result<Vec<EncryptedWireGuardPeerSecret>> {
+    query(
+        "SELECT network_code, peer_id, format_version, encryption_key_version,
+                nonce, ciphertext, public_key, created_at, updated_at
+         FROM wireguard_peer_secrets ORDER BY network_code, peer_id",
+    )
+    .fetch_all(pool)
+    .await?
+    .into_iter()
+    .map(encrypted_peer_secret_from_row)
+    .collect()
+}
+
+fn encrypted_peer_secret_from_row(row: SqliteRow) -> anyhow::Result<EncryptedWireGuardPeerSecret> {
+    Ok(EncryptedWireGuardPeerSecret {
+        network_code: row.try_get("network_code")?,
+        peer_id: row.try_get("peer_id")?,
+        format_version: row.try_get("format_version")?,
+        encryption_key_version: row.try_get("encryption_key_version")?,
+        nonce: row.try_get("nonce")?,
+        ciphertext: row.try_get("ciphertext")?,
+        public_key: row.try_get("public_key")?,
+        created_at: row.try_get("created_at")?,
+        updated_at: row.try_get("updated_at")?,
+    })
 }
 
 pub async fn save_or_update_device(device: &DeviceRecord) -> anyhow::Result<()> {
@@ -1161,6 +1526,296 @@ pub async fn delete_peer_server(server_addr: &str) -> anyhow::Result<bool> {
     Ok(result.rows_affected() > 0)
 }
 
+pub async fn acquire_cluster_lease(
+    request: &ClusterLeaseRequest,
+) -> anyhow::Result<ClusterLeaseGrant> {
+    acquire_cluster_lease_with_pool(db_pool()?, request).await
+}
+
+async fn acquire_cluster_lease_with_pool(
+    pool: &SqlitePool,
+    request: &ClusterLeaseRequest,
+) -> anyhow::Result<ClusterLeaseGrant> {
+    ensure!(
+        matches!(request.owner_type.as_str(), "vnt_device" | "wireguard_peer"),
+        "不支持的集群租约所有者类型"
+    );
+    ensure!(
+        !request.owner_id.trim().is_empty(),
+        "集群租约所有者不能为空"
+    );
+    ensure!(
+        request.network.contains(&request.gateway)
+            && request.gateway != request.network.network()
+            && request.gateway != request.network.broadcast(),
+        "集群租约网关不在有效网段内"
+    );
+
+    let mut transaction = pool
+        .begin()
+        .await
+        .context("Failed to start cluster lease transaction")?;
+    let now = unix_time_i64();
+    query(
+        "DELETE FROM cluster_leases
+         WHERE static_reservation = 0 AND expires_at > 0 AND expires_at <= ?",
+    )
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to expire cluster leases")?;
+
+    let existing = query(
+        "SELECT ip FROM cluster_leases
+         WHERE network_code = ? AND owner_type = ? AND owner_id = ?",
+    )
+    .bind(&request.network_code)
+    .bind(&request.owner_type)
+    .bind(&request.owner_id)
+    .fetch_optional(&mut *transaction)
+    .await
+    .context("Failed to load existing cluster lease")?;
+    let existing_ip = existing
+        .map(|row| row.get::<String, _>("ip"))
+        .map(|value| value.parse::<Ipv4Addr>())
+        .transpose()
+        .context("Cluster lease contains invalid IPv4 address")?;
+
+    let local_owner_ip = if existing_ip.is_none() {
+        query(
+            "SELECT ip FROM ip_allocations
+             WHERE network_code = ? AND owner_type = ? AND owner_id = ?",
+        )
+        .bind(&request.network_code)
+        .bind(&request.owner_type)
+        .bind(&request.owner_id)
+        .fetch_optional(&mut *transaction)
+        .await
+        .context("Failed to load local owner allocation")?
+        .map(|row| row.get::<String, _>("ip"))
+        .map(|value| value.parse::<Ipv4Addr>())
+        .transpose()
+        .context("Local allocation contains invalid IPv4 address")?
+    } else {
+        None
+    };
+
+    let preferred = request.requested_ip.or(existing_ip).or(local_owner_ip);
+    let candidate = if let Some(ip) = preferred {
+        validate_cluster_candidate(request.network, request.gateway, ip)?;
+        ensure_cluster_ip_available(&mut transaction, request, ip).await?;
+        ip
+    } else {
+        let mut selected = None;
+        let start = u32::from(request.network.network()) + 1;
+        let end = u32::from(request.network.broadcast());
+        for raw in start..end {
+            let ip = Ipv4Addr::from(raw);
+            if ip == request.gateway {
+                continue;
+            }
+            if ensure_cluster_ip_available(&mut transaction, request, ip)
+                .await
+                .is_ok()
+            {
+                selected = Some(ip);
+                break;
+            }
+        }
+        selected.ok_or_else(|| anyhow::anyhow!("集群虚拟网段地址已耗尽"))?
+    };
+
+    let revision_row = query(
+        "UPDATE cluster_state
+         SET authority_id = ?, revision = revision + 1, updated_at = ?
+         WHERE id = 1
+         RETURNING revision",
+    )
+    .bind(&request.authority_id)
+    .bind(now)
+    .fetch_one(&mut *transaction)
+    .await
+    .context("Failed to advance cluster lease revision")?;
+    let revision = revision_row.get::<i64, _>("revision") as u64;
+    let expires_at = if request.static_reservation {
+        0
+    } else {
+        now.saturating_add(request.lease_duration_secs.max(10).min(i64::MAX as u64) as i64)
+    };
+    query(
+        "INSERT INTO cluster_leases (
+             network_code, owner_type, owner_id, ip, authority_id, origin_server_id,
+             revision, expires_at, static_reservation, updated_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+         ON CONFLICT(network_code, owner_type, owner_id) DO UPDATE SET
+             ip = excluded.ip,
+             authority_id = excluded.authority_id,
+             origin_server_id = excluded.origin_server_id,
+             revision = excluded.revision,
+             expires_at = excluded.expires_at,
+             static_reservation = excluded.static_reservation,
+             updated_at = excluded.updated_at",
+    )
+    .bind(&request.network_code)
+    .bind(&request.owner_type)
+    .bind(&request.owner_id)
+    .bind(candidate.to_string())
+    .bind(&request.authority_id)
+    .bind(&request.origin_server_id)
+    .bind(revision as i64)
+    .bind(expires_at)
+    .bind(i64::from(request.static_reservation))
+    .bind(now)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to persist cluster lease")?;
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit cluster lease")?;
+    Ok(ClusterLeaseGrant {
+        ip: candidate,
+        revision,
+        expires_at,
+    })
+}
+
+async fn ensure_cluster_ip_available(
+    transaction: &mut sqlx_core::transaction::Transaction<'_, sqlx_sqlite::Sqlite>,
+    request: &ClusterLeaseRequest,
+    ip: Ipv4Addr,
+) -> anyhow::Result<()> {
+    let occupied = query(
+        "SELECT (
+             EXISTS(
+                 SELECT 1 FROM cluster_leases
+                 WHERE network_code = ? AND ip = ?
+                   AND NOT(owner_type = ? AND owner_id = ?)
+             )
+             OR EXISTS(
+                 SELECT 1 FROM ip_allocations
+                 WHERE network_code = ? AND ip = ?
+                   AND NOT(owner_type = ? AND owner_id = ?)
+             )
+         ) AS occupied",
+    )
+    .bind(&request.network_code)
+    .bind(ip.to_string())
+    .bind(&request.owner_type)
+    .bind(&request.owner_id)
+    .bind(&request.network_code)
+    .bind(ip.to_string())
+    .bind(&request.owner_type)
+    .bind(&request.owner_id)
+    .fetch_one(&mut **transaction)
+    .await
+    .context("Failed to check cluster lease collision")?
+    .get::<i64, _>("occupied")
+        != 0;
+    ensure!(!occupied, "IP {ip} 已被其他集群租约占用");
+    Ok(())
+}
+
+fn validate_cluster_candidate(
+    network: Ipv4Net,
+    gateway: Ipv4Addr,
+    ip: Ipv4Addr,
+) -> anyhow::Result<()> {
+    ensure!(network.contains(&ip), "请求 IP 不在虚拟网段内");
+    ensure!(
+        ip != network.network() && ip != network.broadcast() && ip != gateway,
+        "请求 IP 是保留地址"
+    );
+    Ok(())
+}
+
+pub async fn release_cluster_lease(
+    network_code: &str,
+    owner_type: &str,
+    owner_id: &str,
+    authority_id: &str,
+) -> anyhow::Result<u64> {
+    release_cluster_lease_with_pool(db_pool()?, network_code, owner_type, owner_id, authority_id)
+        .await
+}
+
+async fn release_cluster_lease_with_pool(
+    pool: &SqlitePool,
+    network_code: &str,
+    owner_type: &str,
+    owner_id: &str,
+    authority_id: &str,
+) -> anyhow::Result<u64> {
+    let mut transaction = pool.begin().await?;
+    let result = query(
+        "DELETE FROM cluster_leases
+         WHERE network_code = ? AND owner_type = ? AND owner_id = ?",
+    )
+    .bind(network_code)
+    .bind(owner_type)
+    .bind(owner_id)
+    .execute(&mut *transaction)
+    .await
+    .context("Failed to release cluster lease")?;
+    let now = unix_time_i64();
+    let revision = if result.rows_affected() == 0 {
+        query("SELECT revision FROM cluster_state WHERE id = 1")
+            .fetch_one(&mut *transaction)
+            .await?
+            .get::<i64, _>("revision") as u64
+    } else {
+        query(
+            "UPDATE cluster_state
+             SET authority_id = ?, revision = revision + 1, updated_at = ?
+             WHERE id = 1 RETURNING revision",
+        )
+        .bind(authority_id)
+        .bind(now)
+        .fetch_one(&mut *transaction)
+        .await?
+        .get::<i64, _>("revision") as u64
+    };
+    transaction.commit().await?;
+    Ok(revision)
+}
+
+pub async fn load_local_ip_allocations() -> anyhow::Result<Vec<LocalIpAllocation>> {
+    let rows = query(
+        "SELECT a.network_code, a.owner_type, a.owner_id, a.ip,
+                n.gateway, n.netmask, n.lease_duration
+         FROM ip_allocations a
+         INNER JOIN networks n ON n.network_code = a.network_code
+         ORDER BY a.network_code, a.owner_type, a.owner_id",
+    )
+    .fetch_all(db_pool()?)
+    .await
+    .context("Failed to load local IP allocations for cluster reconciliation")?;
+    rows.into_iter()
+        .map(|row| {
+            let gateway: Ipv4Addr = row.get::<String, _>("gateway").parse()?;
+            let prefix = row.get::<i64, _>("netmask") as u8;
+            let network = Ipv4Net::new(Ipv4Addr::from(u32::from(gateway) - 1), prefix)?;
+            Ok(LocalIpAllocation {
+                network_code: row.get("network_code"),
+                owner_type: row.get("owner_type"),
+                owner_id: row.get("owner_id"),
+                ip: row.get::<String, _>("ip").parse()?,
+                network,
+                gateway,
+                lease_duration_secs: row.get::<i64, _>("lease_duration").max(10) as u64,
+            })
+        })
+        .collect()
+}
+
+fn unix_time_i64() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1368,7 +2023,7 @@ mod tests {
             .await
             .unwrap()
             .get(0);
-        assert_eq!(version, 3);
+        assert_eq!(version, migrations::SCHEMA_VERSION);
     }
 
     #[tokio::test]
@@ -1648,6 +2303,54 @@ mod tests {
                 .unwrap()
         );
         assert_eq!(allocation_count(&pool, "network-a").await, 0);
+    }
+
+    #[tokio::test]
+    async fn cluster_authority_keeps_addresses_unique_and_renewals_stable() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        let network: Ipv4Net = "10.26.0.0/24".parse().unwrap();
+        let request = |owner_id: &str, requested_ip: Option<Ipv4Addr>| ClusterLeaseRequest {
+            network_code: "network-a".to_string(),
+            owner_type: "vnt_device".to_string(),
+            owner_id: owner_id.to_string(),
+            requested_ip,
+            network,
+            gateway: "10.26.0.1".parse().unwrap(),
+            lease_duration_secs: 60,
+            static_reservation: false,
+            authority_id: "server-a".to_string(),
+            origin_server_id: "server-b".to_string(),
+        };
+
+        let first = acquire_cluster_lease_with_pool(&pool, &request("device-a", None))
+            .await
+            .unwrap();
+        assert_eq!(first.ip, "10.26.0.2".parse::<Ipv4Addr>().unwrap());
+        let renewed = acquire_cluster_lease_with_pool(&pool, &request("device-a", None))
+            .await
+            .unwrap();
+        assert_eq!(renewed.ip, first.ip);
+        assert!(renewed.revision > first.revision);
+
+        let duplicate =
+            acquire_cluster_lease_with_pool(&pool, &request("device-b", Some(first.ip))).await;
+        assert!(duplicate.is_err());
+        let second = acquire_cluster_lease_with_pool(&pool, &request("device-b", None))
+            .await
+            .unwrap();
+        assert_ne!(second.ip, first.ip);
+
+        let released = release_cluster_lease_with_pool(
+            &pool,
+            "network-a",
+            "vnt_device",
+            "device-a",
+            "server-a",
+        )
+        .await
+        .unwrap();
+        assert!(released > second.revision);
     }
 
     #[test]

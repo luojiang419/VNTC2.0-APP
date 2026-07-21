@@ -5,6 +5,7 @@ use crate::utils::config::ConfigFile;
 use anyhow::Context;
 use base64::{Engine, engine::general_purpose::STANDARD as BASE64_STANDARD};
 use clap::Parser;
+use sha2::{Digest, Sha256};
 use std::path::Path;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -181,6 +182,8 @@ pub(crate) async fn run_app(
         .clone()
         .unwrap_or_else(|| PathBuf::from("config.toml"));
     let conf = ConfigFile::load_from(conf_path).context("加载配置文件失败")?;
+    conf.validate_cluster_config()?;
+    let wireguard_dns = conf.validated_wireguard_dns()?;
     let web_management = conf.web_management_config()?;
     let wireguard_public_endpoint = conf.effective_wireguard_public_endpoint()?;
     let database_ready = if conf.persistence {
@@ -208,6 +211,8 @@ pub(crate) async fn run_app(
                 wireguard_configured: conf.wireguard_bind.is_some(),
                 wireguard_public_endpoint: wireguard_public_endpoint.clone(),
                 wireguard_max_active_peers: conf.wireguard_max_active_peers,
+                wireguard_dns: wireguard_dns.clone(),
+                wireguard_master_key_file: conf.wireguard_master_key_file.clone(),
             });
 
     if conf.wireguard_bind.is_some() {
@@ -247,12 +252,17 @@ pub(crate) async fn run_app(
     };
 
     // 提前提取需要在 move 之后使用的字段
-    let need_peer_manager = !conf.peer_servers.is_empty() || web_management.is_some();
+    let need_peer_manager = conf.server_quic_bind.is_some()
+        || !conf.peer_servers.is_empty()
+        || web_management.is_some();
     let peer_conf = PeerConf {
         persistence: conf.persistence,
         server_quic_bind: conf.server_quic_bind,
         peer_servers: conf.peer_servers.clone(),
         server_token: conf.server_token.clone(),
+        server_id: conf.server_id.clone(),
+        lease_authority: conf.lease_authority.clone(),
+        network_config_digest: network_config_digest(conf.network, &conf.custom_nets),
         cert: conf.cert.clone(),
         key: conf.key.clone(),
     };
@@ -369,6 +379,9 @@ struct PeerConf {
     server_quic_bind: Option<std::net::SocketAddr>,
     peer_servers: Vec<String>,
     server_token: Option<String>,
+    server_id: Option<String>,
+    lease_authority: Option<String>,
+    network_config_digest: String,
     cert: Option<PathBuf>,
     key: Option<PathBuf>,
 }
@@ -383,7 +396,13 @@ async fn init_peer_manager(
         .unwrap_or_else(|| "default_token".to_string());
     let network_state_provider = control_service.get_network_state_provider().clone();
 
-    let peer_manager = Arc::new(PeerServerManager::new(server_token, network_state_provider));
+    let peer_manager = Arc::new(PeerServerManager::new_with_identity(
+        server_token,
+        network_state_provider,
+        conf.server_id.clone(),
+        conf.lease_authority.clone(),
+        conf.network_config_digest.clone(),
+    ));
     control_service.set_peer_manager(peer_manager.clone());
 
     if let Some(server_quic_bind) = conf.server_quic_bind {
@@ -413,6 +432,20 @@ async fn init_peer_manager(
         }
     }
     Ok(())
+}
+
+fn network_config_digest(
+    default_network: ipnet::Ipv4Net,
+    custom_nets: &std::collections::HashMap<String, ipnet::Ipv4Net>,
+) -> String {
+    let mut entries: Vec<_> = custom_nets.iter().collect();
+    entries.sort_unstable_by(|left, right| left.0.cmp(right.0));
+    let mut hasher = Sha256::new();
+    hasher.update(format!("default={default_network}\n"));
+    for (network_code, network) in entries {
+        hasher.update(format!("{network_code}={network}\n"));
+    }
+    hex::encode(hasher.finalize())
 }
 
 /// 将配置文件中的 peer server 写入数据库（已存在的跳过）

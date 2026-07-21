@@ -110,6 +110,8 @@ pub enum MsgType {
     WireGuardRelay = 18,
     RelayProbeReply = 19,
     WireGuardP2pControl = 20,
+    WireGuardSubnetRelay = 21,
+    WireGuardBroadcastRelay = 22,
 }
 impl From<MsgType> for u8 {
     fn from(val: MsgType) -> Self {
@@ -147,6 +149,8 @@ impl TryFrom<u8> for MsgType {
             18 => MsgType::WireGuardRelay,
             19 => MsgType::RelayProbeReply,
             20 => MsgType::WireGuardP2pControl,
+            21 => MsgType::WireGuardSubnetRelay,
+            22 => MsgType::WireGuardBroadcastRelay,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -321,5 +325,15 @@ mod tests {
         assert_eq!(MsgType::try_from(18).unwrap(), MsgType::WireGuardRelay);
         assert_eq!(u8::from(MsgType::WireGuardP2pControl), 20);
         assert_eq!(MsgType::try_from(20).unwrap(), MsgType::WireGuardP2pControl);
+        assert_eq!(u8::from(MsgType::WireGuardSubnetRelay), 21);
+        assert_eq!(
+            MsgType::try_from(21).unwrap(),
+            MsgType::WireGuardSubnetRelay
+        );
+        assert_eq!(u8::from(MsgType::WireGuardBroadcastRelay), 22);
+        assert_eq!(
+            MsgType::try_from(22).unwrap(),
+            MsgType::WireGuardBroadcastRelay
+        );
     }
 }

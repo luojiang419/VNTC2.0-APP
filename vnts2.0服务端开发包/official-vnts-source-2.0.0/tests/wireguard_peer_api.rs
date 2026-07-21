@@ -311,6 +311,8 @@ fn peer_management_api_is_authenticated_persistent_and_ip_consistent() {
     );
     assert!(created.body.contains(r#""enabled":false"#));
     assert!(created.body.contains(r#""ip":null"#));
+    assert!(created.body.contains(r#""online":false"#));
+    assert!(created.body.contains(r#""status":"disabled""#));
     assert!(created.body.contains(r#""created_at":"#));
     assert!(created.body.contains(r#""updated_at":"#));
 
@@ -353,6 +355,8 @@ fn peer_management_api_is_authenticated_persistent_and_ip_consistent() {
     assert_api_code(&enabled, 200);
     assert!(enabled.body.contains(r#""enabled":true"#));
     assert!(enabled.body.contains(r#""ip":"10.26.0.2""#));
+    assert!(enabled.body.contains(r#""online":false"#));
+    assert!(enabled.body.contains(r#""status":"offline""#));
 
     let enabled_again = http_request(
         address,
@@ -529,6 +533,7 @@ fn generated_peer_api_auto_starts_wireguard_after_live_config_update() {
          wireguard_bind = \"127.0.0.1:0\"\n\
          wireguard_public_endpoint = \"vpn.example.com:51820\"\n\
          wireguard_max_active_peers = 64\n\
+         wireguard_dns = [\"10.45.0.53\"]\n\
          [custom_nets]",
     );
     fs::write(&config, enabled_config).unwrap();
@@ -577,9 +582,29 @@ fn generated_peer_api_auto_starts_wireguard_after_live_config_update() {
         );
         assert!(generated.body.contains(r#""listen_addr":"127.0.0.1:"#));
         assert!(generated.body.contains("private_key"));
+        assert!(generated.body.contains("DNS = 10.45.0.53"));
+        assert!(generated.body.contains(r#""config_available":true"#));
+        assert!(generated.body.contains(r#""online":false"#));
+        assert!(generated.body.contains(r#""status":"offline""#));
     }
     assert!(first.body.contains(r#""peer_id":"auto-peer-a""#));
     assert!(second.body.contains(r#""peer_id":"auto-peer-b""#));
+
+    let downloaded = http_request(
+        address,
+        "GET",
+        "/api/wireguard/peers/config?network_code=autostart-network&peer_id=auto-peer-a",
+        Some(&token),
+        None,
+    );
+    assert_eq!(
+        downloaded.status, 200,
+        "downloaded response: {}",
+        downloaded.body
+    );
+    assert_api_code(&downloaded, 200);
+    assert!(downloaded.body.contains("DNS = 10.45.0.53"));
+    assert!(downloaded.body.contains(r#""client_config":"#));
 
     let running_status = http_request(address, "GET", "/api/status", Some(&token), None);
     assert_api_code(&running_status, 200);
@@ -589,7 +614,7 @@ fn generated_peer_api_auto_starts_wireguard_after_live_config_update() {
 }
 
 #[test]
-fn generated_peer_api_returns_one_time_key_material_and_persists_only_public_identity() {
+fn generated_peer_api_encrypts_private_key_and_allows_managed_redownload() {
     let directory = TestDirectory::new();
     let binary = PathBuf::from(env!("CARGO_BIN_EXE_vnts2"));
     let config = directory.0.join("config.toml");
@@ -745,5 +770,15 @@ fn generated_peer_api_returns_one_time_key_material_and_persists_only_public_ide
     );
     assert!(persisted.body.contains(r#""ip":"10.44.0.2""#));
     assert!(!persisted.body.contains(&private_key_text));
+    let downloaded = http_request(
+        address,
+        "GET",
+        "/api/wireguard/peers/config?network_code=generated-network&peer_id=alice-laptop",
+        Some(&restarted_token),
+        None,
+    );
+    assert_api_code(&downloaded, 200);
+    assert!(downloaded.body.contains(&private_key_text));
+    assert!(downloaded.body.contains(r#""client_config":"#));
     restarted_server.stop();
 }

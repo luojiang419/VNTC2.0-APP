@@ -228,9 +228,10 @@ password = "x"
 wireguard_master_key_file = "keys\\wg-master.key"
 wireguard_bind = "0.0.0.0:51820"
 wireguard_public_endpoint = "vpn.example.com:51820"
+wireguard_dns = ["1.1.1.1", "2606:4700:4700::1111"]
 wireguard_max_active_peers = 4096
 server_quic_bind = "0.0.0.0:29873"
-peer_servers = ["192.168.100.3:29873"]
+peer_servers = ["vnts-peer.example.com:29873"]
 server_token = "server-token-strong-2026"
 future_option = "keep#future" # unknown root option
 
@@ -253,6 +254,9 @@ branch = "10.88.0.0/24"
     Assert-Contract ($savedConfig.Contains('branch = "10.88.0.0/24"')) "自定义网络内容未保留。"
     Assert-Contract ($savedConfig.Contains('password = "x"')) "短 API 密码未被结构化配置保留。"
     Assert-Contract ($savedConfig.Contains('wireguard_master_key_file = "keys\\wg-master.key"')) "Windows 路径转义被破坏。"
+    Assert-Contract ($configResult.WireGuardDns.Count -eq 2) "WireGuard DNS 未被结构化配置解析。"
+    Assert-Contract ($savedConfig.Contains('wireguard_dns = ["1.1.1.1", "2606:4700:4700::1111"]')) "WireGuard DNS 未被结构化配置保留。"
+    Assert-Contract ($savedConfig.Contains('peer_servers = ["vnts-peer.example.com:29873"]')) "域名型 Peer 服务器未被结构化配置保留。"
 
     $defaultRoot = Join-Path $configTestRoot "wireguard-default"
     $defaultConfigPath = Join-Path $defaultRoot "config.toml"

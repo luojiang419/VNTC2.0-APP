@@ -17,11 +17,13 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, AtomicI64, Ordering};
 use std::time::SystemTime;
 use time::OffsetDateTime;
 use time::macros::format_description;
 use tokio::sync::mpsc::Sender;
 use tokio::time::{Duration, Instant};
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum RegistrationStatus {
@@ -162,7 +164,7 @@ impl ControlService {
 
     pub async fn register(
         &self,
-        reg_req: RegRequestMsg,
+        mut reg_req: RegRequestMsg,
         sender: Sender<Bytes>,
         remote_addr: SocketAddr,
     ) -> anyhow::Result<Session> {
@@ -170,6 +172,7 @@ impl ControlService {
         let network_code = reg_req.network_code.clone();
         let registration_mode = reg_req.registration_mode;
         let allow_wire_guard = reg_req.allow_wire_guard;
+        let client_capabilities = reg_req.client_capabilities;
         let wireguard_p2p = reg_req.wireguard_p2p.and_then(|registration| {
             remote_addr.is_ipv4().then(|| {
                 crate::server::network_state_provider::WireGuardP2pEndpoint {
@@ -192,6 +195,32 @@ impl ControlService {
             .get_or_create_network_state(reg_req.network_code.clone(), config)
             .await;
 
+        let cluster_grant = if let Some(peer_manager) = self.get_peer_manager() {
+            let requested_ip = if reg_req.ip_variable {
+                None
+            } else {
+                reg_req.ip
+            };
+            peer_manager
+                .acquire_lease(
+                    &network_code,
+                    "vnt_device",
+                    &reg_req.device_id,
+                    requested_ip,
+                    config.net,
+                    state.gateway(),
+                    config.lease_duration,
+                    false,
+                )
+                .await?
+        } else {
+            None
+        };
+        if let Some(grant) = &cluster_grant {
+            reg_req.ip = Some(grant.ip);
+            reg_req.ip_variable = false;
+        }
+
         let (session, entry) = {
             let random_id = rand::rng().next_u64();
             let device_id = reg_req.device_id.clone();
@@ -205,6 +234,72 @@ impl ControlService {
                     }
                 };
 
+            let (cluster_lease_cancel, cluster_lease_valid) = if let (
+                Some(grant),
+                Some(peer_manager),
+            ) =
+                (cluster_grant.clone(), self.get_peer_manager())
+            {
+                let cancel = CancellationToken::new();
+                let valid = Arc::new(AtomicBool::new(true));
+                let expires_at = Arc::new(AtomicI64::new(grant.expires_at));
+                let task_cancel = cancel.clone();
+                let task_valid = valid.clone();
+                let task_expires_at = expires_at.clone();
+                let task_network_code = network_code.clone();
+                let task_device_id = device_id.clone();
+                let task_network = config.net;
+                let task_gateway = state.gateway();
+                let task_lease_duration = config.lease_duration;
+                tokio::spawn(async move {
+                    let renew_every = (task_lease_duration / 3)
+                        .min(Duration::from_secs(30))
+                        .max(Duration::from_secs(3));
+                    let mut interval = tokio::time::interval(renew_every);
+                    interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+                    interval.tick().await;
+                    loop {
+                        tokio::select! {
+                            _ = task_cancel.cancelled() => break,
+                            _ = interval.tick() => {
+                                match peer_manager.acquire_lease(
+                                    &task_network_code,
+                                    "vnt_device",
+                                    &task_device_id,
+                                    Some(ip),
+                                    task_network,
+                                    task_gateway,
+                                    task_lease_duration,
+                                    false,
+                                ).await {
+                                    Ok(Some(renewed)) => {
+                                        task_expires_at.store(renewed.expires_at, Ordering::Release);
+                                        task_valid.store(true, Ordering::Release);
+                                    }
+                                    Ok(None) => break,
+                                    Err(error) => {
+                                        log::warn!(
+                                            "集群租约续租失败: network={}, device={}, ip={}, error={}",
+                                            task_network_code,
+                                            task_device_id,
+                                            ip,
+                                            error
+                                        );
+                                        if unix_time_i64() >= task_expires_at.load(Ordering::Acquire) {
+                                            task_valid.store(false, Ordering::Release);
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                });
+                (Some(cancel), valid)
+            } else {
+                (None, Arc::new(AtomicBool::new(true)))
+            };
+
             (
                 Session {
                     network_code: network_code.clone(),
@@ -217,7 +312,10 @@ impl ControlService {
                         RegistrationMode::PreRegister => RegistrationStatus::PendingConfirmation,
                     },
                     allow_wire_guard,
+                    client_capabilities,
                     control_service: self.clone(),
+                    cluster_lease_cancel,
+                    cluster_lease_valid,
                 },
                 entry,
             )
@@ -610,9 +708,31 @@ impl ControlService {
             created_at: now,
             updated_at: now,
         };
-        let ip = state
-            .create_wireguard_peer_with_automatic_ip(&record)
-            .await?;
+        let cluster_grant = if let Some(peer_manager) = self.get_peer_manager() {
+            peer_manager
+                .acquire_lease(
+                    network_code,
+                    "wireguard_peer",
+                    peer_id,
+                    None,
+                    config.net,
+                    state.gateway(),
+                    config.lease_duration,
+                    true,
+                )
+                .await?
+        } else {
+            None
+        };
+        let ip = if let Some(grant) = cluster_grant {
+            state
+                .create_wireguard_peer_with_ip(&record, grant.ip)
+                .await?
+        } else {
+            state
+                .create_wireguard_peer_with_automatic_ip(&record)
+                .await?
+        };
         Ok((wireguard_peer_vo(record, Some(ip)), config.net))
     }
 
@@ -684,9 +804,17 @@ impl ControlService {
         let state = self
             .get_or_create_network_state(network_code.to_string(), config)
             .await;
-        state
+        let result = state
             .delete_wireguard_peer(peer_id, self.revoke_wireguard_peer(network_code, peer_id))
-            .await
+            .await?;
+        if result.ip_released
+            && let Some(peer_manager) = self.get_peer_manager()
+        {
+            peer_manager
+                .release_lease(network_code, "wireguard_peer", peer_id)
+                .await?;
+        }
+        Ok(result)
     }
 
     async fn revoke_wireguard_peer(&self, network_code: &str, peer_id: &str) -> anyhow::Result<()> {
@@ -695,6 +823,14 @@ impl ControlService {
             runtime.revoke_peer(network_code, peer_id).await?;
         }
         Ok(())
+    }
+
+    pub(crate) async fn reload_wireguard_peer_profile(
+        &self,
+        network_code: &str,
+        peer_id: &str,
+    ) -> anyhow::Result<()> {
+        self.revoke_wireguard_peer(network_code, peer_id).await
     }
 
     pub(crate) async fn list_wireguard_peer_ips(
@@ -733,6 +869,20 @@ impl ControlService {
         let state = self
             .get_or_create_network_state(network_code.to_string(), config)
             .await;
+        if let Some(peer_manager) = self.get_peer_manager() {
+            peer_manager
+                .acquire_lease(
+                    network_code,
+                    "wireguard_peer",
+                    peer_id,
+                    Some(ip),
+                    config.net,
+                    state.gateway(),
+                    config.lease_duration,
+                    true,
+                )
+                .await?;
+        }
         state
             .reserve_wireguard_peer_ip(
                 peer_id,
@@ -756,9 +906,15 @@ impl ControlService {
         let state = self
             .get_or_create_network_state(network_code.to_string(), config)
             .await;
-        state
+        let removed = state
             .release_wireguard_peer_ip(peer_id, self.revoke_wireguard_peer(network_code, peer_id))
-            .await
+            .await?;
+        if removed && let Some(peer_manager) = self.get_peer_manager() {
+            peer_manager
+                .release_lease(network_code, "wireguard_peer", peer_id)
+                .await?;
+        }
+        Ok(removed)
     }
 }
 
@@ -823,6 +979,28 @@ impl ControlService {
             return LocalDeliveryResult::Delivered;
         }
         LocalDeliveryResult::NotFound
+    }
+
+    pub(crate) fn route_wireguard_broadcast(
+        &self,
+        network_code: &str,
+        source: Ipv4Addr,
+        inner: &[u8],
+        origin: RelayOrigin,
+    ) -> bool {
+        let Some(state) = self.get_network_state(network_code) else {
+            return false;
+        };
+        if state
+            .relay_wireguard_broadcast(source, inner, origin)
+            .is_err()
+        {
+            return false;
+        }
+        if let Some(peer_manager) = self.get_peer_manager() {
+            peer_manager.broadcast_wireguard(network_code, source, inner, origin);
+        }
+        true
     }
 
     pub(crate) fn set_wireguard_runtime(
@@ -962,11 +1140,23 @@ pub struct Session {
     pub network_state: Arc<NetworkState>,
     pub registration_status: RegistrationStatus,
     pub allow_wire_guard: bool,
+    pub client_capabilities: u64,
     pub control_service: ControlService,
+    cluster_lease_cancel: Option<CancellationToken>,
+    cluster_lease_valid: Arc<AtomicBool>,
+}
+
+impl Session {
+    pub fn cluster_lease_valid(&self) -> bool {
+        self.cluster_lease_valid.load(Ordering::Acquire)
+    }
 }
 
 impl Drop for Session {
     fn drop(&mut self) {
+        if let Some(cancel) = &self.cluster_lease_cancel {
+            cancel.cancel();
+        }
         match self.registration_status {
             RegistrationStatus::Confirmed => {
                 let record =
@@ -995,6 +1185,14 @@ impl Drop for Session {
             }
         }
     }
+}
+
+fn unix_time_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64
 }
 
 #[derive(Serialize)]

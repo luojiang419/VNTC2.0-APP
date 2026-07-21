@@ -190,6 +190,44 @@ impl ServerTurnInboundHandler {
             return Ok(());
         }
 
+        if msg_type == MsgType::WireGuardBroadcastRelay {
+            if !self.allow_wire_guard || !self.server_info.is_wireguard_client(&src) {
+                return Ok(());
+            }
+            if crate::wireguard_bridge::validate_broadcast_relay(
+                &net_packet,
+                network_addr.ip,
+                network_addr,
+            )
+            .is_none()
+            {
+                return Ok(());
+            }
+            self.enhanced_inbound
+                .inbound(&network_addr, MsgType::Broadcast, src, net_packet)
+                .await?;
+            return Ok(());
+        }
+
+        if msg_type == MsgType::WireGuardSubnetRelay {
+            if !self.allow_wire_guard || !self.server_info.is_wireguard_client(&src) {
+                return Ok(());
+            }
+            if crate::wireguard_bridge::validate_subnet_relay(
+                &net_packet,
+                network_addr.ip,
+                network_addr,
+            )
+            .is_none()
+            {
+                return Ok(());
+            }
+            self.enhanced_inbound
+                .inbound(&network_addr, MsgType::Turn, src, net_packet)
+                .await?;
+            return Ok(());
+        }
+
         if msg_type == MsgType::Quic {
             // QUIC 数据不加密不压缩，但可能有 FEC
             if net_packet.is_fec() {

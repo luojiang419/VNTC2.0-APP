@@ -19,11 +19,15 @@ persistence = true
 # wireguard_bind = "0.0.0.0:41194"
 # GUI 会优先填入本机有效 IPv4；公网/NAT 场景请改为外部设备实际可访问的域名或公网 IP。
 # wireguard_public_endpoint = "vpn.example.com:41194"
+# 客户端配置默认 DNS；最多 4 个 IPv4/IPv6 地址，空列表表示不写入 DNS 行。
+# wireguard_dns = []
 wireguard_max_active_peers = 4096
+# Peer 专属 DNS、Keepalive 及“局域网 CIDR -> VNT 客户端 IP”路由在 Web/Flutter 管理端配置。
 
 # 多服务器互联示例；不要在发布包中保存真实 token。
 # server_quic_bind = "0.0.0.0:29873"
-# peer_servers = ["server.example.com:29873"]
+# peer_servers 支持域名:端口，运行期间会定期重新解析。
+# peer_servers = ["vnts-peer.example.com:29873"]
 # server_token = "请替换为随机强token"
 
 [custom_nets]

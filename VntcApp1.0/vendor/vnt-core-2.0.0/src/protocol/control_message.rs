@@ -13,6 +13,10 @@ pub(crate) mod proto {
 }
 
 pub use proto::NodeType;
+pub const CLIENT_CAP_WIREGUARD_SUBNET_RELAY: u64 = 1 << 0;
+pub const CLIENT_CAP_WIREGUARD_BROADCAST_RELAY: u64 = 1 << 1;
+pub const CLIENT_CAP_WIREGUARD_EXTENDED_RELAY: u64 =
+    CLIENT_CAP_WIREGUARD_SUBNET_RELAY | CLIENT_CAP_WIREGUARD_BROADCAST_RELAY;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct WireGuardP2pRegistration {
     pub public_key: [u8; 32],
@@ -55,6 +59,7 @@ pub(crate) struct RegRequestMsg {
     pub registration_mode: RegistrationMode,
     pub allow_wire_guard: bool,
     pub wireguard_p2p: Option<WireGuardP2pRegistration>,
+    pub client_capabilities: u64,
 }
 impl RegRequestMsg {
     // pub fn check(&self) -> anyhow::Result<()> {
@@ -132,6 +137,7 @@ impl RegRequestMsg {
             allow_wire_guard: self.allow_wire_guard,
             wireguard_p2p_public_key,
             wireguard_p2p_port,
+            client_capabilities: self.client_capabilities,
         }
     }
 }
@@ -298,10 +304,12 @@ mod tests {
             registration_mode: RegistrationMode::Normal,
             allow_wire_guard: true,
             wireguard_p2p: None,
+            client_capabilities: CLIENT_CAP_WIREGUARD_EXTENDED_RELAY,
         }
         .to()
         .encode_to_vec();
         assert!(bytes.windows(2).any(|field| field == [0x50, 0x01]));
+        assert!(bytes.windows(2).any(|field| field == [0x68, 0x03]));
     }
 
     #[test]
@@ -321,6 +329,7 @@ mod tests {
                 public_key: [0x2a; 32],
                 port: 51_820,
             }),
+            client_capabilities: CLIENT_CAP_WIREGUARD_EXTENDED_RELAY,
         }
         .to();
         assert_eq!(message.wireguard_p2p_public_key, vec![0x2a; 32]);

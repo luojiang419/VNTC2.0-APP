@@ -14,6 +14,10 @@ pub(crate) mod proto {
 }
 
 pub use proto::{NodeType, RegistrationMode};
+pub const CLIENT_CAP_WIREGUARD_SUBNET_RELAY: u64 = 1 << 0;
+pub const CLIENT_CAP_WIREGUARD_BROADCAST_RELAY: u64 = 1 << 1;
+pub const CLIENT_CAP_WIREGUARD_EXTENDED_RELAY: u64 =
+    CLIENT_CAP_WIREGUARD_SUBNET_RELAY | CLIENT_CAP_WIREGUARD_BROADCAST_RELAY;
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
 pub struct WireGuardP2pRegistration {
     pub public_key: [u8; 32],
@@ -33,6 +37,7 @@ pub struct RegRequestMsg {
     pub registration_mode: RegistrationMode,
     pub allow_wire_guard: bool,
     pub wireguard_p2p: Option<WireGuardP2pRegistration>,
+    pub client_capabilities: u64,
 }
 impl RegRequestMsg {
     pub const MAX_NETWORK_CODE_LEN: usize = 32;
@@ -80,6 +85,11 @@ impl RegRequestMsg {
         if self.wireguard_p2p.is_some() && !self.allow_wire_guard {
             bail!("WireGuard P2P requires allow_wire_guard");
         }
+        if self.client_capabilities & CLIENT_CAP_WIREGUARD_EXTENDED_RELAY != 0
+            && !self.allow_wire_guard
+        {
+            bail!("WireGuard relay capabilities require allow_wire_guard");
+        }
 
         Ok(())
     }
@@ -108,6 +118,7 @@ impl RegRequestMsg {
             registration_mode,
             allow_wire_guard: msg.allow_wire_guard,
             wireguard_p2p,
+            client_capabilities: msg.client_capabilities,
         })
     }
     pub fn to(self) -> proto::RegRequestMsg {
@@ -133,6 +144,7 @@ impl RegRequestMsg {
             allow_wire_guard: self.allow_wire_guard,
             wireguard_p2p_public_key,
             wireguard_p2p_port,
+            client_capabilities: self.client_capabilities,
         }
     }
 }
@@ -326,6 +338,7 @@ mod tests {
 
         assert!(!registration.allow_wire_guard);
         assert_eq!(registration.wireguard_p2p, None);
+        assert_eq!(registration.client_capabilities, 0);
         assert_eq!(
             RequestMessage::Reg(registration).encode().as_ref(),
             fixture("reg-request-v2-legacy.hex")
@@ -342,6 +355,7 @@ mod tests {
 
         assert!(registration.allow_wire_guard);
         assert_eq!(registration.wireguard_p2p, None);
+        assert_eq!(registration.client_capabilities, 0);
         assert_eq!(
             RequestMessage::Reg(registration).encode().as_ref(),
             fixture("reg-request-v2-wireguard.hex")
@@ -381,6 +395,30 @@ mod tests {
             ..registration
         };
         assert!(disabled.check().is_err());
+    }
+
+    #[test]
+    fn extended_wireguard_capabilities_use_additive_field_thirteen() {
+        let registration = RegRequestMsg::from(proto::RegRequestMsg {
+            network_code: "network-a".to_string(),
+            device_id: "device-a".to_string(),
+            allow_wire_guard: true,
+            client_capabilities: CLIENT_CAP_WIREGUARD_EXTENDED_RELAY,
+            ..Default::default()
+        })
+        .unwrap();
+        registration.check().unwrap();
+        let encoded = RequestMessage::Reg(registration).encode();
+        assert!(encoded.windows(2).any(|field| field == [0x68, 0x03]));
+
+        let invalid = RegRequestMsg::from(proto::RegRequestMsg {
+            network_code: "network-a".to_string(),
+            device_id: "device-a".to_string(),
+            client_capabilities: CLIENT_CAP_WIREGUARD_SUBNET_RELAY,
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(invalid.check().is_err());
     }
 
     #[test]

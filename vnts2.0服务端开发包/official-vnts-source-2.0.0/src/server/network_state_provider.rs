@@ -1,16 +1,22 @@
-use crate::protocol::control_message::{RegRequestMsg, RegistrationMode};
+use crate::protocol::control_message::{
+    CLIENT_CAP_WIREGUARD_BROADCAST_RELAY, CLIENT_CAP_WIREGUARD_SUBNET_RELAY, RegRequestMsg,
+    RegistrationMode,
+};
 use crate::protocol::ip_packet_protocol::{MsgType, NetPacket};
 use crate::server::control_server::db;
 use crate::server::control_server::db::{
     DeviceRecord, WireGuardPeerDeleteResult, WireGuardPeerRecord,
 };
-use crate::server::wireguard_bridge::RelayOrigin;
+use crate::server::wireguard_bridge::{
+    RelayOrigin, RelayValidationError, build_wireguard_broadcast_relay,
+    validate_broadcast_inner_ipv4,
+};
 use anyhow::bail;
 use bytes::Bytes;
 use dashmap::DashMap;
 use ipnet::Ipv4Net;
 use parking_lot::Mutex;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::net::{Ipv4Addr, SocketAddr};
 use std::ops::Deref;
@@ -185,6 +191,7 @@ struct NetworkStateInner {
     device_map: HashMap<String, DeviceEntry>,
     device_ip_map: HashMap<Ipv4Addr, String>,
     wireguard_peer_ip_map: HashMap<Ipv4Addr, String>,
+    remote_wireguard_sources: HashMap<String, HashSet<Ipv4Addr>>,
 }
 
 #[derive(Clone, Debug)]
@@ -192,6 +199,7 @@ enum OnlineEndpoint {
     Vnt {
         random_id: u64,
         allow_wireguard: bool,
+        client_capabilities: u64,
         confirmed: bool,
         wireguard_p2p: Option<WireGuardP2pEndpoint>,
     },
@@ -278,6 +286,39 @@ impl NetworkState {
         self.online_endpoints
             .get(&ip)
             .is_some_and(|endpoint| matches!(endpoint.value(), OnlineEndpoint::WireGuard { .. }))
+    }
+
+    pub(crate) fn update_remote_wireguard_ips(&self, source: &str, ips: HashSet<Ipv4Addr>) -> bool {
+        let mut guard = self.lease_state.lock();
+        if guard.remote_wireguard_sources.get(source) == Some(&ips)
+            || (ips.is_empty() && !guard.remote_wireguard_sources.contains_key(source))
+        {
+            return false;
+        }
+        if ips.is_empty() {
+            guard.remote_wireguard_sources.remove(source);
+        } else {
+            guard
+                .remote_wireguard_sources
+                .insert(source.to_string(), ips);
+        }
+        guard.data_version = guard.data_version.saturating_add(1);
+        guard.last_wireguard_change_version = guard.data_version;
+        drop(guard);
+        self.update_time();
+        true
+    }
+
+    pub(crate) fn remove_remote_wireguard_source(&self, source: &str) -> bool {
+        let mut guard = self.lease_state.lock();
+        if guard.remote_wireguard_sources.remove(source).is_none() {
+            return false;
+        }
+        guard.data_version = guard.data_version.saturating_add(1);
+        guard.last_wireguard_change_version = guard.data_version;
+        drop(guard);
+        self.update_time();
+        true
     }
 
     pub(crate) fn wireguard_p2p_endpoint(&self, ip: Ipv4Addr) -> Option<WireGuardP2pEndpoint> {
@@ -403,6 +444,47 @@ impl NetworkState {
                 },
             ) => true,
             (MsgType::WireGuardRelay, _, _) => false,
+            (
+                MsgType::WireGuardSubnetRelay,
+                RelayOrigin::WireGuard,
+                OnlineEndpoint::Vnt {
+                    allow_wireguard: true,
+                    client_capabilities,
+                    confirmed: true,
+                    ..
+                },
+            ) => {
+                *client_capabilities & CLIENT_CAP_WIREGUARD_SUBNET_RELAY
+                    == CLIENT_CAP_WIREGUARD_SUBNET_RELAY
+            }
+            (MsgType::WireGuardSubnetRelay, RelayOrigin::Vnt, OnlineEndpoint::WireGuard { .. }) => {
+                true
+            }
+            (MsgType::WireGuardSubnetRelay, _, _) => false,
+            (
+                MsgType::WireGuardBroadcastRelay,
+                RelayOrigin::Vnt,
+                OnlineEndpoint::WireGuard { .. },
+            ) => true,
+            (
+                MsgType::WireGuardBroadcastRelay,
+                RelayOrigin::WireGuard,
+                OnlineEndpoint::WireGuard { .. },
+            ) => true,
+            (
+                MsgType::WireGuardBroadcastRelay,
+                RelayOrigin::WireGuard,
+                OnlineEndpoint::Vnt {
+                    allow_wireguard: true,
+                    client_capabilities,
+                    confirmed: true,
+                    ..
+                },
+            ) => {
+                *client_capabilities & CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+                    == CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+            }
+            (MsgType::WireGuardBroadcastRelay, _, _) => false,
             (_, _, OnlineEndpoint::Vnt { .. }) => true,
             (_, _, OnlineEndpoint::WireGuard { .. }) => false,
         };
@@ -433,6 +515,53 @@ impl NetworkState {
                 LocalDeliveryResult::Closed
             }
         }
+    }
+
+    pub(crate) fn relay_wireguard_broadcast(
+        &self,
+        source: Ipv4Addr,
+        inner: &[u8],
+        origin: RelayOrigin,
+    ) -> Result<usize, RelayValidationError> {
+        let route = validate_broadcast_inner_ipv4(inner, source, self.net, self.gateway)?;
+        let targets: Vec<Ipv4Addr> = self
+            .online_endpoints
+            .iter()
+            .filter_map(|endpoint| {
+                let target = *endpoint.key();
+                if target == source {
+                    return None;
+                }
+                match (origin, endpoint.value()) {
+                    (RelayOrigin::Vnt, OnlineEndpoint::WireGuard { .. }) => Some(target),
+                    (RelayOrigin::WireGuard, OnlineEndpoint::WireGuard { .. }) => Some(target),
+                    (
+                        RelayOrigin::WireGuard,
+                        OnlineEndpoint::Vnt {
+                            allow_wireguard: true,
+                            client_capabilities,
+                            confirmed: true,
+                            ..
+                        },
+                    ) if *client_capabilities & CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+                        == CLIENT_CAP_WIREGUARD_BROADCAST_RELAY =>
+                    {
+                        Some(target)
+                    }
+                    _ => None,
+                }
+            })
+            .collect();
+
+        let mut delivered = 0;
+        for target in targets {
+            let data = build_wireguard_broadcast_relay(inner, route, target);
+            if self.try_deliver(target, data.clone(), origin) == LocalDeliveryResult::Delivered {
+                self.record_rx_traffic(target, data.len());
+                delivered += 1;
+            }
+        }
+        Ok(delivered)
     }
 
     pub fn record_tx_traffic(&self, ip: Ipv4Addr, bytes: usize) {
@@ -614,6 +743,7 @@ impl NetworkState {
         wireguard_p2p: Option<WireGuardP2pEndpoint>,
     ) -> anyhow::Result<(Ipv4Addr, Option<Ipv4Addr>, Option<DeviceEntry>)> {
         let allow_wireguard = reg_req.allow_wire_guard;
+        let client_capabilities = reg_req.client_capabilities;
         let confirmed = reg_req.registration_mode == RegistrationMode::Normal;
         let mut guard = self.lease_state.lock();
         let (ip, old_ip) =
@@ -632,6 +762,7 @@ impl NetworkState {
             OnlineEndpoint::Vnt {
                 random_id,
                 allow_wireguard,
+                client_capabilities,
                 confirmed,
                 wireguard_p2p,
             },
@@ -725,6 +856,29 @@ impl NetworkState {
         self.lease_state
             .lock()
             .commit_wireguard_peer_ip_reservation(&record.peer_id, ip, None);
+        self.update_time();
+        Ok(ip)
+    }
+
+    pub(crate) async fn create_wireguard_peer_with_ip(
+        &self,
+        record: &WireGuardPeerRecord,
+        ip: Ipv4Addr,
+    ) -> anyhow::Result<Ipv4Addr> {
+        let _update_guard = self.wireguard_ip_update_lock.lock().await;
+        let previous_ip = self
+            .lease_state
+            .lock()
+            .prepare_wireguard_peer_ip_reservation(&record.peer_id, ip)?;
+        if let Err(error) = db::insert_wireguard_peer_with_ip(record, ip).await {
+            self.lease_state
+                .lock()
+                .rollback_wireguard_peer_ip_reservation(&record.peer_id, ip, previous_ip);
+            return Err(error);
+        }
+        self.lease_state
+            .lock()
+            .commit_wireguard_peer_ip_reservation(&record.peer_id, ip, previous_ip);
         self.update_time();
         Ok(ip)
     }
@@ -988,6 +1142,23 @@ impl NetworkState {
                         },
                     )
                 }));
+                let local_ips: HashSet<_> = list.iter().map(|entry| entry.ip).collect();
+                let remote_ips: HashSet<_> = guard
+                    .remote_wireguard_sources
+                    .values()
+                    .flatten()
+                    .copied()
+                    .collect();
+                list.extend(
+                    remote_ips
+                        .into_iter()
+                        .filter(|ip| *ip != exclude_ip && !local_ips.contains(ip))
+                        .map(|ip| ClientSimpleInfo {
+                            ip,
+                            online: true,
+                            node_type: NodeType::Wireguard,
+                        }),
+                );
             }
             return Some(crate::protocol::control_message::ClientSimpleInfoList {
                 data_version: guard.data_version,
@@ -1415,6 +1586,7 @@ impl NetworkState {
             device_map,
             device_ip_map,
             wireguard_peer_ip_map,
+            remote_wireguard_sources: HashMap::new(),
         }
     }
 
@@ -1537,7 +1709,10 @@ mod tests {
         WireGuardP2pAgentResponse, WireGuardP2pControl, WireGuardP2pStatus,
     };
     use crate::protocol::ip_packet_protocol::{HEAD_LENGTH, MsgType, NetPacket};
-    use crate::server::wireguard_bridge::{Ipv4Route, build_wireguard_relay};
+    use crate::server::wireguard_bridge::{
+        Ipv4Route, build_wireguard_relay, build_wireguard_subnet_relay,
+        validate_broadcast_inner_ipv4,
+    };
     use bytes::BytesMut;
     use prost::Message;
 
@@ -1557,6 +1732,7 @@ mod tests {
                 device_map: HashMap::new(),
                 device_ip_map: HashMap::new(),
                 wireguard_peer_ip_map,
+                remote_wireguard_sources: HashMap::new(),
             }),
             wireguard_ip_update_lock: tokio::sync::Mutex::new(()),
             traffic_stats_map: DashMap::new(),
@@ -1580,6 +1756,17 @@ mod tests {
         )
     }
 
+    fn broadcast_ipv4(source: Ipv4Addr, destination: Ipv4Addr) -> Vec<u8> {
+        let mut ipv4 = vec![0; 20];
+        ipv4[0] = 0x45;
+        ipv4[2..4].copy_from_slice(&20_u16.to_be_bytes());
+        ipv4[8] = 64;
+        ipv4[9] = 17;
+        ipv4[12..16].copy_from_slice(&source.octets());
+        ipv4[16..20].copy_from_slice(&destination.octets());
+        ipv4
+    }
+
     #[test]
     fn p2p_resolution_requires_confirmed_capability_and_delivers_bound_offer() {
         let wireguard_ip = Ipv4Addr::new(10, 26, 0, 2);
@@ -1592,6 +1779,7 @@ mod tests {
             OnlineEndpoint::Vnt {
                 random_id: 7,
                 allow_wireguard: true,
+                client_capabilities: 0,
                 confirmed: true,
                 wireguard_p2p: Some(WireGuardP2pEndpoint {
                     public_key: [0x33; 32],
@@ -1693,6 +1881,7 @@ mod tests {
             OnlineEndpoint::Vnt {
                 random_id: 7,
                 allow_wireguard: true,
+                client_capabilities: 0,
                 confirmed: true,
                 wireguard_p2p: None,
             },
@@ -1714,6 +1903,106 @@ mod tests {
         let guard = state.lease_state.lock();
         assert_eq!(guard.data_version, 2);
         assert_eq!(guard.last_wireguard_change_version, 2);
+    }
+
+    #[test]
+    fn wireguard_broadcast_only_reaches_eligible_local_endpoints() {
+        let source = Ipv4Addr::new(10, 26, 0, 2);
+        let wireguard_target = Ipv4Addr::new(10, 26, 0, 3);
+        let capable_vnt = Ipv4Addr::new(10, 26, 0, 4);
+        let legacy_vnt = Ipv4Addr::new(10, 26, 0, 5);
+        let state = test_network_state(HashMap::from([
+            (source, "peer-source".to_string()),
+            (wireguard_target, "peer-target".to_string()),
+        ]));
+
+        let (source_sender, _source_receiver) = tokio::sync::mpsc::channel(1);
+        let (wireguard_sender, mut wireguard_receiver) = tokio::sync::mpsc::channel(1);
+        assert!(state.connect_wireguard_peer("peer-source", source, source_sender));
+        assert!(state.connect_wireguard_peer("peer-target", wireguard_target, wireguard_sender));
+
+        let (capable_sender, mut capable_receiver) = tokio::sync::mpsc::channel(1);
+        state
+            .sender_map
+            .insert(capable_vnt, NetworkSender::Vnt(capable_sender));
+        state.online_endpoints.insert(
+            capable_vnt,
+            OnlineEndpoint::Vnt {
+                random_id: 7,
+                allow_wireguard: true,
+                client_capabilities: CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+                    | CLIENT_CAP_WIREGUARD_SUBNET_RELAY,
+                confirmed: true,
+                wireguard_p2p: None,
+            },
+        );
+
+        let (legacy_sender, mut legacy_receiver) = tokio::sync::mpsc::channel(1);
+        state
+            .sender_map
+            .insert(legacy_vnt, NetworkSender::Vnt(legacy_sender));
+        state.online_endpoints.insert(
+            legacy_vnt,
+            OnlineEndpoint::Vnt {
+                random_id: 8,
+                allow_wireguard: true,
+                client_capabilities: 0,
+                confirmed: true,
+                wireguard_p2p: None,
+            },
+        );
+
+        let inner = broadcast_ipv4(source, state.net.broadcast());
+        assert_eq!(
+            validate_broadcast_inner_ipv4(&inner, source, state.net, state.gateway),
+            Ok(Ipv4Route {
+                source,
+                destination: state.net.broadcast(),
+            })
+        );
+        assert_eq!(
+            state
+                .relay_wireguard_broadcast(source, &inner, RelayOrigin::WireGuard)
+                .unwrap(),
+            2
+        );
+
+        for (target, data) in [
+            (
+                wireguard_target,
+                wireguard_receiver.try_recv().unwrap().data,
+            ),
+            (capable_vnt, capable_receiver.try_recv().unwrap()),
+        ] {
+            let packet = NetPacket::new(data).unwrap();
+            assert_eq!(packet.msg_type().unwrap(), MsgType::WireGuardBroadcastRelay);
+            assert_eq!(Ipv4Addr::from(packet.src_id()), source);
+            assert_eq!(Ipv4Addr::from(packet.dest_id()), target);
+            assert_eq!(packet.payload(), inner);
+        }
+        assert!(legacy_receiver.try_recv().is_err());
+
+        let lan_destination = Ipv4Addr::new(192, 168, 10, 25);
+        let subnet_inner = broadcast_ipv4(source, lan_destination);
+        let subnet_route = Ipv4Route {
+            source,
+            destination: lan_destination,
+        };
+        let capable_relay = build_wireguard_subnet_relay(&subnet_inner, subnet_route, capable_vnt);
+        assert_eq!(
+            state.try_deliver(capable_vnt, capable_relay, RelayOrigin::WireGuard),
+            LocalDeliveryResult::Delivered
+        );
+        let packet = NetPacket::new(capable_receiver.try_recv().unwrap()).unwrap();
+        assert_eq!(packet.msg_type().unwrap(), MsgType::WireGuardSubnetRelay);
+        assert_eq!(packet.payload(), subnet_inner);
+
+        let legacy_relay = build_wireguard_subnet_relay(&subnet_inner, subnet_route, legacy_vnt);
+        assert_eq!(
+            state.try_deliver(legacy_vnt, legacy_relay, RelayOrigin::WireGuard),
+            LocalDeliveryResult::Rejected
+        );
+        assert!(legacy_receiver.try_recv().is_err());
     }
 
     #[test]
@@ -1750,6 +2039,34 @@ mod tests {
     }
 
     #[test]
+    fn remote_wireguard_topology_updates_client_list_versions() {
+        let state = test_network_state(HashMap::new());
+        let remote_ip = Ipv4Addr::new(10, 26, 0, 20);
+        assert!(state.update_remote_wireguard_ips("server-b", HashSet::from([remote_ip]),));
+        assert!(!state.update_remote_wireguard_ips("server-b", HashSet::from([remote_ip]),));
+
+        let capable = state
+            .changed_client_simple_list(Ipv4Addr::new(10, 26, 0, 3), 0, true)
+            .unwrap();
+        assert!(capable.is_all);
+        assert_eq!(capable.list.len(), 1);
+        assert_eq!(capable.list[0].ip, remote_ip);
+        assert_eq!(
+            capable.list[0].node_type,
+            crate::protocol::control_message::NodeType::Wireguard
+        );
+        let version = capable.data_version;
+
+        assert!(state.remove_remote_wireguard_source("server-b"));
+        let removed = state
+            .changed_client_simple_list(Ipv4Addr::new(10, 26, 0, 3), version, true)
+            .unwrap();
+        assert!(removed.is_all);
+        assert!(removed.list.is_empty());
+        assert!(!state.remove_remote_wireguard_source("server-b"));
+    }
+
+    #[test]
     fn automatic_allocation_skips_wireguard_peer_reservations() {
         let reserved_ip = Ipv4Addr::new(10, 26, 0, 2);
         let mut wireguard_peer_ip_map = HashMap::new();
@@ -1760,6 +2077,7 @@ mod tests {
             device_map: HashMap::new(),
             device_ip_map: HashMap::new(),
             wireguard_peer_ip_map,
+            remote_wireguard_sources: HashMap::new(),
         };
         let net = Ipv4Net::new_assert(Ipv4Addr::new(10, 26, 0, 0), 24);
 

@@ -32,10 +32,16 @@ pub struct ConfigFile {
     pub wireguard_public_endpoint: Option<String>,
     #[serde(default = "default_wireguard_max_active_peers")]
     pub wireguard_max_active_peers: usize,
+    #[serde(default)]
+    pub wireguard_dns: Vec<IpAddr>,
     pub server_quic_bind: Option<SocketAddr>,
     #[serde(default)]
     pub peer_servers: Vec<String>,
     pub server_token: Option<String>,
+    #[serde(default)]
+    pub server_id: Option<String>,
+    #[serde(default)]
+    pub lease_authority: Option<String>,
 }
 impl Default for ConfigFile {
     fn default() -> Self {
@@ -57,9 +63,12 @@ impl Default for ConfigFile {
             wireguard_bind: None,
             wireguard_public_endpoint: None,
             wireguard_max_active_peers: default_wireguard_max_active_peers(),
+            wireguard_dns: vec![],
             server_quic_bind: None,
             peer_servers: vec![],
             server_token: None,
+            server_id: None,
+            lease_authority: None,
         }
     }
 }
@@ -145,6 +154,62 @@ impl ConfigFile {
         };
         validate_wireguard_public_endpoint(&format!("{host}:{}", bind.port())).map(Some)
     }
+
+    pub fn validate_cluster_config(&self) -> anyhow::Result<()> {
+        match (
+            self.server_id.as_deref().map(str::trim),
+            self.lease_authority.as_deref().map(str::trim),
+        ) {
+            (None, None) => return Ok(()),
+            (Some(server_id), Some(authority)) => {
+                validate_server_id(server_id)?;
+                validate_server_id(authority)?;
+            }
+            _ => {
+                anyhow::bail!("server_id 与 lease_authority 必须同时配置或同时省略");
+            }
+        }
+        anyhow::ensure!(self.persistence, "集群租约模式要求 persistence = true");
+        anyhow::ensure!(
+            self.server_quic_bind.is_some(),
+            "集群租约模式要求配置 server_quic_bind"
+        );
+        anyhow::ensure!(
+            self.server_token
+                .as_deref()
+                .is_some_and(|token| !token.trim().is_empty()),
+            "集群租约模式要求配置非空 server_token"
+        );
+        Ok(())
+    }
+
+    pub fn validated_wireguard_dns(&self) -> anyhow::Result<Vec<IpAddr>> {
+        anyhow::ensure!(
+            self.wireguard_dns.len() <= 4,
+            "wireguard_dns 最多允许配置 4 个地址"
+        );
+        let mut result = Vec::new();
+        for address in &self.wireguard_dns {
+            if !result.contains(address) {
+                result.push(*address);
+            }
+        }
+        Ok(result)
+    }
+}
+
+fn validate_server_id(value: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        !value.is_empty() && value.len() <= 64,
+        "服务端 ID 长度必须为 1..=64"
+    );
+    anyhow::ensure!(
+        value
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.')),
+        "服务端 ID 只能包含字母、数字、点、下划线和连字符"
+    );
+    Ok(())
 }
 
 fn validate_wireguard_public_endpoint(raw: &str) -> anyhow::Result<String> {
@@ -302,6 +367,8 @@ persistence = true
 # wireguard_public_endpoint = "vpn.example.com:51820"
 # WireGuard 最大活跃 peer 数；容量满时拒绝新会话，不驱逐现有会话
 wireguard_max_active_peers = 4096
+# WireGuard 客户端默认 DNS；为空时不生成 DNS 行
+wireguard_dns = []
 
 # tls证书不填时将自动生成
 # 自定义tls证书路径
@@ -316,6 +383,9 @@ key = "key.pem"
 # peer_servers = ["server1.example.com:29873", "192.168.1.100:29873"]
 # 服务器验证码，用于服务器之间的身份验证
 # server_token = "your-secret-token"
+# 多服务器全局租约模式（两项必须同时配置）；所有节点填写相同 lease_authority
+# server_id = "server-a"
+# lease_authority = "server-a"
 
 # 自定义虚拟网段 格式：网络编号 = "网段"
 [custom_nets]
@@ -435,5 +505,24 @@ mod tests {
             config.effective_wireguard_public_endpoint().unwrap(),
             Some("203.0.113.10:51821".to_string())
         );
+    }
+
+    #[test]
+    fn cluster_config_is_opt_in_and_fail_closed() {
+        assert!(ConfigFile::default().validate_cluster_config().is_ok());
+
+        let mut config = ConfigFile {
+            server_id: Some("server-a".to_string()),
+            lease_authority: Some("server-a".to_string()),
+            server_quic_bind: Some("127.0.0.1:29873".parse().unwrap()),
+            server_token: Some("cluster-secret".to_string()),
+            ..ConfigFile::default()
+        };
+        assert!(config.validate_cluster_config().is_ok());
+
+        config.lease_authority = None;
+        assert!(config.validate_cluster_config().is_err());
+        config.lease_authority = Some("bad id".to_string());
+        assert!(config.validate_cluster_config().is_err());
     }
 }

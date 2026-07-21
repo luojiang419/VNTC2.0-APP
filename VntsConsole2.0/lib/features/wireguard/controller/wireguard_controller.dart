@@ -68,6 +68,7 @@ class WireGuardController extends SafeChangeNotifier {
   Future<void> createPeer({
     required String peerId,
     required String publicKey,
+    required WireGuardPeerProfile profile,
   }) async {
     await _mutate(
       () => _repository!.createPeer(
@@ -75,11 +76,15 @@ class WireGuardController extends SafeChangeNotifier {
         peerId: peerId,
         publicKey: publicKey,
         enabled: true,
+        profile: profile,
       ),
     );
   }
 
-  Future<GeneratedWireGuardConfig> generatePeer(String peerId) async {
+  Future<GeneratedWireGuardConfig> generatePeer(
+    String peerId,
+    WireGuardPeerProfile profile,
+  ) async {
     mutating = true;
     error = null;
     notifyListeners();
@@ -87,6 +92,7 @@ class WireGuardController extends SafeChangeNotifier {
       final generated = await _repository!.generatePeer(
         networkCode: selectedNetwork!,
         peerId: peerId,
+        profile: profile,
       );
       await _refreshCurrent();
       return generated;
@@ -97,6 +103,37 @@ class WireGuardController extends SafeChangeNotifier {
       mutating = false;
       notifyListeners();
     }
+  }
+
+  Future<GeneratedWireGuardConfig> getPeerConfig(WireGuardPeer peer) async {
+    mutating = true;
+    error = null;
+    notifyListeners();
+    try {
+      return await _repository!.getPeerConfig(
+        networkCode: peer.networkCode,
+        peerId: peer.peerId,
+      );
+    } on ApiException catch (exception) {
+      error = exception.message;
+      rethrow;
+    } finally {
+      mutating = false;
+      notifyListeners();
+    }
+  }
+
+  Future<void> updateProfile(
+    WireGuardPeer peer,
+    WireGuardPeerProfile profile,
+  ) async {
+    await _mutate(
+      () => _repository!.updateProfile(
+        networkCode: peer.networkCode,
+        peerId: peer.peerId,
+        profile: profile,
+      ),
+    );
   }
 
   Future<void> setEnabled(WireGuardPeer peer, bool enabled) async {

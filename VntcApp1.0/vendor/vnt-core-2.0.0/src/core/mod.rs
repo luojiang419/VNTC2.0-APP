@@ -125,8 +125,10 @@ impl NetworkManager {
             basic_outbound,
             packet_compression.clone(),
             subnet_external_route.clone(),
+            allow_subnet.clone(),
             fec_encoder,
             wireguard_p2p.clone(),
+            config.allow_wire_guard,
         );
         let port_mapping_manager = PortMappingManager::new(
             config.no_tun,

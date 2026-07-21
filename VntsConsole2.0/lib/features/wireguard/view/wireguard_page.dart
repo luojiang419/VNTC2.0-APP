@@ -67,7 +67,7 @@ class _WireGuardPageState extends State<WireGuardPage> {
               Text('WireGuard', style: theme.textTheme.headlineMedium),
               const SizedBox(height: AppSpacing.xs),
               Text(
-                '管理 Peer、公钥、地址预留与一次性客户端配置',
+                '管理 Peer 在线状态、DNS、局域网路由与客户端配置',
                 style: TextStyle(color: theme.colorScheme.onSurfaceVariant),
               ),
             ],
@@ -167,6 +167,10 @@ class _WireGuardPageState extends State<WireGuardPage> {
             value ? 'Peer 已启用' : 'Peer 已停用',
           ),
           onReserveIp: () => _reserveIp(peer),
+          onEditProfile: () => _editProfile(peer),
+          onDownloadConfig: peer.configAvailable
+              ? () => _downloadConfig(peer)
+              : null,
           onReleaseIp: peer.ip == null
               ? null
               : () => _run(() => controller.releaseIp(peer), 'IP 预留已释放'),
@@ -186,6 +190,7 @@ class _WireGuardPageState extends State<WireGuardPage> {
       () => controller.createPeer(
         peerId: draft.peerId,
         publicKey: draft.publicKey!,
+        profile: draft.profile,
       ),
       'Peer 已创建',
     );
@@ -198,12 +203,41 @@ class _WireGuardPageState extends State<WireGuardPage> {
     );
     if (draft == null) return;
     try {
-      final generated = await controller.generatePeer(draft.peerId);
+      final generated = await controller.generatePeer(
+        draft.peerId,
+        draft.profile,
+      );
       if (!mounted) return;
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (_) => _GeneratedConfigDialog(config: generated),
+        builder: (_) =>
+            _GeneratedConfigDialog(config: generated, oneTime: true),
+      );
+    } on ApiException catch (exception) {
+      if (mounted) _message(exception.message);
+    }
+  }
+
+  Future<void> _editProfile(WireGuardPeer peer) async {
+    final draft = await showDialog<_PeerDraft>(
+      context: context,
+      builder: (_) => _PeerDialog(withPublicKey: false, peer: peer),
+    );
+    if (draft == null) return;
+    await _run(
+      () => controller.updateProfile(peer, draft.profile),
+      'Peer 配置已更新，现有会话已重新握手',
+    );
+  }
+
+  Future<void> _downloadConfig(WireGuardPeer peer) async {
+    try {
+      final config = await controller.getPeerConfig(peer);
+      if (!mounted) return;
+      await showDialog<void>(
+        context: context,
+        builder: (_) => _GeneratedConfigDialog(config: config, oneTime: false),
       );
     } on ApiException catch (exception) {
       if (mounted) _message(exception.message);
@@ -262,6 +296,8 @@ class _PeerCard extends StatelessWidget {
     required this.disabled,
     required this.onEnabledChanged,
     required this.onReserveIp,
+    required this.onEditProfile,
+    required this.onDownloadConfig,
     required this.onReleaseIp,
     required this.onDelete,
   });
@@ -270,6 +306,8 @@ class _PeerCard extends StatelessWidget {
   final bool disabled;
   final ValueChanged<bool> onEnabledChanged;
   final VoidCallback onReserveIp;
+  final VoidCallback onEditProfile;
+  final VoidCallback? onDownloadConfig;
   final VoidCallback? onReleaseIp;
   final VoidCallback onDelete;
 
@@ -303,6 +341,27 @@ class _PeerCard extends StatelessWidget {
                   ),
                   const SizedBox(height: AppSpacing.xs),
                   Text(peer.ip == null ? '未预留 IP' : '预留 IP ${peer.ip}'),
+                  const SizedBox(height: AppSpacing.xs),
+                  Wrap(
+                    spacing: AppSpacing.sm,
+                    runSpacing: AppSpacing.xs,
+                    children: [
+                      Chip(
+                        visualDensity: VisualDensity.compact,
+                        avatar: Icon(
+                          peer.online ? Icons.circle : Icons.circle_outlined,
+                          size: 12,
+                        ),
+                        label: Text(_statusLabel(peer.status)),
+                      ),
+                      Text(
+                        'DNS ${peer.dnsServers.isEmpty ? '未配置' : peer.dnsServers.join(', ')}${peer.dnsInherited ? '（继承）' : ''}',
+                      ),
+                      Text('Keepalive ${peer.persistentKeepalive} 秒'),
+                      Text('局域网路由 ${peer.routes.length} 条'),
+                      Text(peer.configAvailable ? '客户端配置可下载' : '仅保存公钥'),
+                    ],
+                  ),
                 ],
               ),
             ),
@@ -318,12 +377,25 @@ class _PeerCard extends StatelessWidget {
                     onReserveIp();
                   case 'release':
                     onReleaseIp?.call();
+                  case 'profile':
+                    onEditProfile();
+                  case 'download':
+                    onDownloadConfig?.call();
                   case 'delete':
                     onDelete();
                 }
               },
               itemBuilder: (_) => [
                 const PopupMenuItem(value: 'reserve', child: Text('预留/更改 IP')),
+                const PopupMenuItem(
+                  value: 'profile',
+                  child: Text('编辑 DNS / 路由'),
+                ),
+                if (onDownloadConfig != null)
+                  const PopupMenuItem(
+                    value: 'download',
+                    child: Text('下载客户端配置'),
+                  ),
                 if (onReleaseIp != null)
                   const PopupMenuItem(value: 'release', child: Text('释放 IP')),
                 PopupMenuItem(
@@ -340,19 +412,29 @@ class _PeerCard extends StatelessWidget {
       ),
     );
   }
+
+  static String _statusLabel(String status) => switch (status) {
+    'online' => '在线',
+    'offline' => '离线',
+    'disabled' => '已禁用',
+    'unassigned' => '未分配 IP',
+    _ => '未知',
+  };
 }
 
 class _PeerDraft {
-  const _PeerDraft(this.peerId, this.publicKey);
+  const _PeerDraft(this.peerId, this.publicKey, this.profile);
 
   final String peerId;
   final String? publicKey;
+  final WireGuardPeerProfile profile;
 }
 
 class _PeerDialog extends StatefulWidget {
-  const _PeerDialog({required this.withPublicKey});
+  const _PeerDialog({required this.withPublicKey, this.peer});
 
   final bool withPublicKey;
+  final WireGuardPeer? peer;
 
   @override
   State<_PeerDialog> createState() => _PeerDialogState();
@@ -362,18 +444,44 @@ class _PeerDialogState extends State<_PeerDialog> {
   final formKey = GlobalKey<FormState>();
   final peerId = TextEditingController();
   final publicKey = TextEditingController();
+  final dnsServers = TextEditingController();
+  final persistentKeepalive = TextEditingController(text: '25');
+  final routes = TextEditingController();
+  bool dnsInherited = true;
+
+  @override
+  void initState() {
+    super.initState();
+    final peer = widget.peer;
+    if (peer == null) return;
+    peerId.text = peer.peerId;
+    publicKey.text = peer.publicKey;
+    dnsInherited = peer.dnsInherited;
+    dnsServers.text = peer.dnsServers.join(', ');
+    persistentKeepalive.text = peer.persistentKeepalive.toString();
+    routes.text = peer.routes
+        .map((route) => '${route.lanNetwork} -> ${route.vntClientIp}')
+        .join('\n');
+  }
 
   @override
   void dispose() {
     peerId.dispose();
     publicKey.dispose();
+    dnsServers.dispose();
+    persistentKeepalive.dispose();
+    routes.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
     return AlertDialog(
-      title: Text(widget.withPublicKey ? '导入 Peer 公钥' : '生成一次性客户端配置'),
+      title: Text(
+        widget.peer != null
+            ? '编辑 Peer DNS / 路由'
+            : (widget.withPublicKey ? '导入 Peer 公钥' : '生成客户端配置'),
+      ),
       content: SizedBox(
         width: 480,
         child: Form(
@@ -384,10 +492,11 @@ class _PeerDialogState extends State<_PeerDialog> {
               TextFormField(
                 controller: peerId,
                 autofocus: true,
+                enabled: widget.peer == null,
                 decoration: const InputDecoration(labelText: 'Peer ID'),
                 validator: _required,
               ),
-              if (widget.withPublicKey) ...[
+              if (widget.withPublicKey && widget.peer == null) ...[
                 const SizedBox(height: AppSpacing.md),
                 TextFormField(
                   controller: publicKey,
@@ -397,10 +506,46 @@ class _PeerDialogState extends State<_PeerDialog> {
                   validator: _required,
                 ),
               ],
-              if (!widget.withPublicKey) ...[
+              if (!widget.withPublicKey && widget.peer == null) ...[
                 const SizedBox(height: AppSpacing.md),
-                const Text('私钥只会在下一步显示一次，控制台不会保存。'),
+                const Text('客户端私钥会由服务端主密钥加密保存，下一步请立即下载或扫码导入。'),
               ],
+              const SizedBox(height: AppSpacing.md),
+              CheckboxListTile(
+                contentPadding: EdgeInsets.zero,
+                value: dnsInherited,
+                title: const Text('继承服务端全局 DNS'),
+                onChanged: (value) =>
+                    setState(() => dnsInherited = value ?? true),
+              ),
+              if (!dnsInherited)
+                TextFormField(
+                  controller: dnsServers,
+                  decoration: const InputDecoration(
+                    labelText: 'DNS（逗号或空格分隔，最多 4 个）',
+                  ),
+                  validator: _validateDns,
+                ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: persistentKeepalive,
+                keyboardType: TextInputType.number,
+                decoration: const InputDecoration(
+                  labelText: 'PersistentKeepalive（秒）',
+                ),
+                validator: _validateKeepalive,
+              ),
+              const SizedBox(height: AppSpacing.md),
+              TextFormField(
+                controller: routes,
+                minLines: 3,
+                maxLines: 6,
+                decoration: const InputDecoration(
+                  labelText: 'Peer 后方局域网路由',
+                  hintText: '每行一条：192.168.10.0/24 -> 10.26.0.10',
+                ),
+                validator: _validateRoutes,
+              ),
             ],
           ),
         ),
@@ -417,11 +562,27 @@ class _PeerDialogState extends State<_PeerDialog> {
               context,
               _PeerDraft(
                 peerId.text.trim(),
-                widget.withPublicKey ? publicKey.text.trim() : null,
+                widget.withPublicKey && widget.peer == null
+                    ? publicKey.text.trim()
+                    : null,
+                WireGuardPeerProfile(
+                  dnsServers: dnsInherited
+                      ? null
+                      : dnsServers.text
+                            .split(RegExp(r'[\s,]+'))
+                            .where((value) => value.isNotEmpty)
+                            .toList(growable: false),
+                  persistentKeepalive: int.parse(
+                    persistentKeepalive.text.trim(),
+                  ),
+                  routes: _parseRoutes(routes.text),
+                ),
               ),
             );
           },
-          child: Text(widget.withPublicKey ? '创建' : '生成'),
+          child: Text(
+            widget.peer != null ? '保存' : (widget.withPublicKey ? '创建' : '生成'),
+          ),
         ),
       ],
     );
@@ -429,6 +590,47 @@ class _PeerDialogState extends State<_PeerDialog> {
 
   static String? _required(String? value) {
     return value == null || value.trim().isEmpty ? '不能为空' : null;
+  }
+
+  static String? _validateDns(String? value) {
+    final values = (value ?? '')
+        .split(RegExp(r'[\s,]+'))
+        .where((item) => item.isNotEmpty)
+        .toList(growable: false);
+    return values.length > 4 ? '最多填写 4 个 DNS 地址' : null;
+  }
+
+  static String? _validateKeepalive(String? value) {
+    final number = int.tryParse(value?.trim() ?? '');
+    if (number == null || number < 0 || number > 65535) {
+      return '请输入 0 到 65535 之间的整数';
+    }
+    return null;
+  }
+
+  static String? _validateRoutes(String? value) {
+    try {
+      _parseRoutes(value ?? '');
+      return null;
+    } on FormatException catch (error) {
+      return error.message;
+    }
+  }
+
+  static List<WireGuardRoute> _parseRoutes(String value) {
+    final result = <WireGuardRoute>[];
+    final lines = value.split(RegExp(r'\r?\n'));
+    for (var index = 0; index < lines.length; index++) {
+      final line = lines[index].trim();
+      if (line.isEmpty) continue;
+      final parts = line.split(RegExp(r'\s*(?:->|,|\s+)\s*'))
+        ..removeWhere((part) => part.isEmpty);
+      if (parts.length != 2) {
+        throw FormatException('第 ${index + 1} 行格式应为“CIDR -> VNT 客户端 IP”');
+      }
+      result.add(WireGuardRoute(lanNetwork: parts[0], vntClientIp: parts[1]));
+    }
+    return result;
   }
 }
 
@@ -498,15 +700,16 @@ class _IpDialogState extends State<_IpDialog> {
 }
 
 class _GeneratedConfigDialog extends StatelessWidget {
-  const _GeneratedConfigDialog({required this.config});
+  const _GeneratedConfigDialog({required this.config, required this.oneTime});
 
   final GeneratedWireGuardConfig config;
+  final bool oneTime;
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return AlertDialog(
-      title: const Text('一次性客户端配置'),
+      title: Text(oneTime ? '新建客户端配置' : '客户端配置'),
       content: SizedBox(
         width: 720,
         child: Column(
@@ -548,8 +751,12 @@ class _GeneratedConfigDialog extends StatelessWidget {
             ),
             const SizedBox(height: AppSpacing.sm),
             Text(
-              '关闭后私钥不会保留，请立即复制或扫描。',
-              style: TextStyle(color: theme.colorScheme.error),
+              oneTime ? '请立即复制或扫描，并妥善保管客户端私钥。' : '此配置来自服务端主密钥加密存储，请仅在可信设备上导入。',
+              style: TextStyle(
+                color: oneTime
+                    ? theme.colorScheme.error
+                    : theme.colorScheme.onSurfaceVariant,
+              ),
             ),
           ],
         ),
@@ -569,7 +776,7 @@ class _GeneratedConfigDialog extends StatelessWidget {
         ),
         FilledButton(
           onPressed: () => Navigator.pop(context),
-          child: const Text('我已安全保存'),
+          child: Text(oneTime ? '我已安全保存' : '关闭'),
         ),
       ],
     );

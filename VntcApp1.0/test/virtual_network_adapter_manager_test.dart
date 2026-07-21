@@ -66,6 +66,21 @@ void main() {
     );
   });
 
+  test('Windows 托管网卡名会截断到安全长度', () {
+    final configuredName =
+        '${List.filled(120, 'a').join()}!@#${List.filled(120, 'b').join()}';
+
+    final managedName =
+        VirtualNetworkAdapterIdentity.managedWindowsAdapterName(configuredName);
+
+    expect(managedName, startsWith('VNT-App-TUN-'));
+    expect(managedName.length, 60);
+    expect(
+      managedName,
+      'VNT-App-TUN-${List.filled(48, 'a').join()}',
+    );
+  });
+
   test('删除配置时只按该配置的精确 PnP 设备标识删除 Windows 网卡', () async {
     final calls = <({
       String executable,

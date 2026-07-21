@@ -181,6 +181,67 @@ jobs:
           python scripts/verify_android_16kb_alignment.py --self-test
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
+  test-server:
+    name: 服务端格式检查与测试
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Rust
+        shell: bash
+        run: |
+          set -euo pipefail
+          rustup set auto-self-update disable
+          rustup toolchain install "${RUST_VERSION}"
+          rustup default "${RUST_VERSION}"
+          rustup component add rustfmt --toolchain "${RUST_VERSION}"
+          rustc -V
+
+      - name: 验证服务端源码
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo fmt \
+            --manifest-path "${SERVER_SOURCE_DIR}/Cargo.toml" \
+            --all \
+            -- \
+            --check
+          cargo test \
+            --manifest-path "${SERVER_SOURCE_DIR}/Cargo.toml" \
+            --locked
+
+  test-console:
+    name: 服务端增强控制台静态分析与测试
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置 Flutter
+        uses: subosito/flutter-action@6292cfc21e60a8e80b17aa5c8c44be81236112f8 # v2.12.0
+        with:
+          channel: stable
+          flutter-version: ${{ env.CONSOLE_FLUTTER_VERSION }}
+
+      - name: 验证增强控制台
+        working-directory: VntsConsole2.0
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          flutter pub get --enforce-lockfile
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter analyze --no-pub
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          flutter test --no-pub
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
   validate-release-signing:
     name: 校验发布签名策略
     needs: meta
@@ -914,6 +975,7 @@ jobs:
       - meta
       - validate-release-signing
       - test-client
+      - test-server
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -965,6 +1027,8 @@ jobs:
       - meta
       - validate-release-signing
       - test-client
+      - test-server
+      - test-console
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
@@ -1018,6 +1082,7 @@ jobs:
       - meta
       - validate-release-signing
       - test-client
+      - test-server
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

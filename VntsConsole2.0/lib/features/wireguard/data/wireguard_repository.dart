@@ -31,23 +31,27 @@ class WireGuardRepository {
     required String peerId,
     required String publicKey,
     required bool enabled,
+    required WireGuardPeerProfile profile,
   }) async {
     await _client.postObject('wireguard/peers', {
       'network_code': networkCode,
       'peer_id': peerId,
       'public_key': publicKey,
       'enabled': enabled,
+      ...profile.toJson(),
     });
   }
 
   Future<GeneratedWireGuardConfig> generatePeer({
     required String networkCode,
     required String peerId,
+    required WireGuardPeerProfile profile,
   }) async {
     final data = await _client.postObject('wireguard/peers/generated', {
       'network_code': networkCode,
       'peer_id': peerId,
       'enabled': true,
+      ...profile.toJson(),
     });
     try {
       return GeneratedWireGuardConfig.fromJson(
@@ -59,6 +63,37 @@ class WireGuardRepository {
         '一次性 WireGuard 配置响应无效',
       );
     }
+  }
+
+  Future<GeneratedWireGuardConfig> getPeerConfig({
+    required String networkCode,
+    required String peerId,
+  }) async {
+    final data = await _client.getObject(
+      'wireguard/peers/config?${_query({'network_code': networkCode, 'peer_id': peerId})}',
+    );
+    try {
+      return GeneratedWireGuardConfig.fromJson(
+        Map<String, Object?>.from(data as Map),
+      );
+    } on (TypeError, FormatException) {
+      throw const ApiException(
+        ApiErrorKind.invalidResponse,
+        'WireGuard 客户端配置响应无效',
+      );
+    }
+  }
+
+  Future<void> updateProfile({
+    required String networkCode,
+    required String peerId,
+    required WireGuardPeerProfile profile,
+  }) async {
+    await _client.putObject('wireguard/peers/profile', {
+      'network_code': networkCode,
+      'peer_id': peerId,
+      ...profile.toJson(),
+    });
   }
 
   Future<void> setEnabled({

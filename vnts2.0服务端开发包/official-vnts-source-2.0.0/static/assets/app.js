@@ -23,9 +23,15 @@ const appOptions = {
         const wireguardPeerIps = ref([]);
         const wireguardIpDrafts = reactive({});
         const showWireGuardPeerModal = ref(false);
-        const wireguardPeerForm = ref({ peer_id: '', public_key: '', enabled: true });
+        const emptyWireGuardPeerForm = () => ({
+            peer_id: '', public_key: '', enabled: true, dns_inherited: true,
+            dns_servers: '', persistent_keepalive: 25, routes: ''
+        });
+        const wireguardPeerForm = ref(emptyWireGuardPeerForm());
+        const wireguardEditingPeer = ref(null);
         const wireguardPeerMode = ref('generated');
         const generatedWireGuardPeer = ref(null);
+        const wireguardGeneratedPeerNew = ref(false);
         const wireguardPrivateKeyCopied = ref(false);
         const wireguardPrivateKeySaved = ref(false);
         const wireguardConfigCopied = ref(false);
@@ -33,11 +39,14 @@ const appOptions = {
         const wireguardQrCanvas = ref(null);
         const generatedWireGuardConfig = computed(() => {
             const generated = generatedWireGuardPeer.value;
+            if (generated?.client_config) return generated.client_config;
             if (!generated?.private_key || !generated.peer?.ip || !generated.server_public_key
                 || !generated.endpoint || !generated.allowed_ips) {
                 return '';
             }
-            return `[Interface]\nPrivateKey = ${generated.private_key}\nAddress = ${generated.peer.ip}/32\n\n[Peer]\nPublicKey = ${generated.server_public_key}\nAllowedIPs = ${generated.allowed_ips}\nEndpoint = ${generated.endpoint}\nPersistentKeepalive = 25\n`;
+            const dnsLine = generated.dns_servers?.length ? `DNS = ${generated.dns_servers.join(', ')}\n` : '';
+            const keepalive = generated.persistent_keepalive ?? 25;
+            return `[Interface]\nPrivateKey = ${generated.private_key}\nAddress = ${generated.peer.ip}/32\n${dnsLine}\n[Peer]\nPublicKey = ${generated.server_public_key}\nAllowedIPs = ${generated.allowed_ips}\nEndpoint = ${generated.endpoint}\nPersistentKeepalive = ${keepalive}\n`;
         });
         const generatedWireGuardConfigFilename = computed(() => {
             const peer = generatedWireGuardPeer.value?.peer;
@@ -255,6 +264,8 @@ const appOptions = {
             wireguardPeerIps.value = [];
             Object.keys(wireguardIpDrafts).forEach(key => delete wireguardIpDrafts[key]);
             generatedWireGuardPeer.value = null;
+            wireguardGeneratedPeerNew.value = false;
+            wireguardEditingPeer.value = null;
             wireguardPrivateKeyCopied.value = false;
             wireguardPrivateKeySaved.value = false;
             wireguardConfigCopied.value = false;
@@ -486,9 +497,11 @@ const appOptions = {
         };
 
         const openWireGuardPeerModal = () => {
-            wireguardPeerForm.value = { peer_id: '', public_key: '', enabled: true };
+            wireguardPeerForm.value = emptyWireGuardPeerForm();
+            wireguardEditingPeer.value = null;
             wireguardPeerMode.value = 'generated';
             generatedWireGuardPeer.value = null;
+            wireguardGeneratedPeerNew.value = false;
             wireguardPrivateKeyCopied.value = false;
             wireguardPrivateKeySaved.value = false;
             wireguardConfigCopied.value = false;
@@ -498,12 +511,66 @@ const appOptions = {
         };
 
         const closeWireGuardPeerModal = () => {
-            if (generatedWireGuardPeer.value) {
+            if (generatedWireGuardPeer.value && wireguardGeneratedPeerNew.value) {
                 modalErrorMsg.value = '请先确认已保存私钥，或选择“放弃并删除 Peer”。';
                 return;
             }
             showWireGuardPeerModal.value = false;
+            wireguardEditingPeer.value = null;
+            clearGeneratedWireGuardPeer();
             modalErrorMsg.value = '';
+        };
+
+        const parseWireGuardRoutes = (value) => value
+            .split(/\r?\n/)
+            .map(line => line.trim())
+            .filter(Boolean)
+            .map((line, index) => {
+                const parts = line.split(/\s*(?:->|,|\s+)\s*/).filter(Boolean);
+                if (parts.length !== 2) {
+                    throw new Error(`第 ${index + 1} 条路由格式错误，应为“局域网 CIDR -> VNT 客户端 IP”`);
+                }
+                return { lan_network: parts[0], vnt_cli_ip: parts[1] };
+            });
+
+        const wireguardProfilePayload = () => ({
+            dns_servers: wireguardPeerForm.value.dns_inherited
+                ? null
+                : wireguardPeerForm.value.dns_servers.split(/[\s,]+/).map(value => value.trim()).filter(Boolean),
+            persistent_keepalive: Number(wireguardPeerForm.value.persistent_keepalive),
+            routes: parseWireGuardRoutes(wireguardPeerForm.value.routes)
+        });
+
+        const openWireGuardProfileModal = (peer) => {
+            wireguardEditingPeer.value = peer;
+            wireguardPeerForm.value = {
+                peer_id: peer.peer_id,
+                public_key: peer.public_key,
+                enabled: peer.enabled,
+                dns_inherited: peer.dns_inherited,
+                dns_servers: peer.dns_servers?.join(', ') || '',
+                persistent_keepalive: peer.persistent_keepalive ?? 25,
+                routes: (peer.routes || []).map(route => `${route.lan_network} -> ${route.vnt_cli_ip}`).join('\n')
+            };
+            generatedWireGuardPeer.value = null;
+            wireguardGeneratedPeerNew.value = false;
+            modalErrorMsg.value = '';
+            showWireGuardPeerModal.value = true;
+        };
+
+        const openStoredWireGuardConfig = async (peer) => {
+            const endpoint = `/wireguard/peers/config?network_code=${encodeURIComponent(peer.network_code)}&peer_id=${encodeURIComponent(peer.peer_id)}`;
+            const generated = await request(endpoint);
+            if (!generated) return;
+            wireguardEditingPeer.value = null;
+            generatedWireGuardPeer.value = generated;
+            wireguardGeneratedPeerNew.value = false;
+            wireguardPrivateKeySaved.value = true;
+            wireguardConfigCopied.value = false;
+            wireguardConfigDownloaded.value = false;
+            modalErrorMsg.value = '';
+            showWireGuardPeerModal.value = true;
+            await renderGeneratedWireGuardQrCode();
         };
 
         const submitWireGuardPeer = async () => {
@@ -512,17 +579,46 @@ const appOptions = {
                 modalErrorMsg.value = '请输入设备名称。';
                 return;
             }
+            let profile;
+            try {
+                profile = wireguardProfilePayload();
+            } catch (error) {
+                modalErrorMsg.value = error.message;
+                return;
+            }
+            if (!Number.isInteger(profile.persistent_keepalive) || profile.persistent_keepalive < 0 || profile.persistent_keepalive > 65535) {
+                modalErrorMsg.value = 'PersistentKeepalive 必须是 0 到 65535 之间的整数。';
+                return;
+            }
+            if (wireguardEditingPeer.value) {
+                const result = await request('/wireguard/peers/profile', {
+                    method: 'PUT',
+                    body: JSON.stringify({
+                        network_code: wireguardEditingPeer.value.network_code,
+                        peer_id: wireguardEditingPeer.value.peer_id,
+                        ...profile
+                    })
+                });
+                if (result) {
+                    showWireGuardPeerModal.value = false;
+                    wireguardEditingPeer.value = null;
+                    await fetchWireGuardData();
+                }
+                return;
+            }
             if (wireguardPeerMode.value === 'generated') {
                 const generated = await request('/wireguard/peers/generated', {
                     method: 'POST',
                     body: JSON.stringify({
                         network_code: wireguardNetworkCode.value,
                         peer_id: peerId,
-                        enabled: wireguardPeerForm.value.enabled
+                        enabled: wireguardPeerForm.value.enabled,
+                        ...profile
                     })
                 });
                 if (generated) {
                     generatedWireGuardPeer.value = generated;
+                    wireguardGeneratedPeerNew.value = true;
                     wireguardPrivateKeyCopied.value = false;
                     wireguardPrivateKeySaved.value = false;
                     wireguardConfigCopied.value = false;
@@ -538,7 +634,8 @@ const appOptions = {
                     network_code: wireguardNetworkCode.value,
                     peer_id: peerId,
                     public_key: wireguardPeerForm.value.public_key.trim(),
-                    enabled: wireguardPeerForm.value.enabled
+                    enabled: wireguardPeerForm.value.enabled,
+                    ...profile
                 })
             });
             if (result) {
@@ -622,6 +719,7 @@ const appOptions = {
                 wireguardQrCanvas.value.height = 0;
             }
             generatedWireGuardPeer.value = null;
+            wireguardGeneratedPeerNew.value = false;
             wireguardPrivateKeyCopied.value = false;
             wireguardPrivateKeySaved.value = false;
             wireguardConfigCopied.value = false;
@@ -629,7 +727,7 @@ const appOptions = {
         };
 
         const finishGeneratedWireGuardPeer = async () => {
-            if (!generatedWireGuardPeer.value || !wireguardPrivateKeySaved.value) {
+            if (!generatedWireGuardPeer.value || (wireguardGeneratedPeerNew.value && !wireguardPrivateKeySaved.value)) {
                 modalErrorMsg.value = '请先确认已经下载配置、扫码导入或安全保存客户端私钥。';
                 return;
             }
@@ -640,6 +738,7 @@ const appOptions = {
         };
 
         const discardGeneratedWireGuardPeer = async () => {
+            if (!wireguardGeneratedPeerNew.value) return;
             const peer = generatedWireGuardPeer.value?.peer;
             if (!peer) return;
             if (!window.confirm(`确定放弃并删除 Peer “${peer.peer_id}”吗？刚生成的密钥将无法恢复。`)) {
@@ -697,6 +796,17 @@ const appOptions = {
             if (!seconds) return '-';
             return new Date(seconds * 1000).toLocaleString('zh-CN', { hour12: false });
         };
+
+        const wireguardStatusLabel = (status) => ({
+            online: '在线', offline: '离线', disabled: '已禁用', unassigned: '未分配 IP'
+        })[status] || '未知';
+
+        const wireguardStatusClass = (status) => ({
+            online: 'bg-green-100 text-green-800',
+            offline: 'bg-gray-200 text-gray-600',
+            disabled: 'bg-red-100 text-red-700',
+            unassigned: 'bg-amber-100 text-amber-800'
+        })[status] || 'bg-gray-100 text-gray-600';
 
         // 网络管理
         const openAddNetworkModal = () => {
@@ -1130,8 +1240,10 @@ const appOptions = {
             wireguardIpMap,
             showWireGuardPeerModal,
             wireguardPeerForm,
+            wireguardEditingPeer,
             wireguardPeerMode,
             generatedWireGuardPeer,
+            wireguardGeneratedPeerNew,
             wireguardPrivateKeyCopied,
             wireguardPrivateKeySaved,
             wireguardConfigCopied,
@@ -1141,6 +1253,8 @@ const appOptions = {
             generatedWireGuardConfigFilename,
             fetchWireGuardData,
             openWireGuardPeerModal,
+            openWireGuardProfileModal,
+            openStoredWireGuardConfig,
             closeWireGuardPeerModal,
             submitWireGuardPeer,
             copyGeneratedWireGuardPrivateKey,
@@ -1152,7 +1266,9 @@ const appOptions = {
             reserveWireGuardPeerIp,
             releaseWireGuardPeerIp,
             confirmDeleteWireGuardPeer,
-            formatTimestamp
+            formatTimestamp,
+            wireguardStatusLabel,
+            wireguardStatusClass
         };
     }
 };
@@ -1470,110 +1586,141 @@ const _hoisted_189 = { class: "flex items-center gap-2" }
 const _hoisted_190 = ["onUpdate:modelValue"]
 const _hoisted_191 = ["onClick", "disabled"]
 const _hoisted_192 = ["onClick", "disabled"]
-const _hoisted_193 = { class: "px-4 py-4 whitespace-nowrap text-sm text-gray-500" }
-const _hoisted_194 = { class: "px-4 py-4 whitespace-nowrap text-right text-sm" }
-const _hoisted_195 = ["onClick", "disabled"]
-const _hoisted_196 = ["onClick", "disabled"]
-const _hoisted_197 = { key: 0 }
-const _hoisted_198 = ["onClick"]
-const _hoisted_199 = { class: "bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" }
-const _hoisted_200 = { class: "text-xl font-bold mb-4" }
-const _hoisted_201 = ["onSubmit"]
-const _hoisted_202 = { class: "mb-4" }
-const _hoisted_203 = ["onUpdate:modelValue", "disabled"]
-const _hoisted_204 = { class: "mb-4" }
-const _hoisted_205 = ["onUpdate:modelValue"]
-const _hoisted_206 = { class: "mb-4" }
-const _hoisted_207 = ["onUpdate:modelValue"]
-const _hoisted_208 = { class: "mb-6" }
-const _hoisted_209 = ["onUpdate:modelValue"]
-const _hoisted_210 = { class: "flex justify-end space-x-3" }
-const _hoisted_211 = ["onClick"]
-const _hoisted_212 = ["disabled"]
-const _hoisted_213 = {
+const _hoisted_193 = { class: "px-4 py-4 text-xs text-gray-600" }
+const _hoisted_194 = {
   key: 0,
-  class: "text-red-500 text-sm mt-4"
+  class: "text-gray-400"
 }
-const _hoisted_214 = ["onClick"]
-const _hoisted_215 = { class: "bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6" }
-const _hoisted_216 = { class: "text-gray-600 mb-6" }
+const _hoisted_195 = { class: "mt-1" }
+const _hoisted_196 = { class: "mt-1" }
+const _hoisted_197 = { class: "mt-1" }
+const _hoisted_198 = { class: "px-4 py-4 whitespace-nowrap text-sm text-gray-500" }
+const _hoisted_199 = { class: "px-4 py-4 whitespace-nowrap text-right text-sm" }
+const _hoisted_200 = ["onClick", "disabled"]
+const _hoisted_201 = ["onClick", "disabled"]
+const _hoisted_202 = ["onClick", "disabled"]
+const _hoisted_203 = ["onClick", "disabled"]
+const _hoisted_204 = { key: 0 }
+const _hoisted_205 = ["onClick"]
+const _hoisted_206 = { class: "bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" }
+const _hoisted_207 = { class: "text-xl font-bold mb-4" }
+const _hoisted_208 = ["onSubmit"]
+const _hoisted_209 = { class: "mb-4" }
+const _hoisted_210 = ["onUpdate:modelValue", "disabled"]
+const _hoisted_211 = { class: "mb-4" }
+const _hoisted_212 = ["onUpdate:modelValue"]
+const _hoisted_213 = { class: "mb-4" }
+const _hoisted_214 = ["onUpdate:modelValue"]
+const _hoisted_215 = { class: "mb-6" }
+const _hoisted_216 = ["onUpdate:modelValue"]
 const _hoisted_217 = { class: "flex justify-end space-x-3" }
 const _hoisted_218 = ["onClick"]
-const _hoisted_219 = ["onClick", "disabled"]
+const _hoisted_219 = ["disabled"]
 const _hoisted_220 = {
   key: 0,
   class: "text-red-500 text-sm mt-4"
 }
 const _hoisted_221 = ["onClick"]
-const _hoisted_222 = { class: "bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" }
-const _hoisted_223 = ["onSubmit"]
-const _hoisted_224 = { class: "mb-4" }
-const _hoisted_225 = ["onUpdate:modelValue"]
-const _hoisted_226 = { class: "flex justify-end space-x-3" }
-const _hoisted_227 = ["onClick"]
-const _hoisted_228 = ["disabled"]
-const _hoisted_229 = {
+const _hoisted_222 = { class: "bg-white rounded-lg shadow-xl w-full max-w-sm mx-4 p-6" }
+const _hoisted_223 = { class: "text-gray-600 mb-6" }
+const _hoisted_224 = { class: "flex justify-end space-x-3" }
+const _hoisted_225 = ["onClick"]
+const _hoisted_226 = ["onClick", "disabled"]
+const _hoisted_227 = {
   key: 0,
   class: "text-red-500 text-sm mt-4"
 }
-const _hoisted_230 = ["onClick"]
-const _hoisted_231 = { class: "bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 p-6 max-h-screen overflow-y-auto" }
-const _hoisted_232 = { class: "text-xl font-bold mb-4" }
-const _hoisted_233 = { key: 0 }
-const _hoisted_234 = { class: "grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 text-sm" }
-const _hoisted_235 = { class: "rounded bg-gray-50 p-3" }
-const _hoisted_236 = { class: "font-medium break-all" }
-const _hoisted_237 = { class: "rounded bg-gray-50 p-3" }
-const _hoisted_238 = { class: "font-medium break-all" }
-const _hoisted_239 = { class: "rounded bg-gray-50 p-3" }
-const _hoisted_240 = { class: "font-medium" }
-const _hoisted_241 = { class: "mb-4" }
-const _hoisted_242 = ["value"]
-const _hoisted_243 = { class: "flex items-center justify-between mt-2 gap-3" }
-const _hoisted_244 = ["onClick"]
-const _hoisted_245 = { class: "grid grid-cols-1 md:grid-cols-3 gap-4 mb-4" }
-const _hoisted_246 = { class: "md:col-span-2" }
-const _hoisted_247 = { class: "flex items-center justify-between gap-3 mb-2" }
-const _hoisted_248 = { class: "text-xs text-gray-500 break-all" }
-const _hoisted_249 = ["value"]
-const _hoisted_250 = { class: "flex flex-wrap gap-2 mt-2" }
-const _hoisted_251 = ["onClick"]
+const _hoisted_228 = ["onClick"]
+const _hoisted_229 = { class: "bg-white rounded-lg shadow-xl w-full max-w-md mx-4 p-6" }
+const _hoisted_230 = ["onSubmit"]
+const _hoisted_231 = { class: "mb-4" }
+const _hoisted_232 = ["onUpdate:modelValue"]
+const _hoisted_233 = { class: "flex justify-end space-x-3" }
+const _hoisted_234 = ["onClick"]
+const _hoisted_235 = ["disabled"]
+const _hoisted_236 = {
+  key: 0,
+  class: "text-red-500 text-sm mt-4"
+}
+const _hoisted_237 = ["onClick"]
+const _hoisted_238 = { class: "bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 p-6 max-h-screen overflow-y-auto" }
+const _hoisted_239 = { class: "text-xl font-bold mb-4" }
+const _hoisted_240 = { key: 0 }
+const _hoisted_241 = {
+  key: 0,
+  class: "rounded border border-amber-300 bg-amber-50 p-4 mb-4 text-amber-900"
+}
+const _hoisted_242 = { class: "grid grid-cols-1 sm:grid-cols-3 gap-3 mb-4 text-sm" }
+const _hoisted_243 = { class: "rounded bg-gray-50 p-3" }
+const _hoisted_244 = { class: "font-medium break-all" }
+const _hoisted_245 = { class: "rounded bg-gray-50 p-3" }
+const _hoisted_246 = { class: "font-medium break-all" }
+const _hoisted_247 = { class: "rounded bg-gray-50 p-3" }
+const _hoisted_248 = { class: "font-medium" }
+const _hoisted_249 = { class: "mb-4" }
+const _hoisted_250 = ["value"]
+const _hoisted_251 = { class: "flex items-center justify-between mt-2 gap-3" }
 const _hoisted_252 = ["onClick"]
-const _hoisted_253 = { class: "flex flex-col items-center rounded border border-gray-200 bg-white p-3" }
-const _hoisted_254 = {
+const _hoisted_253 = { class: "grid grid-cols-1 md:grid-cols-3 gap-4 mb-4" }
+const _hoisted_254 = { class: "md:col-span-2" }
+const _hoisted_255 = { class: "flex items-center justify-between gap-3 mb-2" }
+const _hoisted_256 = { class: "text-xs text-gray-500 break-all" }
+const _hoisted_257 = ["value"]
+const _hoisted_258 = { class: "flex flex-wrap gap-2 mt-2" }
+const _hoisted_259 = ["onClick"]
+const _hoisted_260 = ["onClick"]
+const _hoisted_261 = { class: "flex flex-col items-center rounded border border-gray-200 bg-white p-3" }
+const _hoisted_262 = {
   ref: "wireguardQrCanvas",
   class: "max-w-full"
 }
-const _hoisted_255 = { class: "mb-4 rounded border border-gray-200 p-3 text-sm" }
-const _hoisted_256 = { class: "mt-3 space-y-3" }
-const _hoisted_257 = { class: "block break-all rounded bg-gray-50 p-2" }
-const _hoisted_258 = { class: "block break-all rounded bg-gray-50 p-2" }
-const _hoisted_259 = { class: "block break-all rounded bg-gray-50 p-2" }
-const _hoisted_260 = { class: "flex items-start rounded border border-gray-200 p-3 mb-4 text-sm text-gray-700" }
-const _hoisted_261 = ["onUpdate:modelValue"]
-const _hoisted_262 = { class: "flex flex-col-reverse sm:flex-row sm:justify-between gap-3" }
-const _hoisted_263 = ["onClick", "disabled"]
-const _hoisted_264 = ["onClick", "disabled"]
-const _hoisted_265 = ["onSubmit"]
-const _hoisted_266 = { class: "mb-4" }
-const _hoisted_267 = ["value"]
-const _hoisted_268 = { class: "mb-4" }
+const _hoisted_263 = { class: "mb-4 rounded border border-gray-200 p-3 text-sm" }
+const _hoisted_264 = { class: "mt-3 space-y-3" }
+const _hoisted_265 = { class: "block break-all rounded bg-gray-50 p-2" }
+const _hoisted_266 = { class: "block break-all rounded bg-gray-50 p-2" }
+const _hoisted_267 = { class: "block break-all rounded bg-gray-50 p-2" }
+const _hoisted_268 = {
+  key: 1,
+  class: "flex items-start rounded border border-gray-200 p-3 mb-4 text-sm text-gray-700"
+}
 const _hoisted_269 = ["onUpdate:modelValue"]
-const _hoisted_270 = { class: "mb-4" }
-const _hoisted_271 = { class: "grid grid-cols-1 sm:grid-cols-2 gap-3" }
-const _hoisted_272 = ["onUpdate:modelValue"]
-const _hoisted_273 = ["onUpdate:modelValue"]
-const _hoisted_274 = {
+const _hoisted_270 = { class: "flex flex-col-reverse sm:flex-row sm:justify-between gap-3" }
+const _hoisted_271 = ["onClick", "disabled"]
+const _hoisted_272 = ["onClick", "disabled"]
+const _hoisted_273 = ["onSubmit"]
+const _hoisted_274 = { class: "mb-4" }
+const _hoisted_275 = ["value"]
+const _hoisted_276 = { class: "mb-4" }
+const _hoisted_277 = ["onUpdate:modelValue", "disabled"]
+const _hoisted_278 = {
   key: 0,
   class: "mb-4"
 }
-const _hoisted_275 = ["onUpdate:modelValue"]
-const _hoisted_276 = { class: "flex items-center mb-6 text-sm text-gray-700" }
-const _hoisted_277 = ["onUpdate:modelValue"]
-const _hoisted_278 = { class: "flex justify-end space-x-3" }
-const _hoisted_279 = ["onClick"]
-const _hoisted_280 = ["disabled"]
-const _hoisted_281 = {
+const _hoisted_279 = { class: "grid grid-cols-1 sm:grid-cols-2 gap-3" }
+const _hoisted_280 = ["onUpdate:modelValue"]
+const _hoisted_281 = ["onUpdate:modelValue"]
+const _hoisted_282 = {
+  key: 1,
+  class: "mb-4"
+}
+const _hoisted_283 = ["onUpdate:modelValue"]
+const _hoisted_284 = { class: "mb-4 rounded border border-gray-200 p-3" }
+const _hoisted_285 = { class: "flex items-center text-sm text-gray-700" }
+const _hoisted_286 = ["onUpdate:modelValue"]
+const _hoisted_287 = ["onUpdate:modelValue"]
+const _hoisted_288 = { class: "mb-4" }
+const _hoisted_289 = ["onUpdate:modelValue"]
+const _hoisted_290 = { class: "mb-4" }
+const _hoisted_291 = ["onUpdate:modelValue"]
+const _hoisted_292 = {
+  key: 2,
+  class: "flex items-center mb-6 text-sm text-gray-700"
+}
+const _hoisted_293 = ["onUpdate:modelValue"]
+const _hoisted_294 = { class: "flex justify-end space-x-3" }
+const _hoisted_295 = ["onClick"]
+const _hoisted_296 = ["disabled"]
+const _hoisted_297 = {
   key: 2,
   class: "text-red-500 text-sm mt-4"
 }
@@ -2214,7 +2361,7 @@ return function render(_ctx, _cache) {
                             _createElementVNode("div", _hoisted_170, [
                               _cache[67] || (_cache[67] = _createElementVNode("div", null, [
                                 _createElementVNode("h2", { class: "text-2xl font-bold text-gray-800" }, "WireGuard 管理"),
-                                _createElementVNode("p", { class: "text-sm text-gray-500 mt-1" }, "管理网络级 peer 身份、启用状态与保留地址")
+                                _createElementVNode("p", { class: "text-sm text-gray-500 mt-1" }, "管理网络级 Peer 身份、在线状态、DNS 与局域网路由")
                               ], -1 /* CACHED */)),
                               _createElementVNode("div", _hoisted_171, [
                                 _createElementVNode("label", _hoisted_172, [
@@ -2263,12 +2410,13 @@ return function render(_ctx, _cache) {
                                       _createElementVNode("span", _hoisted_181, _toDisplayString(wireguardPeers.length) + " 个", 1 /* TEXT */)
                                     ]),
                                     _createElementVNode("table", _hoisted_182, [
-                                      _cache[71] || (_cache[71] = _createElementVNode("thead", { class: "bg-gray-50" }, [
+                                      _cache[75] || (_cache[75] = _createElementVNode("thead", { class: "bg-gray-50" }, [
                                         _createElementVNode("tr", null, [
                                           _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" }, "Peer ID"),
                                           _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" }, "公钥"),
                                           _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" }, "状态"),
                                           _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-72" }, "保留 IP"),
+                                          _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-72" }, "DNS / 路由"),
                                           _createElementVNode("th", { class: "px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider" }, "更新时间"),
                                           _createElementVNode("th", { class: "px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider" }, "操作")
                                         ])
@@ -2288,8 +2436,8 @@ return function render(_ctx, _cache) {
                                             ]),
                                             _createElementVNode("td", _hoisted_187, [
                                               _createElementVNode("span", {
-                                                class: _normalizeClass([peer.enabled ? 'bg-green-100 text-green-800' : 'bg-gray-200 text-gray-600', "px-2 py-1 text-xs font-semibold rounded-full"])
-                                              }, _toDisplayString(peer.enabled ? '已启用' : '已禁用'), 3 /* TEXT, CLASS */)
+                                                class: _normalizeClass([wireguardStatusClass(peer.status), "px-2 py-1 text-xs font-semibold rounded-full"])
+                                              }, _toDisplayString(wireguardStatusLabel(peer.status)), 3 /* TEXT, CLASS */)
                                             ]),
                                             _createElementVNode("td", _hoisted_188, [
                                               _createElementVNode("div", _hoisted_189, [
@@ -2316,27 +2464,61 @@ return function render(_ctx, _cache) {
                                                   : _createCommentVNode("v-if", true)
                                               ])
                                             ]),
-                                            _createElementVNode("td", _hoisted_193, _toDisplayString(formatTimestamp(peer.updated_at)), 1 /* TEXT */),
-                                            _createElementVNode("td", _hoisted_194, [
+                                            _createElementVNode("td", _hoisted_193, [
+                                              _createElementVNode("p", null, [
+                                                _cache[70] || (_cache[70] = _createElementVNode("span", { class: "text-gray-400" }, "DNS：", -1 /* CACHED */)),
+                                                _createTextVNode(_toDisplayString(peer.dns_servers?.join(', ') || '未配置'), 1 /* TEXT */),
+                                                (peer.dns_inherited)
+                                                  ? (_openBlock(), _createElementBlock("span", _hoisted_194, "（继承）"))
+                                                  : _createCommentVNode("v-if", true)
+                                              ]),
+                                              _createElementVNode("p", _hoisted_195, [
+                                                _cache[71] || (_cache[71] = _createElementVNode("span", { class: "text-gray-400" }, "Keepalive：", -1 /* CACHED */)),
+                                                _createTextVNode(_toDisplayString(peer.persistent_keepalive) + " 秒", 1 /* TEXT */)
+                                              ]),
+                                              _createElementVNode("p", _hoisted_196, [
+                                                _cache[72] || (_cache[72] = _createElementVNode("span", { class: "text-gray-400" }, "路由：", -1 /* CACHED */)),
+                                                _createTextVNode(_toDisplayString(peer.routes?.length || 0) + " 条", 1 /* TEXT */)
+                                              ]),
+                                              _createElementVNode("p", _hoisted_197, [
+                                                _cache[73] || (_cache[73] = _createElementVNode("span", { class: "text-gray-400" }, "客户端配置：", -1 /* CACHED */)),
+                                                _createTextVNode(_toDisplayString(peer.config_available ? '可下载' : '仅公钥'), 1 /* TEXT */)
+                                              ])
+                                            ]),
+                                            _createElementVNode("td", _hoisted_198, _toDisplayString(formatTimestamp(peer.updated_at)), 1 /* TEXT */),
+                                            _createElementVNode("td", _hoisted_199, [
+                                              _createElementVNode("button", {
+                                                onClick: $event => (openWireGuardProfileModal(peer)),
+                                                disabled: loading,
+                                                class: "mr-3 text-indigo-600 hover:text-indigo-800 disabled:text-gray-300"
+                                              }, "配置", 8 /* PROPS */, _hoisted_200),
+                                              (peer.config_available)
+                                                ? (_openBlock(), _createElementBlock("button", {
+                                                    key: 0,
+                                                    onClick: $event => (openStoredWireGuardConfig(peer)),
+                                                    disabled: loading,
+                                                    class: "mr-3 text-green-600 hover:text-green-800 disabled:text-gray-300"
+                                                  }, "下载", 8 /* PROPS */, _hoisted_201))
+                                                : _createCommentVNode("v-if", true),
                                               _createElementVNode("button", {
                                                 onClick: $event => (setWireGuardPeerEnabled(peer, !peer.enabled)),
                                                 disabled: loading,
                                                 class: "mr-3 text-blue-600 hover:text-blue-800 disabled:text-gray-300"
-                                              }, _toDisplayString(peer.enabled ? '禁用' : '启用'), 9 /* TEXT, PROPS */, _hoisted_195),
+                                              }, _toDisplayString(peer.enabled ? '禁用' : '启用'), 9 /* TEXT, PROPS */, _hoisted_202),
                                               _createElementVNode("button", {
                                                 onClick: $event => (confirmDeleteWireGuardPeer(peer)),
                                                 disabled: loading,
                                                 class: "text-red-600 hover:text-red-800 disabled:text-gray-300"
-                                              }, "删除", 8 /* PROPS */, _hoisted_196)
+                                              }, "删除", 8 /* PROPS */, _hoisted_203)
                                             ])
                                           ]))
                                         }), 128 /* KEYED_FRAGMENT */)),
                                         (wireguardPeers.length === 0)
-                                          ? (_openBlock(), _createElementBlock("tr", _hoisted_197, _cache[70] || (_cache[70] = [
+                                          ? (_openBlock(), _createElementBlock("tr", _hoisted_204, _cache[74] || (_cache[74] = [
                                               _createElementVNode("td", {
-                                                colspan: "6",
+                                                colspan: "7",
                                                 class: "px-6 py-10 text-center text-gray-500"
-                                              }, "当前网络暂无 WireGuard peer", -1 /* CACHED */)
+                                              }, "当前网络暂无 WireGuard Peer", -1 /* CACHED */)
                                             ])))
                                           : _createCommentVNode("v-if", true)
                                       ])
@@ -2355,13 +2537,13 @@ return function render(_ctx, _cache) {
             class: "modal-mask",
             onClick: _withModifiers(closeNetworkModal, ["self"])
           }, [
-            _createElementVNode("div", _hoisted_199, [
-              _createElementVNode("h3", _hoisted_200, _toDisplayString(isEditMode ? '编辑网络' : '新增网络'), 1 /* TEXT */),
+            _createElementVNode("div", _hoisted_206, [
+              _createElementVNode("h3", _hoisted_207, _toDisplayString(isEditMode ? '编辑网络' : '新增网络'), 1 /* TEXT */),
               _createElementVNode("form", {
                 onSubmit: _withModifiers(submitNetworkForm, ["prevent"])
               }, [
-                _createElementVNode("div", _hoisted_202, [
-                  _cache[72] || (_cache[72] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网络编号", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_209, [
+                  _cache[76] || (_cache[76] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网络编号", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": $event => ((networkForm.network_code) = $event),
                     type: "text",
@@ -2369,24 +2551,24 @@ return function render(_ctx, _cache) {
                     class: _normalizeClass([{'bg-gray-100': isEditMode}, "shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500"]),
                     placeholder: "如: office, home",
                     required: ""
-                  }, null, 10 /* CLASS, PROPS */, _hoisted_203), [
+                  }, null, 10 /* CLASS, PROPS */, _hoisted_210), [
                     [_vModelText, networkForm.network_code]
                   ])
                 ]),
-                _createElementVNode("div", _hoisted_204, [
-                  _cache[73] || (_cache[73] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网关地址", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_211, [
+                  _cache[77] || (_cache[77] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网关地址", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": $event => ((networkForm.gateway) = $event),
                     type: "text",
                     class: "shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500",
                     placeholder: "如: 10.26.0.1",
                     required: ""
-                  }, null, 8 /* PROPS */, _hoisted_205), [
+                  }, null, 8 /* PROPS */, _hoisted_212), [
                     [_vModelText, networkForm.gateway]
                   ])
                 ]),
-                _createElementVNode("div", _hoisted_206, [
-                  _cache[74] || (_cache[74] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "掩码长度", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_213, [
+                  _cache[78] || (_cache[78] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "掩码长度", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": $event => ((networkForm.netmask) = $event),
                     type: "number",
@@ -2395,7 +2577,7 @@ return function render(_ctx, _cache) {
                     class: "shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500",
                     placeholder: "如: 24",
                     required: ""
-                  }, null, 8 /* PROPS */, _hoisted_207), [
+                  }, null, 8 /* PROPS */, _hoisted_214), [
                     [
                       _vModelText,
                       networkForm.netmask,
@@ -2404,15 +2586,15 @@ return function render(_ctx, _cache) {
                     ]
                   ])
                 ]),
-                _createElementVNode("div", _hoisted_208, [
-                  _cache[75] || (_cache[75] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "IP租期（秒）", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_215, [
+                  _cache[79] || (_cache[79] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "IP租期（秒）", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": $event => ((networkForm.lease_duration) = $event),
                     type: "number",
                     min: "60",
                     class: "shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500",
                     placeholder: "如: 86400 (24小时)"
-                  }, null, 8 /* PROPS */, _hoisted_209), [
+                  }, null, 8 /* PROPS */, _hoisted_216), [
                     [
                       _vModelText,
                       networkForm.lease_duration,
@@ -2420,26 +2602,26 @@ return function render(_ctx, _cache) {
                       { number: true }
                     ]
                   ]),
-                  _cache[76] || (_cache[76] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "新增时不填则使用默认值", -1 /* CACHED */))
+                  _cache[80] || (_cache[80] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "新增时不填则使用默认值", -1 /* CACHED */))
                 ]),
-                _createElementVNode("div", _hoisted_210, [
+                _createElementVNode("div", _hoisted_217, [
                   _createElementVNode("button", {
                     type: "button",
                     onClick: closeNetworkModal,
                     class: "px-4 py-2 text-gray-600 hover:text-gray-800"
-                  }, "取消", 8 /* PROPS */, _hoisted_211),
+                  }, "取消", 8 /* PROPS */, _hoisted_218),
                   _createElementVNode("button", {
                     type: "submit",
                     disabled: loading,
                     class: "bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium transition"
-                  }, _toDisplayString(loading ? '提交中...' : '确定'), 9 /* TEXT, PROPS */, _hoisted_212)
+                  }, _toDisplayString(loading ? '提交中...' : '确定'), 9 /* TEXT, PROPS */, _hoisted_219)
                 ])
-              ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_201),
+              ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_208),
               modalErrorMsg
-                ? (_openBlock(), _createElementBlock("p", _hoisted_213, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
+                ? (_openBlock(), _createElementBlock("p", _hoisted_220, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
                 : _createCommentVNode("v-if", true)
             ])
-          ], 8 /* PROPS */, _hoisted_198))
+          ], 8 /* PROPS */, _hoisted_205))
         : _createCommentVNode("v-if", true),
       _createCommentVNode(" 确认删除模态框 "),
       showConfirmModal
@@ -2448,28 +2630,28 @@ return function render(_ctx, _cache) {
             class: "modal-mask",
             onClick: _withModifiers(closeConfirmModal, ["self"])
           }, [
-            _createElementVNode("div", _hoisted_215, [
-              _cache[77] || (_cache[77] = _createElementVNode("h3", { class: "text-xl font-bold mb-4 text-red-600" }, [
+            _createElementVNode("div", _hoisted_222, [
+              _cache[81] || (_cache[81] = _createElementVNode("h3", { class: "text-xl font-bold mb-4 text-red-600" }, [
                 _createElementVNode("i", { class: "fa-solid fa-triangle-exclamation mr-2" }),
                 _createTextVNode("确认删除 ")
               ], -1 /* CACHED */)),
-              _createElementVNode("p", _hoisted_216, _toDisplayString(confirmMessage), 1 /* TEXT */),
-              _createElementVNode("div", _hoisted_217, [
+              _createElementVNode("p", _hoisted_223, _toDisplayString(confirmMessage), 1 /* TEXT */),
+              _createElementVNode("div", _hoisted_224, [
                 _createElementVNode("button", {
                   onClick: closeConfirmModal,
                   class: "px-4 py-2 text-gray-600 hover:text-gray-800"
-                }, "取消", 8 /* PROPS */, _hoisted_218),
+                }, "取消", 8 /* PROPS */, _hoisted_225),
                 _createElementVNode("button", {
                   onClick: executeDelete,
                   disabled: loading,
                   class: "bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded font-medium transition"
-                }, _toDisplayString(loading ? '删除中...' : '确认删除'), 9 /* TEXT, PROPS */, _hoisted_219)
+                }, _toDisplayString(loading ? '删除中...' : '确认删除'), 9 /* TEXT, PROPS */, _hoisted_226)
               ]),
               modalErrorMsg
-                ? (_openBlock(), _createElementBlock("p", _hoisted_220, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
+                ? (_openBlock(), _createElementBlock("p", _hoisted_227, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
                 : _createCommentVNode("v-if", true)
             ])
-          ], 8 /* PROPS */, _hoisted_214))
+          ], 8 /* PROPS */, _hoisted_221))
         : _createCommentVNode("v-if", true),
       _createCommentVNode(" 添加服务器模态框 "),
       showAddServerModal
@@ -2478,42 +2660,42 @@ return function render(_ctx, _cache) {
             class: "modal-mask",
             onClick: _withModifiers(closeAddServerModal, ["self"])
           }, [
-            _createElementVNode("div", _hoisted_222, [
-              _cache[80] || (_cache[80] = _createElementVNode("h3", { class: "text-xl font-bold mb-4" }, "添加服务器", -1 /* CACHED */)),
+            _createElementVNode("div", _hoisted_229, [
+              _cache[84] || (_cache[84] = _createElementVNode("h3", { class: "text-xl font-bold mb-4" }, "添加服务器", -1 /* CACHED */)),
               _createElementVNode("form", {
                 onSubmit: _withModifiers(submitAddServer, ["prevent"])
               }, [
-                _createElementVNode("div", _hoisted_224, [
-                  _cache[78] || (_cache[78] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "服务器地址", -1 /* CACHED */)),
+                _createElementVNode("div", _hoisted_231, [
+                  _cache[82] || (_cache[82] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "服务器地址", -1 /* CACHED */)),
                   _withDirectives(_createElementVNode("input", {
                     "onUpdate:modelValue": $event => ((serverForm.server_addr) = $event),
                     type: "text",
                     class: "shadow appearance-none border rounded w-full py-2 px-3 text-gray-700 leading-tight focus:outline-none focus:ring-2 focus:ring-blue-500",
                     placeholder: "如: 192.168.1.100:8080",
                     required: ""
-                  }, null, 8 /* PROPS */, _hoisted_225), [
+                  }, null, 8 /* PROPS */, _hoisted_232), [
                     [_vModelText, serverForm.server_addr]
                   ]),
-                  _cache[79] || (_cache[79] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "格式: IP:端口 或 域名:端口", -1 /* CACHED */))
+                  _cache[83] || (_cache[83] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "格式: IP:端口 或 域名:端口", -1 /* CACHED */))
                 ]),
-                _createElementVNode("div", _hoisted_226, [
+                _createElementVNode("div", _hoisted_233, [
                   _createElementVNode("button", {
                     type: "button",
                     onClick: closeAddServerModal,
                     class: "px-4 py-2 text-gray-600 hover:text-gray-800"
-                  }, "取消", 8 /* PROPS */, _hoisted_227),
+                  }, "取消", 8 /* PROPS */, _hoisted_234),
                   _createElementVNode("button", {
                     type: "submit",
                     disabled: loading,
                     class: "bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded font-medium transition"
-                  }, _toDisplayString(loading ? '添加中...' : '确定'), 9 /* TEXT, PROPS */, _hoisted_228)
+                  }, _toDisplayString(loading ? '添加中...' : '确定'), 9 /* TEXT, PROPS */, _hoisted_235)
                 ])
-              ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_223),
+              ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_230),
               modalErrorMsg
-                ? (_openBlock(), _createElementBlock("p", _hoisted_229, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
+                ? (_openBlock(), _createElementBlock("p", _hoisted_236, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
                 : _createCommentVNode("v-if", true)
             ])
-          ], 8 /* PROPS */, _hoisted_221))
+          ], 8 /* PROPS */, _hoisted_228))
         : _createCommentVNode("v-if", true),
       _createCommentVNode(" 新增 WireGuard Peer 模态框 "),
       showWireGuardPeerModal
@@ -2522,41 +2704,43 @@ return function render(_ctx, _cache) {
             class: "modal-mask",
             onClick: _withModifiers(closeWireGuardPeerModal, ["self"])
           }, [
-            _createElementVNode("div", _hoisted_231, [
-              _createElementVNode("h3", _hoisted_232, _toDisplayString(generatedWireGuardPeer ? '保存 WireGuard 客户端密钥' : '新增 WireGuard Peer'), 1 /* TEXT */),
+            _createElementVNode("div", _hoisted_238, [
+              _createElementVNode("h3", _hoisted_239, _toDisplayString(generatedWireGuardPeer ? (wireguardGeneratedPeerNew ? '保存 WireGuard 客户端密钥' : '下载 WireGuard 客户端配置') : (wireguardEditingPeer ? '编辑 WireGuard Peer 配置' : '新增 WireGuard Peer')), 1 /* TEXT */),
               generatedWireGuardPeer
-                ? (_openBlock(), _createElementBlock("div", _hoisted_233, [
-                    _cache[96] || (_cache[96] = _createElementVNode("div", { class: "rounded border border-amber-300 bg-amber-50 p-4 mb-4 text-amber-900" }, [
-                      _createElementVNode("p", { class: "font-bold" }, [
-                        _createElementVNode("i", { class: "fa-solid fa-triangle-exclamation mr-2" }),
-                        _createTextVNode("客户端配置只显示这一次")
+                ? (_openBlock(), _createElementBlock("div", _hoisted_240, [
+                    wireguardGeneratedPeerNew
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_241, _cache[85] || (_cache[85] = [
+                          _createElementVNode("p", { class: "font-bold" }, [
+                            _createElementVNode("i", { class: "fa-solid fa-triangle-exclamation mr-2" }),
+                            _createTextVNode("客户端配置只显示这一次")
+                          ], -1 /* CACHED */),
+                          _createElementVNode("p", { class: "text-sm mt-1" }, "请立即下载配置或扫码导入。关闭或完成后，服务器无法恢复其中的私钥。", -1 /* CACHED */)
+                        ])))
+                      : _createCommentVNode("v-if", true),
+                    _createElementVNode("dl", _hoisted_242, [
+                      _createElementVNode("div", _hoisted_243, [
+                        _cache[86] || (_cache[86] = _createElementVNode("dt", { class: "text-gray-500" }, "网络", -1 /* CACHED */)),
+                        _createElementVNode("dd", _hoisted_244, _toDisplayString(generatedWireGuardPeer.peer.network_code), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("p", { class: "text-sm mt-1" }, "请立即下载配置或扫码导入。关闭或完成后，服务器无法恢复其中的私钥。")
-                    ], -1 /* CACHED */)),
-                    _createElementVNode("dl", _hoisted_234, [
-                      _createElementVNode("div", _hoisted_235, [
-                        _cache[81] || (_cache[81] = _createElementVNode("dt", { class: "text-gray-500" }, "网络", -1 /* CACHED */)),
-                        _createElementVNode("dd", _hoisted_236, _toDisplayString(generatedWireGuardPeer.peer.network_code), 1 /* TEXT */)
+                      _createElementVNode("div", _hoisted_245, [
+                        _cache[87] || (_cache[87] = _createElementVNode("dt", { class: "text-gray-500" }, "设备名称", -1 /* CACHED */)),
+                        _createElementVNode("dd", _hoisted_246, _toDisplayString(generatedWireGuardPeer.peer.peer_id), 1 /* TEXT */)
                       ]),
-                      _createElementVNode("div", _hoisted_237, [
-                        _cache[82] || (_cache[82] = _createElementVNode("dt", { class: "text-gray-500" }, "设备名称", -1 /* CACHED */)),
-                        _createElementVNode("dd", _hoisted_238, _toDisplayString(generatedWireGuardPeer.peer.peer_id), 1 /* TEXT */)
-                      ]),
-                      _createElementVNode("div", _hoisted_239, [
-                        _cache[83] || (_cache[83] = _createElementVNode("dt", { class: "text-gray-500" }, "虚拟 IP", -1 /* CACHED */)),
-                        _createElementVNode("dd", _hoisted_240, _toDisplayString(generatedWireGuardPeer.peer.ip || '-'), 1 /* TEXT */)
+                      _createElementVNode("div", _hoisted_247, [
+                        _cache[88] || (_cache[88] = _createElementVNode("dt", { class: "text-gray-500" }, "虚拟 IP", -1 /* CACHED */)),
+                        _createElementVNode("dd", _hoisted_248, _toDisplayString(generatedWireGuardPeer.peer.ip || '-'), 1 /* TEXT */)
                       ])
                     ]),
-                    _createElementVNode("div", _hoisted_241, [
-                      _cache[85] || (_cache[85] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "客户端私钥", -1 /* CACHED */)),
+                    _createElementVNode("div", _hoisted_249, [
+                      _cache[90] || (_cache[90] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "客户端私钥", -1 /* CACHED */)),
                       _createElementVNode("textarea", {
                         value: generatedWireGuardPeer.private_key,
                         readonly: "",
                         rows: "2",
                         spellcheck: "false",
                         class: "border rounded w-full py-2 px-3 bg-gray-50 font-mono text-sm break-all resize-none"
-                      }, null, 8 /* PROPS */, _hoisted_242),
-                      _createElementVNode("div", _hoisted_243, [
+                      }, null, 8 /* PROPS */, _hoisted_250),
+                      _createElementVNode("div", _hoisted_251, [
                         _createElementVNode("p", {
                           class: _normalizeClass(["text-xs", wireguardPrivateKeyCopied ? 'text-green-600' : 'text-gray-500'])
                         }, _toDisplayString(wireguardPrivateKeyCopied ? '已复制到剪贴板' : '请保存到安全位置，不要发送给他人。'), 3 /* TEXT, CLASS */),
@@ -2564,17 +2748,17 @@ return function render(_ctx, _cache) {
                           type: "button",
                           onClick: copyGeneratedWireGuardPrivateKey,
                           class: "shrink-0 bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded text-sm font-medium"
-                        }, _cache[84] || (_cache[84] = [
+                        }, _cache[89] || (_cache[89] = [
                           _createElementVNode("i", { class: "fa-regular fa-copy mr-1" }, null, -1 /* CACHED */),
                           _createTextVNode("复制私钥 ")
-                        ]), 8 /* PROPS */, _hoisted_244)
+                        ]), 8 /* PROPS */, _hoisted_252)
                       ])
                     ]),
-                    _createElementVNode("div", _hoisted_245, [
-                      _createElementVNode("div", _hoisted_246, [
-                        _createElementVNode("div", _hoisted_247, [
-                          _cache[86] || (_cache[86] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold" }, "完整客户端配置", -1 /* CACHED */)),
-                          _createElementVNode("span", _hoisted_248, _toDisplayString(generatedWireGuardConfigFilename), 1 /* TEXT */)
+                    _createElementVNode("div", _hoisted_253, [
+                      _createElementVNode("div", _hoisted_254, [
+                        _createElementVNode("div", _hoisted_255, [
+                          _cache[91] || (_cache[91] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold" }, "完整客户端配置", -1 /* CACHED */)),
+                          _createElementVNode("span", _hoisted_256, _toDisplayString(generatedWireGuardConfigFilename), 1 /* TEXT */)
                         ]),
                         _createElementVNode("textarea", {
                           value: generatedWireGuardConfig,
@@ -2582,137 +2766,145 @@ return function render(_ctx, _cache) {
                           rows: "10",
                           spellcheck: "false",
                           class: "border rounded w-full py-2 px-3 bg-gray-50 font-mono text-xs resize-none"
-                        }, null, 8 /* PROPS */, _hoisted_249),
-                        _createElementVNode("div", _hoisted_250, [
+                        }, null, 8 /* PROPS */, _hoisted_257),
+                        _createElementVNode("div", _hoisted_258, [
                           _createElementVNode("button", {
                             type: "button",
                             onClick: copyGeneratedWireGuardConfig,
                             class: "bg-gray-700 hover:bg-gray-800 text-white px-4 py-2 rounded text-sm font-medium"
                           }, [
-                            _cache[87] || (_cache[87] = _createElementVNode("i", { class: "fa-regular fa-copy mr-1" }, null, -1 /* CACHED */)),
+                            _cache[92] || (_cache[92] = _createElementVNode("i", { class: "fa-regular fa-copy mr-1" }, null, -1 /* CACHED */)),
                             _createTextVNode(_toDisplayString(wireguardConfigCopied ? '配置已复制' : '复制配置'), 1 /* TEXT */)
-                          ], 8 /* PROPS */, _hoisted_251),
+                          ], 8 /* PROPS */, _hoisted_259),
                           _createElementVNode("button", {
                             type: "button",
                             onClick: downloadGeneratedWireGuardConfig,
                             class: "bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded text-sm font-medium"
                           }, [
-                            _cache[88] || (_cache[88] = _createElementVNode("i", { class: "fa-solid fa-download mr-1" }, null, -1 /* CACHED */)),
+                            _cache[93] || (_cache[93] = _createElementVNode("i", { class: "fa-solid fa-download mr-1" }, null, -1 /* CACHED */)),
                             _createTextVNode(_toDisplayString(wireguardConfigDownloaded ? '已下载 .conf' : '下载 .conf'), 1 /* TEXT */)
-                          ], 8 /* PROPS */, _hoisted_252)
+                          ], 8 /* PROPS */, _hoisted_260)
                         ])
                       ]),
-                      _createElementVNode("div", _hoisted_253, [
-                        _cache[89] || (_cache[89] = _createElementVNode("p", { class: "text-sm font-bold text-gray-700 mb-2" }, "WireGuard 扫码导入", -1 /* CACHED */)),
-                        _createElementVNode("canvas", _hoisted_254, null, 512 /* NEED_PATCH */),
-                        _cache[90] || (_cache[90] = _createElementVNode("p", { class: "text-xs text-gray-500 text-center mt-2" }, "二维码包含客户端私钥，请勿截图分享。", -1 /* CACHED */))
+                      _createElementVNode("div", _hoisted_261, [
+                        _cache[94] || (_cache[94] = _createElementVNode("p", { class: "text-sm font-bold text-gray-700 mb-2" }, "WireGuard 扫码导入", -1 /* CACHED */)),
+                        _createElementVNode("canvas", _hoisted_262, null, 512 /* NEED_PATCH */),
+                        _cache[95] || (_cache[95] = _createElementVNode("p", { class: "text-xs text-gray-500 text-center mt-2" }, "二维码包含客户端私钥，请勿截图分享。", -1 /* CACHED */))
                       ])
                     ]),
-                    _createElementVNode("details", _hoisted_255, [
-                      _cache[94] || (_cache[94] = _createElementVNode("summary", { class: "cursor-pointer font-medium text-gray-700" }, "查看公钥信息", -1 /* CACHED */)),
-                      _createElementVNode("div", _hoisted_256, [
+                    _createElementVNode("details", _hoisted_263, [
+                      _cache[99] || (_cache[99] = _createElementVNode("summary", { class: "cursor-pointer font-medium text-gray-700" }, "查看公钥信息", -1 /* CACHED */)),
+                      _createElementVNode("div", _hoisted_264, [
                         _createElementVNode("div", null, [
-                          _cache[91] || (_cache[91] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "客户端公钥", -1 /* CACHED */)),
-                          _createElementVNode("code", _hoisted_257, _toDisplayString(generatedWireGuardPeer.peer.public_key), 1 /* TEXT */)
+                          _cache[96] || (_cache[96] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "客户端公钥", -1 /* CACHED */)),
+                          _createElementVNode("code", _hoisted_265, _toDisplayString(generatedWireGuardPeer.peer.public_key), 1 /* TEXT */)
                         ]),
                         _createElementVNode("div", null, [
-                          _cache[92] || (_cache[92] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "服务端公钥", -1 /* CACHED */)),
-                          _createElementVNode("code", _hoisted_258, _toDisplayString(generatedWireGuardPeer.server_public_key), 1 /* TEXT */)
+                          _cache[97] || (_cache[97] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "服务端公钥", -1 /* CACHED */)),
+                          _createElementVNode("code", _hoisted_266, _toDisplayString(generatedWireGuardPeer.server_public_key), 1 /* TEXT */)
                         ]),
                         _createElementVNode("div", null, [
-                          _cache[93] || (_cache[93] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "公网 Endpoint", -1 /* CACHED */)),
-                          _createElementVNode("code", _hoisted_259, _toDisplayString(generatedWireGuardPeer.endpoint), 1 /* TEXT */)
+                          _cache[98] || (_cache[98] = _createElementVNode("p", { class: "text-gray-500 mb-1" }, "公网 Endpoint", -1 /* CACHED */)),
+                          _createElementVNode("code", _hoisted_267, _toDisplayString(generatedWireGuardPeer.endpoint), 1 /* TEXT */)
                         ])
                       ])
                     ]),
-                    _createElementVNode("label", _hoisted_260, [
-                      _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": $event => ((wireguardPrivateKeySaved) = $event),
-                        type: "checkbox",
-                        class: "mr-2 mt-0.5 h-4 w-4"
-                      }, null, 8 /* PROPS */, _hoisted_261), [
-                        [_vModelCheckbox, wireguardPrivateKeySaved]
-                      ]),
-                      _cache[95] || (_cache[95] = _createElementVNode("span", null, "我确认已经下载配置、扫码导入或安全保存客户端私钥", -1 /* CACHED */))
-                    ]),
-                    _createElementVNode("div", _hoisted_262, [
-                      _createElementVNode("button", {
-                        type: "button",
-                        onClick: discardGeneratedWireGuardPeer,
-                        disabled: loading,
-                        class: "px-4 py-2 text-red-600 hover:text-red-800 disabled:text-gray-400"
-                      }, " 放弃并删除 Peer ", 8 /* PROPS */, _hoisted_263),
+                    wireguardGeneratedPeerNew
+                      ? (_openBlock(), _createElementBlock("label", _hoisted_268, [
+                          _withDirectives(_createElementVNode("input", {
+                            "onUpdate:modelValue": $event => ((wireguardPrivateKeySaved) = $event),
+                            type: "checkbox",
+                            class: "mr-2 mt-0.5 h-4 w-4"
+                          }, null, 8 /* PROPS */, _hoisted_269), [
+                            [_vModelCheckbox, wireguardPrivateKeySaved]
+                          ]),
+                          _cache[100] || (_cache[100] = _createElementVNode("span", null, "我确认已经下载配置、扫码导入或安全保存客户端私钥", -1 /* CACHED */))
+                        ]))
+                      : _createCommentVNode("v-if", true),
+                    _createElementVNode("div", _hoisted_270, [
+                      wireguardGeneratedPeerNew
+                        ? (_openBlock(), _createElementBlock("button", {
+                            key: 0,
+                            type: "button",
+                            onClick: discardGeneratedWireGuardPeer,
+                            disabled: loading,
+                            class: "px-4 py-2 text-red-600 hover:text-red-800 disabled:text-gray-400"
+                          }, " 放弃并删除 Peer ", 8 /* PROPS */, _hoisted_271))
+                        : _createCommentVNode("v-if", true),
                       _createElementVNode("button", {
                         type: "button",
                         onClick: finishGeneratedWireGuardPeer,
-                        disabled: loading || !wireguardPrivateKeySaved,
+                        disabled: loading || (wireguardGeneratedPeerNew && !wireguardPrivateKeySaved),
                         class: "bg-blue-600 hover:bg-blue-700 disabled:bg-gray-300 text-white px-4 py-2 rounded font-medium"
-                      }, " 已保存，完成 ", 8 /* PROPS */, _hoisted_264)
+                      }, _toDisplayString(wireguardGeneratedPeerNew ? '已保存，完成' : '关闭'), 9 /* TEXT, PROPS */, _hoisted_272)
                     ])
                   ]))
                 : (_openBlock(), _createElementBlock("form", {
                     key: 1,
                     onSubmit: _withModifiers(submitWireGuardPeer, ["prevent"])
                   }, [
-                    _createElementVNode("div", _hoisted_266, [
-                      _cache[97] || (_cache[97] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网络", -1 /* CACHED */)),
+                    _createElementVNode("div", _hoisted_274, [
+                      _cache[101] || (_cache[101] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "网络", -1 /* CACHED */)),
                       _createElementVNode("input", {
                         value: wireguardNetworkCode,
                         type: "text",
                         disabled: "",
                         class: "border rounded w-full py-2 px-3 bg-gray-100 text-gray-600"
-                      }, null, 8 /* PROPS */, _hoisted_267)
+                      }, null, 8 /* PROPS */, _hoisted_275)
                     ]),
-                    _createElementVNode("div", _hoisted_268, [
-                      _cache[98] || (_cache[98] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "设备名称（Peer ID）", -1 /* CACHED */)),
+                    _createElementVNode("div", _hoisted_276, [
+                      _cache[102] || (_cache[102] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "设备名称（Peer ID）", -1 /* CACHED */)),
                       _withDirectives(_createElementVNode("input", {
                         "onUpdate:modelValue": $event => ((wireguardPeerForm.peer_id) = $event),
                         type: "text",
                         autocomplete: "off",
+                        disabled: !!wireguardEditingPeer,
                         class: "border rounded w-full py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500",
                         placeholder: "如：张三的笔记本",
                         required: ""
-                      }, null, 8 /* PROPS */, _hoisted_269), [
+                      }, null, 8 /* PROPS */, _hoisted_277), [
                         [_vModelText, wireguardPeerForm.peer_id]
                       ]),
-                      _cache[99] || (_cache[99] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "日常通过设备名称识别，无需记忆公钥。", -1 /* CACHED */))
+                      _cache[103] || (_cache[103] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "日常通过设备名称识别，无需记忆公钥。", -1 /* CACHED */))
                     ]),
-                    _createElementVNode("div", _hoisted_270, [
-                      _cache[104] || (_cache[104] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "添加方式", -1 /* CACHED */)),
-                      _createElementVNode("div", _hoisted_271, [
-                        _createElementVNode("label", {
-                          class: _normalizeClass(["cursor-pointer rounded border-2 p-3", wireguardPeerMode === 'generated' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'])
-                        }, [
-                          _withDirectives(_createElementVNode("input", {
-                            "onUpdate:modelValue": $event => ((wireguardPeerMode) = $event),
-                            type: "radio",
-                            value: "generated",
-                            class: "mr-2"
-                          }, null, 8 /* PROPS */, _hoisted_272), [
-                            [_vModelRadio, wireguardPeerMode]
-                          ]),
-                          _cache[100] || (_cache[100] = _createElementVNode("span", { class: "font-medium" }, "一键生成", -1 /* CACHED */)),
-                          _cache[101] || (_cache[101] = _createElementVNode("span", { class: "block text-xs text-gray-500 mt-1 ml-6" }, "自动生成密钥并分配虚拟 IP", -1 /* CACHED */))
-                        ], 2 /* CLASS */),
-                        _createElementVNode("label", {
-                          class: _normalizeClass(["cursor-pointer rounded border-2 p-3", wireguardPeerMode === 'existing' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'])
-                        }, [
-                          _withDirectives(_createElementVNode("input", {
-                            "onUpdate:modelValue": $event => ((wireguardPeerMode) = $event),
-                            type: "radio",
-                            value: "existing",
-                            class: "mr-2"
-                          }, null, 8 /* PROPS */, _hoisted_273), [
-                            [_vModelRadio, wireguardPeerMode]
-                          ]),
-                          _cache[102] || (_cache[102] = _createElementVNode("span", { class: "font-medium" }, "粘贴已有公钥", -1 /* CACHED */)),
-                          _cache[103] || (_cache[103] = _createElementVNode("span", { class: "block text-xs text-gray-500 mt-1 ml-6" }, "适合已经生成密钥的设备", -1 /* CACHED */))
-                        ], 2 /* CLASS */)
-                      ])
-                    ]),
-                    (wireguardPeerMode === 'existing')
-                      ? (_openBlock(), _createElementBlock("div", _hoisted_274, [
-                          _cache[105] || (_cache[105] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "WireGuard 公钥", -1 /* CACHED */)),
+                    (!wireguardEditingPeer)
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_278, [
+                          _cache[108] || (_cache[108] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "添加方式", -1 /* CACHED */)),
+                          _createElementVNode("div", _hoisted_279, [
+                            _createElementVNode("label", {
+                              class: _normalizeClass(["cursor-pointer rounded border-2 p-3", wireguardPeerMode === 'generated' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'])
+                            }, [
+                              _withDirectives(_createElementVNode("input", {
+                                "onUpdate:modelValue": $event => ((wireguardPeerMode) = $event),
+                                type: "radio",
+                                value: "generated",
+                                class: "mr-2"
+                              }, null, 8 /* PROPS */, _hoisted_280), [
+                                [_vModelRadio, wireguardPeerMode]
+                              ]),
+                              _cache[104] || (_cache[104] = _createElementVNode("span", { class: "font-medium" }, "一键生成", -1 /* CACHED */)),
+                              _cache[105] || (_cache[105] = _createElementVNode("span", { class: "block text-xs text-gray-500 mt-1 ml-6" }, "自动生成密钥并分配虚拟 IP", -1 /* CACHED */))
+                            ], 2 /* CLASS */),
+                            _createElementVNode("label", {
+                              class: _normalizeClass(["cursor-pointer rounded border-2 p-3", wireguardPeerMode === 'existing' ? 'border-blue-500 bg-blue-50' : 'border-gray-200'])
+                            }, [
+                              _withDirectives(_createElementVNode("input", {
+                                "onUpdate:modelValue": $event => ((wireguardPeerMode) = $event),
+                                type: "radio",
+                                value: "existing",
+                                class: "mr-2"
+                              }, null, 8 /* PROPS */, _hoisted_281), [
+                                [_vModelRadio, wireguardPeerMode]
+                              ]),
+                              _cache[106] || (_cache[106] = _createElementVNode("span", { class: "font-medium" }, "粘贴已有公钥", -1 /* CACHED */)),
+                              _cache[107] || (_cache[107] = _createElementVNode("span", { class: "block text-xs text-gray-500 mt-1 ml-6" }, "适合已经生成密钥的设备", -1 /* CACHED */))
+                            ], 2 /* CLASS */)
+                          ])
+                        ]))
+                      : _createCommentVNode("v-if", true),
+                    (!wireguardEditingPeer && wireguardPeerMode === 'existing')
+                      ? (_openBlock(), _createElementBlock("div", _hoisted_282, [
+                          _cache[109] || (_cache[109] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "WireGuard 公钥", -1 /* CACHED */)),
                           _withDirectives(_createElementVNode("input", {
                             "onUpdate:modelValue": $event => ((wireguardPeerForm.public_key) = $event),
                             type: "text",
@@ -2721,40 +2913,97 @@ return function render(_ctx, _cache) {
                             class: "border rounded w-full py-2 px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500",
                             placeholder: "44 字符、带填充的 Base64 公钥",
                             required: ""
-                          }, null, 8 /* PROPS */, _hoisted_275), [
+                          }, null, 8 /* PROPS */, _hoisted_283), [
                             [_vModelText, wireguardPeerForm.public_key]
                           ]),
-                          _cache[106] || (_cache[106] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "必须是 32 字节公钥的规范 Base64 编码。", -1 /* CACHED */))
+                          _cache[110] || (_cache[110] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "必须是 32 字节公钥的规范 Base64 编码。", -1 /* CACHED */))
                         ]))
                       : _createCommentVNode("v-if", true),
-                    _createElementVNode("label", _hoisted_276, [
-                      _withDirectives(_createElementVNode("input", {
-                        "onUpdate:modelValue": $event => ((wireguardPeerForm.enabled) = $event),
-                        type: "checkbox",
-                        class: "mr-2 h-4 w-4"
-                      }, null, 8 /* PROPS */, _hoisted_277), [
-                        [_vModelCheckbox, wireguardPeerForm.enabled]
+                    _createElementVNode("div", _hoisted_284, [
+                      _createElementVNode("label", _hoisted_285, [
+                        _withDirectives(_createElementVNode("input", {
+                          "onUpdate:modelValue": $event => ((wireguardPeerForm.dns_inherited) = $event),
+                          type: "checkbox",
+                          class: "mr-2 h-4 w-4"
+                        }, null, 8 /* PROPS */, _hoisted_286), [
+                          [_vModelCheckbox, wireguardPeerForm.dns_inherited]
+                        ]),
+                        _cache[111] || (_cache[111] = _createTextVNode(" 继承服务端全局 DNS "))
                       ]),
-                      _cache[107] || (_cache[107] = _createTextVNode(" 创建后立即启用 "))
+                      (!wireguardPeerForm.dns_inherited)
+                        ? _withDirectives((_openBlock(), _createElementBlock("input", {
+                            key: 0,
+                            "onUpdate:modelValue": $event => ((wireguardPeerForm.dns_servers) = $event),
+                            type: "text",
+                            autocomplete: "off",
+                            class: "mt-3 border rounded w-full py-2 px-3 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500",
+                            placeholder: "如：1.1.1.1, 8.8.8.8"
+                          }, null, 8 /* PROPS */, _hoisted_287)), [
+                            [_vModelText, wireguardPeerForm.dns_servers]
+                          ])
+                        : _createCommentVNode("v-if", true),
+                      _cache[112] || (_cache[112] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "最多 4 个 IPv4/IPv6 地址，逗号或空格分隔。", -1 /* CACHED */))
                     ]),
-                    _createElementVNode("div", _hoisted_278, [
+                    _createElementVNode("div", _hoisted_288, [
+                      _cache[113] || (_cache[113] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "PersistentKeepalive（秒）", -1 /* CACHED */)),
+                      _withDirectives(_createElementVNode("input", {
+                        "onUpdate:modelValue": $event => ((wireguardPeerForm.persistent_keepalive) = $event),
+                        type: "number",
+                        min: "0",
+                        max: "65535",
+                        class: "border rounded w-full py-2 px-3 focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      }, null, 8 /* PROPS */, _hoisted_289), [
+                        [
+                          _vModelText,
+                          wireguardPeerForm.persistent_keepalive,
+                          void 0,
+                          { number: true }
+                        ]
+                      ])
+                    ]),
+                    _createElementVNode("div", _hoisted_290, [
+                      _cache[114] || (_cache[114] = _createElementVNode("label", { class: "block text-gray-700 text-sm font-bold mb-2" }, "Peer 后方局域网路由", -1 /* CACHED */)),
+                      _withDirectives(_createElementVNode("textarea", {
+                        "onUpdate:modelValue": $event => ((wireguardPeerForm.routes) = $event),
+                        rows: "4",
+                        spellcheck: "false",
+                        class: "border rounded w-full py-2 px-3 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500",
+                        placeholder: "每行一条：192.168.10.0/24 -> 10.26.0.10"
+                      }, null, 8 /* PROPS */, _hoisted_291), [
+                        [_vModelText, wireguardPeerForm.routes]
+                      ]),
+                      _cache[115] || (_cache[115] = _createElementVNode("p", { class: "text-gray-400 text-xs mt-1" }, "左侧为局域网 CIDR，右侧为负责转发的 VNT 客户端虚拟 IP。", -1 /* CACHED */))
+                    ]),
+                    (!wireguardEditingPeer)
+                      ? (_openBlock(), _createElementBlock("label", _hoisted_292, [
+                          _withDirectives(_createElementVNode("input", {
+                            "onUpdate:modelValue": $event => ((wireguardPeerForm.enabled) = $event),
+                            type: "checkbox",
+                            class: "mr-2 h-4 w-4"
+                          }, null, 8 /* PROPS */, _hoisted_293), [
+                            [_vModelCheckbox, wireguardPeerForm.enabled]
+                          ]),
+                          _cache[116] || (_cache[116] = _createTextVNode(" 创建后立即启用 "))
+                        ]))
+                      : _createCommentVNode("v-if", true),
+                    _createElementVNode("div", _hoisted_294, [
                       _createElementVNode("button", {
                         type: "button",
                         onClick: closeWireGuardPeerModal,
                         class: "px-4 py-2 text-gray-600 hover:text-gray-800"
-                      }, "取消", 8 /* PROPS */, _hoisted_279),
+                      }, "取消", 8 /* PROPS */, _hoisted_295),
                       _createElementVNode("button", {
                         type: "submit",
                         disabled: loading,
                         class: "bg-blue-600 hover:bg-blue-700 disabled:bg-blue-300 text-white px-4 py-2 rounded font-medium transition"
-                      }, _toDisplayString(loading ? '处理中...' : (wireguardPeerMode === 'generated' ? '一键生成' : '创建 Peer')), 9 /* TEXT, PROPS */, _hoisted_280)
+                      }, _toDisplayString(loading ? '处理中...' : (wireguardEditingPeer ? '保存配置' : (wireguardPeerMode === 'generated' ? '一键生成' : '创建 Peer'))), 9 /* TEXT, PROPS */, _hoisted_296)
                     ])
-                  ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_265)),
+                  ], 40 /* PROPS, NEED_HYDRATION */, _hoisted_273)),
               modalErrorMsg
-                ? (_openBlock(), _createElementBlock("p", _hoisted_281, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
+                ? (_openBlock(), _createElementBlock("p", _hoisted_297, _toDisplayString(modalErrorMsg), 1 /* TEXT */))
                 : _createCommentVNode("v-if", true)
             ])
-          ], 8 /* PROPS */, _hoisted_230))
+          ], 8 /* PROPS */, _hoisted_237))
         : _createCommentVNode("v-if", true)
     ], 64 /* STABLE_FRAGMENT */))
   }

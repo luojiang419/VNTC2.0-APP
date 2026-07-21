@@ -107,6 +107,8 @@ pub enum MsgType {
     Quic = 17,
     WireGuardRelay = 18,
     WireGuardP2pControl = 20,
+    WireGuardSubnetRelay = 21,
+    WireGuardBroadcastRelay = 22,
 }
 
 impl Into<u8> for MsgType {
@@ -143,6 +145,8 @@ impl TryFrom<u8> for MsgType {
             17 => MsgType::Quic,
             18 => MsgType::WireGuardRelay,
             20 => MsgType::WireGuardP2pControl,
+            21 => MsgType::WireGuardSubnetRelay,
+            22 => MsgType::WireGuardBroadcastRelay,
             _ => {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -304,5 +308,19 @@ mod tests {
         let value: u8 = MsgType::WireGuardP2pControl.into();
         assert_eq!(value, 20);
         assert_eq!(MsgType::try_from(20).unwrap(), MsgType::WireGuardP2pControl);
+    }
+
+    #[test]
+    fn wireguard_extended_relay_types_are_frozen() {
+        assert_eq!(MsgType::WireGuardSubnetRelay as u8, 21);
+        assert_eq!(
+            MsgType::try_from(21).unwrap(),
+            MsgType::WireGuardSubnetRelay
+        );
+        assert_eq!(MsgType::WireGuardBroadcastRelay as u8, 22);
+        assert_eq!(
+            MsgType::try_from(22).unwrap(),
+            MsgType::WireGuardBroadcastRelay
+        );
     }
 }

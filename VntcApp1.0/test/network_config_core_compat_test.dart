@@ -3,6 +3,32 @@ import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/network_config_input_page.dart';
 
 void main() {
+  test('裸服务器地址默认补齐 QUIC 且保留受支持的自定义前缀', () {
+    expect(
+      normalizeServerAddressInput('127.0.0.1:29872'),
+      'quic://127.0.0.1:29872',
+    );
+    expect(
+      normalizeServerAddressInput('edge.example.com:29872'),
+      'quic://edge.example.com:29872',
+    );
+    expect(
+      normalizeServerAddressInput('tcp://edge.example.com:29872'),
+      'tcp://edge.example.com:29872',
+    );
+    expect(
+      normalizeServerAddressInput('wss://edge.example.com:443'),
+      'wss://edge.example.com:443',
+    );
+    expect(normalizeServerAddressInput('txt:edge.example.com'),
+        'txt:edge.example.com');
+    expect(unsupportedServerAddressScheme('ftp://edge.example.com:21'), 'ftp');
+    expect(
+      unsupportedServerAddressScheme('dynamic://edge.example.com'),
+      isNull,
+    );
+  });
+
   test('旧版配置升级后仍能推导出 2.0 核心默认值', () {
     final config = NetworkConfig.fromJson({
       'itemKey': 'legacy-1',

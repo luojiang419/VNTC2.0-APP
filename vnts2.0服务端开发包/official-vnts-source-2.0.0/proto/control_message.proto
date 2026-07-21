@@ -25,6 +25,7 @@ message RegRequestMsg {
   bool allow_wire_guard = 10;
   bytes wireguard_p2p_public_key = 11;
   uint32 wireguard_p2p_port = 12;
+  uint64 client_capabilities = 13;
 }
 
 

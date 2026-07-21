@@ -2,7 +2,7 @@ use crate::compression::PacketCompression;
 use crate::context::{NetworkAddr, ServerInfoCollection, SharedNetworkAddr, TrafficStats};
 use crate::crypto::PacketCrypto;
 use crate::fec::FecEncoder;
-use crate::nat::SubnetExternalRoute;
+use crate::nat::{AllowSubnetExternalRoute, SubnetExternalRoute};
 use crate::protocol::ip_packet_protocol::{HEAD_LENGTH, MsgType, NetPacket};
 use crate::protocol::transmission::TransmissionBytes;
 use crate::tunnel_core::p2p::outbound::P2pOutbound;
@@ -192,8 +192,10 @@ pub(crate) struct HybridOutbound {
     basic_outbound: BasicOutbound,
     packet_compression: PacketCompression,
     external_route: SubnetExternalRoute,
+    allow_subnet: AllowSubnetExternalRoute,
     fec_encoder: Option<FecEncoder>,
     wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
+    allow_wire_guard: bool,
 }
 impl HybridOutbound {
     pub fn new(
@@ -203,8 +205,10 @@ impl HybridOutbound {
         basic_outbound: BasicOutbound,
         packet_compression: PacketCompression,
         external_route: SubnetExternalRoute,
+        allow_subnet: AllowSubnetExternalRoute,
         fec_encoder: Option<FecEncoder>,
         wireguard_p2p: Option<crate::wireguard_p2p::WireGuardP2pHandle>,
+        allow_wire_guard: bool,
     ) -> Self {
         Self {
             network,
@@ -213,8 +217,10 @@ impl HybridOutbound {
             basic_outbound,
             packet_compression,
             external_route,
+            allow_subnet,
             fec_encoder,
             wireguard_p2p,
+            allow_wire_guard,
         }
     }
     pub async fn outbound_raw(
@@ -261,12 +267,34 @@ impl HybridOutbound {
         let len = data.len() as u64;
 
         if net.network().contains(&dest) && self.server_info.is_wireguard_client(&dest) {
-            if crate::wireguard_bridge::validate_inner_ipv4(data.as_ref(), net.ip, Some(dest), net)
+            let source = ipv4.get_source();
+            let message_type = if source == net.ip {
+                if crate::wireguard_bridge::validate_inner_ipv4(
+                    data.as_ref(),
+                    net.ip,
+                    Some(dest),
+                    net,
+                )
                 .is_none()
-            {
-                return Ok(());
-            }
-            if let Some(wireguard_p2p) = &self.wireguard_p2p
+                {
+                    return Ok(());
+                }
+                MsgType::WireGuardRelay
+            } else {
+                let Some(route) = crate::wireguard_bridge::validate_subnet_reply_inner_ipv4(
+                    data.as_ref(),
+                    dest,
+                    net,
+                ) else {
+                    return Ok(());
+                };
+                if !self.allow_wire_guard || !self.allow_subnet.allow(&route.source) {
+                    return Ok(());
+                }
+                MsgType::WireGuardSubnetRelay
+            };
+            if message_type == MsgType::WireGuardRelay
+                && let Some(wireguard_p2p) = &self.wireguard_p2p
                 && wireguard_p2p.send_ipv4(dest, data.as_ref()).await
             {
                 self.traffic_stats.record_tx(dest, len);
@@ -274,7 +302,7 @@ impl HybridOutbound {
             }
             data.retreat_head(HEAD_LENGTH)?;
             let mut packet = NetPacket::new(data)?;
-            packet.set_msg_type(MsgType::WireGuardRelay);
+            packet.set_msg_type(message_type);
             packet.set_src_id(net.ip.into());
             packet.set_dest_id(dest.into());
             packet.set_ttl(5);
@@ -333,6 +361,22 @@ impl HybridOutbound {
         net: NetworkAddr,
         mut data: TransmissionBytes,
     ) -> anyhow::Result<()> {
+        if self.allow_wire_guard
+            && crate::wireguard_bridge::validate_broadcast_inner_ipv4(data.as_ref(), net.ip, net)
+                .is_some()
+        {
+            let mut wireguard_data = data.clone();
+            wireguard_data.retreat_head(HEAD_LENGTH)?;
+            let mut wireguard_packet = NetPacket::new(wireguard_data)?;
+            wireguard_packet.set_msg_type(MsgType::WireGuardBroadcastRelay);
+            wireguard_packet.set_src_id(net.ip.into());
+            wireguard_packet.set_dest_id(Ipv4Addr::BROADCAST.into());
+            wireguard_packet.set_ttl(5);
+            if let Err(error) = self.basic_outbound.send_default_raw(wireguard_packet).await {
+                log::warn!("WireGuard broadcast relay send failed: {error:?}");
+            }
+        }
+
         data.retreat_head(HEAD_LENGTH)?;
         let mut packet = NetPacket::new(data)?;
         packet.set_msg_type(MsgType::Broadcast);

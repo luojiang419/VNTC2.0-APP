@@ -205,7 +205,9 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
         token: _groupNumberController.text,
         deviceName: _deviceNameController.text,
         virtualIPv4: _virtualIPv4Controller.text,
-        serverAddress: _serverAddressController.text,
+        serverAddress: normalizeServerAddressInput(
+          _serverAddressController.text,
+        ),
         stunServers: _stunServers
             .map((controller) => controller.text)
             .where((text) => text.isNotEmpty)
@@ -374,7 +376,7 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
                     },
                   ),
                   validator: (value) {
-                    if (value == null || value.isEmpty) {
+                    if (value == null || value.trim().isEmpty) {
                       return '请输入token';
                     }
                     return null;
@@ -413,13 +415,18 @@ class _NetworkConfigInputPageState extends State<NetworkConfigInputPage> {
                   controller: _serverAddressController,
                   labelText: '服务器地址',
                   tooltipMessage:
-                      '(VNTS 2.0 地址，支持 quic://、tcp://、wss://、dynamic://。兼容旧 udp:// 输入并会自动按 QUIC 处理)',
+                      '(直接填写 IP:端口或域名:端口即可，默认使用 QUIC；也支持 quic://、tcp://、wss://、dynamic:// 等前缀)',
                   maxLength: 64,
                   validator: (value) {
                     if (value == null || value.isEmpty) {
                       return '地址不能为空';
                     }
-                    value = value.toLowerCase();
+                    final unsupportedScheme =
+                        unsupportedServerAddressScheme(value);
+                    if (unsupportedScheme != null) {
+                      return '不支持 $unsupportedScheme:// 协议';
+                    }
+                    value = normalizeServerAddressInput(value).toLowerCase();
                     var last = stripPrefix(value, 'quic://');
                     if (last != null) {
                       _communicationMethod = 'QUIC';
@@ -1204,6 +1211,43 @@ String? stripPrefix(String input, String prefix) {
 String stripScheme(String input) {
   final pattern = RegExp(r'^[^:]+://');
   return input.replaceFirst(pattern, '');
+}
+
+const Set<String> supportedServerAddressSchemes = {
+  'quic',
+  'udp',
+  'tcp',
+  'wss',
+  'ws',
+  'dynamic',
+};
+
+String normalizeServerAddressInput(String input) {
+  final address = input.trim();
+  if (address.isEmpty) {
+    return '';
+  }
+  final lower = address.toLowerCase();
+  if (lower.startsWith('txt:')) {
+    return address;
+  }
+  final match = RegExp(r'^([a-z][a-z0-9+.-]*)://', caseSensitive: false)
+      .firstMatch(address);
+  if (match != null) {
+    return address;
+  }
+  return 'quic://$address';
+}
+
+String? unsupportedServerAddressScheme(String input) {
+  final address = input.trim();
+  final match = RegExp(r'^([a-z][a-z0-9+.-]*)://', caseSensitive: false)
+      .firstMatch(address);
+  if (match == null) {
+    return null;
+  }
+  final scheme = match.group(1)!.toLowerCase();
+  return supportedServerAddressSchemes.contains(scheme) ? null : scheme;
 }
 
 String normalizeCommunicationMethod(String protocol, String serverAddress) {

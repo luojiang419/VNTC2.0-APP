@@ -12,12 +12,7 @@ pub(crate) struct Ipv4Route {
     pub(crate) destination: Ipv4Addr,
 }
 
-pub(crate) fn validate_inner_ipv4(
-    packet: &[u8],
-    expected_source: Ipv4Addr,
-    expected_destination: Option<Ipv4Addr>,
-    network_addr: NetworkAddr,
-) -> Option<Ipv4Route> {
+fn parse_unbound_inner_ipv4(packet: &[u8]) -> Option<Ipv4Route> {
     if !(20..=MAX_INNER_IPV4_PACKET_SIZE).contains(&packet.len()) {
         return None;
     }
@@ -34,9 +29,27 @@ pub(crate) fn validate_inner_ipv4(
         return None;
     }
 
-    let source = ipv4.get_source();
-    let destination = ipv4.get_destination();
-    if source != expected_source || expected_destination.is_some_and(|ip| destination != ip) {
+    Some(Ipv4Route {
+        source: ipv4.get_source(),
+        destination: ipv4.get_destination(),
+    })
+}
+
+fn parse_inner_ipv4(packet: &[u8], expected_source: Ipv4Addr) -> Option<Ipv4Route> {
+    let route = parse_unbound_inner_ipv4(packet)?;
+    (route.source == expected_source).then_some(route)
+}
+
+pub(crate) fn validate_inner_ipv4(
+    packet: &[u8],
+    expected_source: Ipv4Addr,
+    expected_destination: Option<Ipv4Addr>,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    let route = parse_inner_ipv4(packet, expected_source)?;
+    let source = route.source;
+    let destination = route.destination;
+    if expected_destination.is_some_and(|ip| destination != ip) {
         return None;
     }
 
@@ -56,10 +69,74 @@ pub(crate) fn validate_inner_ipv4(
         return None;
     }
 
-    Some(Ipv4Route {
-        source,
-        destination,
-    })
+    Some(route)
+}
+
+pub(crate) fn validate_broadcast_inner_ipv4(
+    packet: &[u8],
+    expected_source: Ipv4Addr,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    let route = parse_inner_ipv4(packet, expected_source)?;
+    let network = network_addr.network();
+    if !network.contains(&route.source)
+        || route.source == network.network()
+        || route.source == network.broadcast()
+        || route.source == network_addr.gateway
+        || route.source.is_multicast()
+    {
+        return None;
+    }
+    if route.destination != Ipv4Addr::BROADCAST
+        && route.destination != network.broadcast()
+        && !route.destination.is_multicast()
+    {
+        return None;
+    }
+    Some(route)
+}
+
+pub(crate) fn validate_subnet_inner_ipv4(
+    packet: &[u8],
+    expected_source: Ipv4Addr,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    let route = parse_inner_ipv4(packet, expected_source)?;
+    let network = network_addr.network();
+    if !network.contains(&route.source)
+        || route.source == network.network()
+        || route.source == network.broadcast()
+        || route.source == network_addr.gateway
+        || route.destination.is_unspecified()
+        || route.destination == Ipv4Addr::BROADCAST
+        || route.destination.is_multicast()
+        || network.contains(&route.destination)
+    {
+        return None;
+    }
+    Some(route)
+}
+
+pub(crate) fn validate_subnet_reply_inner_ipv4(
+    packet: &[u8],
+    expected_destination: Ipv4Addr,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    let route = parse_unbound_inner_ipv4(packet)?;
+    let network = network_addr.network();
+    if route.destination != expected_destination
+        || !network.contains(&route.destination)
+        || route.destination == network.network()
+        || route.destination == network.broadcast()
+        || route.destination == network_addr.gateway
+        || route.source.is_unspecified()
+        || route.source == Ipv4Addr::BROADCAST
+        || route.source.is_multicast()
+        || network.contains(&route.source)
+    {
+        return None;
+    }
+    Some(route)
 }
 
 pub(crate) fn validate_relay<B: AsRef<[u8]>>(
@@ -87,6 +164,44 @@ pub(crate) fn validate_relay<B: AsRef<[u8]>>(
         return None;
     }
     Some(route)
+}
+
+pub(crate) fn validate_broadcast_relay<B: AsRef<[u8]>>(
+    packet: &NetPacket<B>,
+    expected_destination: Ipv4Addr,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    if packet.msg_type().ok() != Some(MsgType::WireGuardBroadcastRelay)
+        || packet.is_compressed()
+        || packet.is_gateway()
+        || packet.is_fec()
+        || packet.ttl() == 0
+        || Ipv4Addr::from(packet.dest_id()) != expected_destination
+    {
+        return None;
+    }
+
+    let source = Ipv4Addr::from(packet.src_id());
+    validate_broadcast_inner_ipv4(packet.payload(), source, network_addr)
+}
+
+pub(crate) fn validate_subnet_relay<B: AsRef<[u8]>>(
+    packet: &NetPacket<B>,
+    expected_destination: Ipv4Addr,
+    network_addr: NetworkAddr,
+) -> Option<Ipv4Route> {
+    if packet.msg_type().ok() != Some(MsgType::WireGuardSubnetRelay)
+        || packet.is_compressed()
+        || packet.is_gateway()
+        || packet.is_fec()
+        || packet.ttl() == 0
+        || Ipv4Addr::from(packet.dest_id()) != expected_destination
+    {
+        return None;
+    }
+
+    let source = Ipv4Addr::from(packet.src_id());
+    validate_subnet_inner_ipv4(packet.payload(), source, network_addr)
 }
 
 #[cfg(test)]
@@ -168,5 +283,78 @@ mod tests {
         let mut packet = relay(&ipv4);
         packet.set_dest_id(Ipv4Addr::new(10, 26, 0, 4).into());
         assert!(validate_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR).is_none());
+    }
+
+    #[test]
+    fn accepts_broadcast_relay_for_local_target_and_rejects_legacy_shapes() {
+        for destination in [
+            Ipv4Addr::BROADCAST,
+            NETWORK_ADDR.broadcast,
+            Ipv4Addr::new(224, 0, 0, 251),
+        ] {
+            let ipv4 = ipv4_packet(SOURCE, destination, 20);
+            let mut packet = relay(&ipv4);
+            packet.set_msg_type(MsgType::WireGuardBroadcastRelay);
+            assert_eq!(
+                validate_broadcast_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR),
+                Some(Ipv4Route {
+                    source: SOURCE,
+                    destination,
+                })
+            );
+        }
+
+        let ipv4 = ipv4_packet(SOURCE, NETWORK_ADDR.broadcast, 20);
+        let mut packet = relay(&ipv4);
+        packet.set_msg_type(MsgType::WireGuardBroadcastRelay);
+        packet.set_dest_id(Ipv4Addr::new(10, 26, 0, 4).into());
+        assert!(validate_broadcast_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR).is_none());
+
+        packet.set_dest_id(NETWORK_ADDR.ip.into());
+        packet.set_compressed_flag(true);
+        assert!(validate_broadcast_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR).is_none());
+    }
+
+    #[test]
+    fn accepts_plain_subnet_relay_and_rejects_virtual_or_wrong_outer_destination() {
+        let destination = Ipv4Addr::new(192, 168, 10, 25);
+        let ipv4 = ipv4_packet(SOURCE, destination, 20);
+        let mut packet = relay(&ipv4);
+        packet.set_msg_type(MsgType::WireGuardSubnetRelay);
+        assert_eq!(
+            validate_subnet_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR),
+            Some(Ipv4Route {
+                source: SOURCE,
+                destination,
+            })
+        );
+
+        let virtual_ipv4 = ipv4_packet(SOURCE, NETWORK_ADDR.ip, 20);
+        let mut virtual_packet = relay(&virtual_ipv4);
+        virtual_packet.set_msg_type(MsgType::WireGuardSubnetRelay);
+        assert!(validate_subnet_relay(&virtual_packet, NETWORK_ADDR.ip, NETWORK_ADDR).is_none());
+
+        packet.set_dest_id(Ipv4Addr::new(10, 26, 0, 4).into());
+        assert!(validate_subnet_relay(&packet, NETWORK_ADDR.ip, NETWORK_ADDR).is_none());
+    }
+
+    #[test]
+    fn subnet_reply_preserves_lan_source_and_targets_wireguard_ip() {
+        let lan_source = Ipv4Addr::new(192, 168, 10, 25);
+        let wireguard_destination = Ipv4Addr::new(10, 26, 0, 3);
+        let reply = ipv4_packet(lan_source, wireguard_destination, 20);
+        assert_eq!(
+            validate_subnet_reply_inner_ipv4(&reply, wireguard_destination, NETWORK_ADDR),
+            Some(Ipv4Route {
+                source: lan_source,
+                destination: wireguard_destination,
+            })
+        );
+
+        let spoofed = ipv4_packet(SOURCE, wireguard_destination, 20);
+        assert!(
+            validate_subnet_reply_inner_ipv4(&spoofed, wireguard_destination, NETWORK_ADDR)
+                .is_none()
+        );
     }
 }

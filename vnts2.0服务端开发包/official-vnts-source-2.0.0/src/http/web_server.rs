@@ -6,7 +6,8 @@ use crate::http::web_security::{self, AuthError, Claims, LoginLimiter};
 use crate::server::control_server::service::{
     DeviceInfoVO, NetworkInfoVO, WireGuardPeerIpVO, WireGuardPeerVO,
 };
-use crate::server::control_server::{db, wireguard_identity};
+use crate::server::control_server::{db, wireguard_identity, wireguard_profile};
+use crate::server::network_state_provider::NetworkState;
 use crate::server::wireguard_runtime;
 use crate::utils::config::ConfigFile;
 use anyhow::Context;
@@ -27,7 +28,7 @@ use rand::Rng;
 use rand::distr::Alphanumeric;
 use rust_embed::RustEmbed;
 use serde::{Deserialize, Serialize};
-use std::net::{Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
@@ -49,6 +50,14 @@ pub struct ApiResponse<T> {
 #[derive(Serialize)]
 struct PeerServerInfoVO {
     addr: String,
+    resolved_addr: Option<String>,
+    last_resolved_at: Option<u64>,
+    last_error: Option<String>,
+    remote_server_id: Option<String>,
+    protocol_version: u32,
+    capabilities: u64,
+    route_only: bool,
+    cluster_compatible: bool,
     latency_ms: u32,
     connected: bool,
     is_outbound: bool,
@@ -175,6 +184,8 @@ pub(crate) struct ServerStatusConfig {
     pub(crate) wireguard_configured: bool,
     pub(crate) wireguard_public_endpoint: Option<String>,
     pub(crate) wireguard_max_active_peers: usize,
+    pub(crate) wireguard_dns: Vec<std::net::IpAddr>,
+    pub(crate) wireguard_master_key_file: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -188,6 +199,8 @@ struct WireGuardReady {
     listen_addr: SocketAddr,
     server_public_key: [u8; 32],
     endpoint: String,
+    master_key_file: PathBuf,
+    dns_servers: Vec<IpAddr>,
 }
 
 impl WireGuardAutostart {
@@ -214,6 +227,11 @@ impl WireGuardAutostart {
         let endpoint = config
             .effective_wireguard_public_endpoint()?
             .context("尚未配置 WireGuard UDP 监听地址，无法生成可连接的客户端配置")?;
+        let master_key_file = config
+            .wireguard_master_key_file
+            .clone()
+            .context("尚未配置 wireguard_master_key_file，无法安全管理客户端私钥")?;
+        let dns_servers = config.validated_wireguard_dns()?;
 
         if let Some((listen_addr, server_public_key, _)) =
             control_service.wireguard_runtime_status()
@@ -222,6 +240,8 @@ impl WireGuardAutostart {
                 listen_addr,
                 server_public_key,
                 endpoint,
+                master_key_file,
+                dns_servers,
             });
         }
 
@@ -232,15 +252,12 @@ impl WireGuardAutostart {
         let bind_addr = config
             .wireguard_bind
             .context("尚未配置 wireguard_bind，无法自动启动 WireGuard UDP 服务")?;
-        let master_key_file = config
-            .wireguard_master_key_file
-            .as_deref()
-            .context("尚未配置 wireguard_master_key_file，无法自动启动 WireGuard UDP 服务")?;
+        let master_key_file_ref = master_key_file.as_path();
 
         db::init_db_pool()
             .await
             .context("WireGuard UDP 自动启动时初始化数据库失败")?;
-        let identity = wireguard_identity::load_or_create(master_key_file)
+        let identity = wireguard_identity::load_or_create(master_key_file_ref)
             .await
             .context("WireGuard UDP 自动启动时加载服务端身份失败")?;
         let (handle, task) = wireguard_runtime::start(
@@ -274,6 +291,8 @@ impl WireGuardAutostart {
             listen_addr,
             server_public_key,
             endpoint,
+            master_key_file,
+            dns_servers,
         })
     }
 }
@@ -334,6 +353,12 @@ struct PeerServerStatusResponse {
     enabled: bool,
     total_connections: usize,
     connected: usize,
+    cluster_enabled: bool,
+    cluster_ready: bool,
+    server_id: Option<String>,
+    lease_authority: Option<String>,
+    lease_revision: u64,
+    lease_conflicts: u64,
 }
 
 #[derive(Serialize)]
@@ -419,16 +444,37 @@ async fn server_status(State(state): State<AppState>) -> ApiResponse<ServerStatu
         )
     });
     let peer_servers = state.control_service.get_peer_manager();
-    let (peer_server_enabled, total_connections, connected) = match peer_servers {
+    let (
+        peer_server_enabled,
+        total_connections,
+        connected,
+        cluster_enabled,
+        cluster_ready,
+        server_id,
+        lease_authority,
+        lease_revision,
+        lease_conflicts,
+    ) = match peer_servers {
         Some(manager) => {
             let connections = manager.get_peer_servers();
             let connected = connections
                 .iter()
                 .filter(|connection| connection.is_connected())
                 .count();
-            (true, connections.len(), connected)
+            (
+                true,
+                connections.len(),
+                connected,
+                manager.cluster_enabled(),
+                manager.cluster_ready(),
+                (!manager.server_id().is_empty()).then(|| manager.server_id().to_string()),
+                (!manager.lease_authority().is_empty())
+                    .then(|| manager.lease_authority().to_string()),
+                manager.cluster_revision(),
+                manager.cluster_conflicts(),
+            )
         }
-        None => (false, 0, 0),
+        None => (false, 0, 0, false, true, None, None, 0, 0),
     };
     let wireguard_runtime = state.control_service.wireguard_runtime_status();
     let (wireguard_running, wireguard_listen_addr, wireguard_public_key, active_peers) =
@@ -466,6 +512,12 @@ async fn server_status(State(state): State<AppState>) -> ApiResponse<ServerStatu
             enabled: peer_server_enabled,
             total_connections,
             connected,
+            cluster_enabled,
+            cluster_ready,
+            server_id,
+            lease_authority,
+            lease_revision,
+            lease_conflicts,
         },
         wireguard: WireGuardStatusResponse {
             configured: config.wireguard_configured || wireguard_running,
@@ -610,6 +662,16 @@ async fn list_peer_servers(State(state): State<AppState>) -> ApiResponse<PeerSer
     for peer_info in peer_servers {
         let info = PeerServerInfoVO {
             addr: peer_info.get_addr(),
+            resolved_addr: peer_info
+                .get_resolved_addr()
+                .map(|address| address.to_string()),
+            last_resolved_at: peer_info.get_last_resolved_at(),
+            last_error: peer_info.get_last_error(),
+            remote_server_id: peer_info.get_remote_server_id(),
+            protocol_version: peer_info.get_remote_protocol_version(),
+            capabilities: peer_info.get_remote_capabilities(),
+            route_only: peer_info.is_route_only(),
+            cluster_compatible: peer_info.is_cluster_compatible(),
             latency_ms: peer_info.get_latency(),
             connected: peer_info.is_connected(),
             is_outbound: peer_info.is_outbound(),
@@ -778,6 +840,13 @@ struct WireGuardPeerResponse {
     ip: Option<Ipv4Addr>,
     created_at: i64,
     updated_at: i64,
+    dns_servers: Vec<IpAddr>,
+    dns_inherited: bool,
+    persistent_keepalive: u16,
+    routes: Vec<db::WireGuardPeerRouteRecord>,
+    config_available: bool,
+    online: bool,
+    status: &'static str,
 }
 
 impl From<WireGuardPeerVO> for WireGuardPeerResponse {
@@ -790,12 +859,23 @@ impl From<WireGuardPeerVO> for WireGuardPeerResponse {
             ip: peer.ip,
             created_at: peer.created_at,
             updated_at: peer.updated_at,
+            dns_servers: vec![],
+            dns_inherited: true,
+            persistent_keepalive: 25,
+            routes: vec![],
+            config_available: false,
+            online: false,
+            status: "offline",
         }
     }
 }
 
 fn default_wireguard_peer_enabled() -> bool {
     true
+}
+
+fn default_wireguard_keepalive() -> u16 {
+    25
 }
 
 #[derive(Deserialize)]
@@ -805,6 +885,12 @@ struct CreateWireGuardPeerRequest {
     public_key: String,
     #[serde(default = "default_wireguard_peer_enabled")]
     enabled: bool,
+    #[serde(default)]
+    dns_servers: Option<Vec<IpAddr>>,
+    #[serde(default = "default_wireguard_keepalive")]
+    persistent_keepalive: u16,
+    #[serde(default)]
+    routes: Vec<db::WireGuardPeerRouteRecord>,
 }
 
 #[derive(Deserialize)]
@@ -813,6 +899,12 @@ struct GenerateWireGuardPeerRequest {
     peer_id: String,
     #[serde(default = "default_wireguard_peer_enabled")]
     enabled: bool,
+    #[serde(default)]
+    dns_servers: Option<Vec<IpAddr>>,
+    #[serde(default = "default_wireguard_keepalive")]
+    persistent_keepalive: u16,
+    #[serde(default)]
+    routes: Vec<db::WireGuardPeerRouteRecord>,
 }
 
 #[derive(Serialize)]
@@ -823,6 +915,28 @@ struct GeneratedWireGuardPeerResponse {
     listen_addr: String,
     endpoint: String,
     allowed_ips: String,
+    dns_servers: Vec<IpAddr>,
+    persistent_keepalive: u16,
+    routes: Vec<db::WireGuardPeerRouteRecord>,
+    client_config: String,
+}
+
+#[derive(Deserialize)]
+struct UpdateWireGuardPeerProfileRequest {
+    network_code: String,
+    peer_id: String,
+    #[serde(default)]
+    dns_servers: Option<Vec<IpAddr>>,
+    #[serde(default = "default_wireguard_keepalive")]
+    persistent_keepalive: u16,
+    #[serde(default)]
+    routes: Vec<db::WireGuardPeerRouteRecord>,
+}
+
+#[derive(Deserialize)]
+struct WireGuardPeerConfigParams {
+    network_code: String,
+    peer_id: String,
 }
 
 #[derive(Deserialize)]
@@ -857,22 +971,182 @@ fn decode_wireguard_public_key(value: &str) -> Result<[u8; 32], &'static str> {
     Ok(public_key)
 }
 
+fn normalized_profile(
+    network: ipnet::Ipv4Net,
+    gateway: Ipv4Addr,
+    network_code: &str,
+    peer_id: &str,
+    dns_servers: Option<Vec<IpAddr>>,
+    persistent_keepalive: u16,
+    mut routes: Vec<db::WireGuardPeerRouteRecord>,
+    created_at: i64,
+) -> anyhow::Result<db::WireGuardPeerProfileRecord> {
+    let dns_servers = dns_servers
+        .map(|servers| {
+            anyhow::ensure!(
+                servers.len() <= 4,
+                "每个 WireGuard Peer 最多配置 4 个 DNS 地址"
+            );
+            let mut normalized = Vec::new();
+            for server in servers {
+                if !normalized.contains(&server) {
+                    normalized.push(server);
+                }
+            }
+            Ok(normalized)
+        })
+        .transpose()?;
+    anyhow::ensure!(
+        routes.len() <= 64,
+        "每个 WireGuard Peer 最多配置 64 条局域网路由"
+    );
+    let mut seen = std::collections::HashSet::new();
+    for route in &routes {
+        anyhow::ensure!(
+            !network.contains(&route.lan_network.network())
+                && !route.lan_network.contains(&network.network()),
+            "局域网路由 {} 不能与 VNT 网段 {} 重叠",
+            route.lan_network,
+            network
+        );
+        anyhow::ensure!(
+            network.contains(&route.vnt_cli_ip)
+                && route.vnt_cli_ip != network.network()
+                && route.vnt_cli_ip != network.broadcast()
+                && route.vnt_cli_ip != gateway,
+            "局域网路由网关 {} 不是有效的 VNT 客户端地址",
+            route.vnt_cli_ip
+        );
+        anyhow::ensure!(
+            seen.insert(route.lan_network),
+            "局域网路由 {} 重复",
+            route.lan_network
+        );
+    }
+    routes.sort_unstable_by_key(|route| {
+        (
+            std::cmp::Reverse(route.lan_network.prefix_len()),
+            u32::from(route.lan_network.network()),
+        )
+    });
+    Ok(db::WireGuardPeerProfileRecord {
+        network_code: network_code.to_string(),
+        peer_id: peer_id.to_string(),
+        dns_servers,
+        persistent_keepalive,
+        routes,
+        config_available: false,
+        created_at,
+        updated_at: unix_timestamp_i64(),
+    })
+}
+
+async fn wireguard_peer_response(
+    peer: WireGuardPeerVO,
+    global_dns: &[IpAddr],
+    network_state: &NetworkState,
+) -> anyhow::Result<WireGuardPeerResponse> {
+    let profile = db::load_wireguard_peer_profile(&peer.network_code, &peer.peer_id)
+        .await?
+        .ok_or_else(|| anyhow::anyhow!("WireGuard Peer 在读取 Profile 时消失"))?;
+    let mut response = WireGuardPeerResponse::from(peer);
+    response.dns_inherited = profile.dns_servers.is_none();
+    response.dns_servers = profile
+        .dns_servers
+        .clone()
+        .unwrap_or_else(|| global_dns.to_vec());
+    response.persistent_keepalive = profile.persistent_keepalive;
+    response.routes = profile.routes;
+    response.config_available = profile.config_available;
+    response.online = response
+        .ip
+        .is_some_and(|ip| network_state.is_wireguard_endpoint(ip));
+    response.status = if !response.enabled {
+        "disabled"
+    } else if response.online {
+        "online"
+    } else if response.ip.is_none() {
+        "unassigned"
+    } else {
+        "offline"
+    };
+    Ok(response)
+}
+
+fn allowed_ips(network: ipnet::Ipv4Net, routes: &[db::WireGuardPeerRouteRecord]) -> String {
+    std::iter::once(network.to_string())
+        .chain(routes.iter().map(|route| route.lan_network.to_string()))
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+fn render_wireguard_client_config(
+    private_key: &str,
+    address: Ipv4Addr,
+    dns_servers: &[IpAddr],
+    server_public_key: &str,
+    allowed_ips: &str,
+    endpoint: &str,
+    persistent_keepalive: u16,
+) -> String {
+    let dns_line = (!dns_servers.is_empty())
+        .then(|| {
+            format!(
+                "DNS = {}\n",
+                dns_servers
+                    .iter()
+                    .map(ToString::to_string)
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "[Interface]\nPrivateKey = {private_key}\nAddress = {address}/32\n{dns_line}\n[Peer]\nPublicKey = {server_public_key}\nAllowedIPs = {allowed_ips}\nEndpoint = {endpoint}\nPersistentKeepalive = {persistent_keepalive}\n"
+    )
+}
+
+fn unix_timestamp_i64() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_secs()
+        .min(i64::MAX as u64) as i64
+}
+
 async fn list_wireguard_peers(
     State(state): State<AppState>,
     Query(params): Query<WireGuardPeerListParams>,
 ) -> Response {
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&params.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
     match state
         .control_service
         .list_wireguard_peers(&params.network_code)
         .await
     {
-        Ok(peers) => ApiResponse::ok(
-            peers
-                .into_iter()
-                .map(WireGuardPeerResponse::from)
-                .collect::<Vec<_>>(),
-        )
-        .into_response(),
+        Ok(peers) => {
+            let mut responses = Vec::with_capacity(peers.len());
+            for peer in peers {
+                match wireguard_peer_response(
+                    peer,
+                    &state.status_config.wireguard_dns,
+                    &network_state,
+                )
+                .await
+                {
+                    Ok(response) => responses.push(response),
+                    Err(error) => return service_error(error),
+                }
+            }
+            ApiResponse::ok(responses).into_response()
+        }
         Err(error) => service_error(error),
     }
 }
@@ -885,12 +1159,49 @@ async fn create_wireguard_peer(
         Ok(public_key) => public_key,
         Err(error) => return ApiResponse::<WireGuardPeerResponse>::err(error).into_response(),
     };
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&body.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
+    let profile = match normalized_profile(
+        *network_state.network(),
+        network_state.gateway(),
+        &body.network_code,
+        &body.peer_id,
+        body.dns_servers,
+        body.persistent_keepalive,
+        body.routes,
+        unix_timestamp_i64(),
+    ) {
+        Ok(profile) => profile,
+        Err(error) => {
+            return ApiResponse::<WireGuardPeerResponse>::err(error.to_string()).into_response();
+        }
+    };
     match state
         .control_service
         .create_wireguard_peer(&body.network_code, &body.peer_id, public_key, body.enabled)
         .await
     {
-        Ok(peer) => ApiResponse::ok(WireGuardPeerResponse::from(peer)).into_response(),
+        Ok(peer) => {
+            if let Err(error) = wireguard_profile::save_profile(&profile).await {
+                let _ = state
+                    .control_service
+                    .delete_wireguard_peer(&body.network_code, &body.peer_id)
+                    .await;
+                return service_error(error);
+            }
+            match wireguard_peer_response(peer, &state.status_config.wireguard_dns, &network_state)
+                .await
+            {
+                Ok(response) => ApiResponse::ok(response).into_response(),
+                Err(error) => service_error(error),
+            }
+        }
         Err(error) => service_error(error),
     }
 }
@@ -925,10 +1236,42 @@ async fn generate_wireguard_peer(
             )
             .into_response();
         };
+        let Some(master_key_file) = state.status_config.wireguard_master_key_file.clone() else {
+            return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+                "尚未配置 wireguard_master_key_file，不能安全保存客户端私钥",
+            )
+            .into_response();
+        };
         WireGuardReady {
             listen_addr,
             server_public_key,
             endpoint,
+            master_key_file,
+            dns_servers: state.status_config.wireguard_dns.clone(),
+        }
+    };
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&body.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
+    let mut profile = match normalized_profile(
+        *network_state.network(),
+        network_state.gateway(),
+        &body.network_code,
+        &body.peer_id,
+        body.dns_servers,
+        body.persistent_keepalive,
+        body.routes,
+        unix_timestamp_i64(),
+    ) {
+        Ok(profile) => profile,
+        Err(error) => {
+            return ApiResponse::<GeneratedWireGuardPeerResponse>::err(error.to_string())
+                .into_response();
         }
     };
     let private_key = StaticSecret::random_from_rng(OsRng);
@@ -944,13 +1287,59 @@ async fn generate_wireguard_peer(
         .await
     {
         Ok((peer, network)) => {
+            profile.config_available = true;
+            if let Err(error) = wireguard_profile::save_generated_profile(
+                &ready.master_key_file,
+                &profile,
+                public_key,
+                private_key.to_bytes(),
+            )
+            .await
+            {
+                let _ = state
+                    .control_service
+                    .delete_wireguard_peer(&body.network_code, &body.peer_id)
+                    .await;
+                return service_error(error);
+            }
+            let peer_response =
+                match wireguard_peer_response(peer, &ready.dns_servers, &network_state).await {
+                    Ok(response) => response,
+                    Err(error) => return service_error(error),
+                };
+            let Some(address) = peer_response.ip else {
+                return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+                    "WireGuard Peer 没有分配客户端地址",
+                )
+                .into_response();
+            };
+            let private_key_base64 = BASE64_STANDARD.encode(private_key.to_bytes());
+            let server_public_key = BASE64_STANDARD.encode(ready.server_public_key);
+            let allowed_ips = allowed_ips(network, &profile.routes);
+            let dns_servers = profile
+                .dns_servers
+                .clone()
+                .unwrap_or_else(|| ready.dns_servers.clone());
+            let client_config = render_wireguard_client_config(
+                &private_key_base64,
+                address,
+                &dns_servers,
+                &server_public_key,
+                &allowed_ips,
+                &ready.endpoint,
+                profile.persistent_keepalive,
+            );
             let mut response = ApiResponse::ok(GeneratedWireGuardPeerResponse {
-                peer: WireGuardPeerResponse::from(peer),
-                private_key: BASE64_STANDARD.encode(private_key.to_bytes()),
-                server_public_key: BASE64_STANDARD.encode(ready.server_public_key),
+                peer: peer_response,
+                private_key: private_key_base64,
+                server_public_key,
                 listen_addr: ready.listen_addr.to_string(),
                 endpoint: ready.endpoint,
-                allowed_ips: network.to_string(),
+                allowed_ips,
+                dns_servers,
+                persistent_keepalive: profile.persistent_keepalive,
+                routes: profile.routes,
+                client_config,
             })
             .into_response();
             response
@@ -962,16 +1351,231 @@ async fn generate_wireguard_peer(
     }
 }
 
+async fn update_wireguard_peer_profile(
+    State(state): State<AppState>,
+    Json(body): Json<UpdateWireGuardPeerProfileRequest>,
+) -> Response {
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&body.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
+    let existing = match db::load_wireguard_peer_profile(&body.network_code, &body.peer_id).await {
+        Ok(Some(profile)) => profile,
+        Ok(None) => return (StatusCode::NOT_FOUND, "WireGuard Peer 不存在").into_response(),
+        Err(error) => return service_error(error),
+    };
+    let profile = match normalized_profile(
+        *network_state.network(),
+        network_state.gateway(),
+        &body.network_code,
+        &body.peer_id,
+        body.dns_servers,
+        body.persistent_keepalive,
+        body.routes,
+        existing.created_at,
+    ) {
+        Ok(profile) => profile,
+        Err(error) => {
+            return ApiResponse::<WireGuardPeerResponse>::err(error.to_string()).into_response();
+        }
+    };
+    if let Err(error) = wireguard_profile::save_profile(&profile).await {
+        return service_error(error);
+    }
+    if let Err(error) = state
+        .control_service
+        .reload_wireguard_peer_profile(&body.network_code, &body.peer_id)
+        .await
+    {
+        return service_error(error);
+    }
+    match state
+        .control_service
+        .list_wireguard_peers(&body.network_code)
+        .await
+    {
+        Ok(peers) => {
+            let Some(peer) = peers.into_iter().find(|peer| peer.peer_id == body.peer_id) else {
+                return (StatusCode::NOT_FOUND, "WireGuard Peer 不存在").into_response();
+            };
+            match wireguard_peer_response(peer, &state.status_config.wireguard_dns, &network_state)
+                .await
+            {
+                Ok(response) => ApiResponse::ok(response).into_response(),
+                Err(error) => service_error(error),
+            }
+        }
+        Err(error) => service_error(error),
+    }
+}
+
+async fn get_wireguard_peer_config(
+    State(state): State<AppState>,
+    Query(params): Query<WireGuardPeerConfigParams>,
+) -> Response {
+    let profile = match db::load_wireguard_peer_profile(&params.network_code, &params.peer_id).await
+    {
+        Ok(Some(profile)) if profile.config_available => profile,
+        Ok(Some(_)) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse::<()>::err(
+                    "该 Peer 是公钥导入项，服务端没有客户端私钥",
+                )),
+            )
+                .into_response();
+        }
+        Ok(None) => return (StatusCode::NOT_FOUND, "WireGuard Peer 不存在").into_response(),
+        Err(error) => return service_error(error),
+    };
+    let ready = if let Some(autostart) = &state.wireguard_autostart {
+        match autostart.ensure_started(&state.control_service).await {
+            Ok(ready) => ready,
+            Err(error) => return service_error(error),
+        }
+    } else {
+        let Some((listen_addr, server_public_key, _)) =
+            state.control_service.wireguard_runtime_status()
+        else {
+            return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+                "WireGuard UDP 服务尚未运行",
+            )
+            .into_response();
+        };
+        let Some(endpoint) = state.status_config.wireguard_public_endpoint.clone() else {
+            return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+                "尚未配置 wireguard_public_endpoint",
+            )
+            .into_response();
+        };
+        let Some(master_key_file) = state.status_config.wireguard_master_key_file.clone() else {
+            return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+                "尚未配置 wireguard_master_key_file",
+            )
+            .into_response();
+        };
+        WireGuardReady {
+            listen_addr,
+            server_public_key,
+            endpoint,
+            master_key_file,
+            dns_servers: state.status_config.wireguard_dns.clone(),
+        }
+    };
+    let private_key = match wireguard_profile::load_private_key(
+        &ready.master_key_file,
+        &params.network_code,
+        &params.peer_id,
+    )
+    .await
+    {
+        Ok(Some(private_key)) => private_key,
+        Ok(None) => {
+            return (
+                StatusCode::CONFLICT,
+                Json(ApiResponse::<()>::err("该 Peer 没有可用的客户端私钥")),
+            )
+                .into_response();
+        }
+        Err(error) => return service_error(error),
+    };
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&params.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
+    let peers = match state
+        .control_service
+        .list_wireguard_peers(&params.network_code)
+        .await
+    {
+        Ok(peers) => peers,
+        Err(error) => return service_error(error),
+    };
+    let Some(peer) = peers
+        .into_iter()
+        .find(|peer| peer.peer_id == params.peer_id)
+    else {
+        return (StatusCode::NOT_FOUND, "WireGuard Peer 不存在").into_response();
+    };
+    let Some(address) = peer.ip else {
+        return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
+            "WireGuard Peer 尚未分配 IP",
+        )
+        .into_response();
+    };
+    let peer_response =
+        match wireguard_peer_response(peer, &ready.dns_servers, &network_state).await {
+            Ok(response) => response,
+            Err(error) => return service_error(error),
+        };
+    let private_key = BASE64_STANDARD.encode(*private_key);
+    let server_public_key = BASE64_STANDARD.encode(ready.server_public_key);
+    let allowed_ips = allowed_ips(*network_state.network(), &profile.routes);
+    let dns_servers = profile
+        .dns_servers
+        .clone()
+        .unwrap_or_else(|| ready.dns_servers.clone());
+    let client_config = render_wireguard_client_config(
+        &private_key,
+        address,
+        &dns_servers,
+        &server_public_key,
+        &allowed_ips,
+        &ready.endpoint,
+        profile.persistent_keepalive,
+    );
+    let mut response = ApiResponse::ok(GeneratedWireGuardPeerResponse {
+        peer: peer_response,
+        private_key,
+        server_public_key,
+        listen_addr: ready.listen_addr.to_string(),
+        endpoint: ready.endpoint,
+        allowed_ips,
+        dns_servers,
+        persistent_keepalive: profile.persistent_keepalive,
+        routes: profile.routes,
+        client_config,
+    })
+    .into_response();
+    response
+        .headers_mut()
+        .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+    response
+}
+
 async fn set_wireguard_peer_enabled(
     State(state): State<AppState>,
     Json(body): Json<SetWireGuardPeerEnabledRequest>,
 ) -> Response {
+    let network_state = match state
+        .control_service
+        .wireguard_network_state(&body.network_code)
+        .await
+    {
+        Ok(network_state) => network_state,
+        Err(error) => return service_error(error),
+    };
     match state
         .control_service
         .set_wireguard_peer_enabled(&body.network_code, &body.peer_id, body.enabled)
         .await
     {
-        Ok(peer) => ApiResponse::ok(WireGuardPeerResponse::from(peer)).into_response(),
+        Ok(peer) => {
+            match wireguard_peer_response(peer, &state.status_config.wireguard_dns, &network_state)
+                .await
+            {
+                Ok(response) => ApiResponse::ok(response).into_response(),
+                Err(error) => service_error(error),
+            }
+        }
         Err(error) => service_error(error),
     }
 }
@@ -1207,6 +1811,11 @@ fn build_app(app_state: AppState) -> Router {
         .route("/wireguard/peers", get(list_wireguard_peers))
         .route("/wireguard/peers", post(create_wireguard_peer))
         .route("/wireguard/peers/generated", post(generate_wireguard_peer))
+        .route(
+            "/wireguard/peers/profile",
+            put(update_wireguard_peer_profile),
+        )
+        .route("/wireguard/peers/config", get(get_wireguard_peer_config))
         .route("/wireguard/peers/enabled", put(set_wireguard_peer_enabled))
         .route("/wireguard/peers", delete(delete_wireguard_peer))
         .route("/wireguard/peer_ips", get(list_wireguard_peer_ips))
@@ -1314,6 +1923,8 @@ mod tests {
             websocket_bind: Some("0.0.0.0:29872".parse().unwrap()),
             peer_server_bind: None,
             wireguard_configured: false,
+            wireguard_dns: vec![],
+            wireguard_master_key_file: None,
             wireguard_public_endpoint: None,
             wireguard_max_active_peers: 4096,
         }
@@ -1412,14 +2023,19 @@ mod tests {
         assert!(application.contains("客户端配置只显示这一次"));
         assert!(application.contains("放弃并删除 Peer"));
         assert!(application.contains("navigator.clipboard.writeText"));
+        assert!(
+            application.contains("if (generated?.client_config) return generated.client_config")
+        );
         assert!(application.contains("PrivateKey = ${generated.private_key}"));
-        assert!(application.contains("PersistentKeepalive = 25"));
+        assert!(application.contains("PersistentKeepalive = ${keepalive}"));
         assert!(application.contains("window.QRCode.toCanvas"));
         assert!(application.contains("downloadGeneratedWireGuardConfig"));
         for endpoint in [
             "/wireguard/peers?network_code=",
             "request('/wireguard/peers/generated'",
             "/wireguard/peers/enabled",
+            "/wireguard/peers/profile",
+            "/wireguard/peers/config?network_code=",
             "/wireguard/peer_ips?network_code=",
             "request('/wireguard/peers'",
             "request('/wireguard/peer_ips'",

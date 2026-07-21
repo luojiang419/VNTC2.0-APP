@@ -1,12 +1,14 @@
 use crate::protocol::ip_packet_protocol::NetPacket;
-use crate::server::control_server::db::{self, WireGuardRuntimePeer};
+use crate::server::control_server::db::{self, WireGuardPeerRouteRecord, WireGuardRuntimePeer};
 use crate::server::control_server::service::ControlService;
 use crate::server::control_server::wireguard_identity::WireGuardIdentity;
 use crate::server::network_state_provider::{
     LocalDeliveryResult, NetworkState, WireGuardBridgePacket,
 };
 use crate::server::wireguard_bridge::{
-    RelayOrigin, build_wireguard_relay, validate_inner_ipv4, validate_vnt_relay,
+    RelayOrigin, build_gateway_echo_reply, build_wireguard_relay, build_wireguard_subnet_relay,
+    validate_broadcast_inner_ipv4, validate_inner_ipv4, validate_subnet_inner_ipv4,
+    validate_vnt_relay, validate_vnt_subnet_relay,
 };
 use crate::server::wireguard_p2p::{
     AgentControlParse, AgentControlRequest, build_agent_response, parse_agent_control,
@@ -18,6 +20,7 @@ use boringtun::noise::handshake::parse_handshake_anon;
 use boringtun::noise::rate_limiter::RateLimiter;
 use boringtun::noise::{Packet, Tunn, TunnResult};
 use boringtun::x25519::{PublicKey, StaticSecret};
+use pnet_packet::ipv4::Ipv4Packet;
 use rand::Rng;
 use std::collections::{HashMap, HashSet};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr};
@@ -55,6 +58,7 @@ struct ActivePeer {
     stats: ActivePeerStats,
     last_p2p_request: Option<Instant>,
     p2p_leases: HashMap<Ipv4Addr, u64>,
+    routes: Vec<WireGuardPeerRouteRecord>,
 }
 
 #[derive(Default)]
@@ -180,6 +184,21 @@ struct WireGuardRuntime {
 enum PacketDestination {
     PublicKey([u8; 32]),
     ReceiverIndex(u32),
+}
+
+enum WireGuardIngressRelay {
+    Unicast {
+        destination: Ipv4Addr,
+        data: bytes::Bytes,
+    },
+    Broadcast {
+        source: Ipv4Addr,
+        inner: Vec<u8>,
+    },
+    Subnet {
+        vnt_gateway: Ipv4Addr,
+        data: bytes::Bytes,
+    },
 }
 
 impl WireGuardRuntime {
@@ -331,6 +350,7 @@ impl WireGuardRuntime {
                 stats: ActivePeerStats::default(),
                 last_p2p_request: None,
                 p2p_leases: HashMap::new(),
+                routes: record.routes,
             },
         );
         Some(key)
@@ -344,73 +364,150 @@ impl WireGuardRuntime {
             let mut outbound = Vec::new();
             let mut relay = None;
             let mut agent_control = None;
-            let processed =
-                match peer
-                    .tunnel
-                    .decapsulate(Some(source.ip()), packet, &mut self.output_buffer)
-                {
-                    TunnResult::Done => true,
-                    TunnResult::Err(_) => {
+            let mut direct_reply = None;
+            let processed = match peer.tunnel.decapsulate(
+                Some(source.ip()),
+                packet,
+                &mut self.output_buffer,
+            ) {
+                TunnResult::Done => true,
+                TunnResult::Err(_) => {
+                    peer.stats.rejected_packets += 1;
+                    false
+                }
+                TunnResult::WriteToNetwork(response) => {
+                    outbound.push(response.to_vec());
+                    true
+                }
+                TunnResult::WriteToTunnelV4(inner, source_ip) => {
+                    if !accepts_inner_source(peer.reserved_ip, IpAddr::V4(source_ip)) {
                         peer.stats.rejected_packets += 1;
-                        false
-                    }
-                    TunnResult::WriteToNetwork(response) => {
-                        outbound.push(response.to_vec());
-                        true
-                    }
-                    TunnResult::WriteToTunnelV4(inner, source_ip) => {
-                        if !accepts_inner_source(peer.reserved_ip, IpAddr::V4(source_ip)) {
-                            peer.stats.rejected_packets += 1;
-                        } else {
-                            match parse_agent_control(
-                                inner,
-                                peer.reserved_ip,
-                                peer.network_state.gateway(),
-                            ) {
-                                AgentControlParse::Request(request) => {
-                                    let now = Instant::now();
-                                    if peer.last_p2p_request.is_some_and(|last| {
-                                        now.saturating_duration_since(last) < P2P_REQUEST_INTERVAL
-                                    }) {
-                                        peer.stats.dropped_packets += 1;
-                                    } else {
-                                        peer.last_p2p_request = Some(now);
-                                        agent_control = Some(request);
-                                    }
+                    } else {
+                        match parse_agent_control(
+                            inner,
+                            peer.reserved_ip,
+                            peer.network_state.gateway(),
+                        ) {
+                            AgentControlParse::Request(request) => {
+                                let now = Instant::now();
+                                if peer.last_p2p_request.is_some_and(|last| {
+                                    now.saturating_duration_since(last) < P2P_REQUEST_INTERVAL
+                                }) {
+                                    peer.stats.dropped_packets += 1;
+                                } else {
+                                    peer.last_p2p_request = Some(now);
+                                    agent_control = Some(request);
                                 }
-                                AgentControlParse::Invalid => peer.stats.rejected_packets += 1,
-                                AgentControlParse::NotControl => {
-                                    match validate_inner_ipv4(
-                                        inner,
-                                        peer.reserved_ip,
-                                        *peer.network_state.network(),
-                                        peer.network_state.gateway(),
-                                    ) {
-                                        Ok(route) => {
-                                            peer.stats.rx_bytes += inner.len() as u64;
-                                            relay = Some((
-                                                route.destination,
-                                                build_wireguard_relay(inner, route),
-                                            ));
-                                        }
-                                        Err(_) => peer.stats.rejected_packets += 1,
+                            }
+                            AgentControlParse::Invalid => peer.stats.rejected_packets += 1,
+                            AgentControlParse::NotControl => {
+                                match build_gateway_echo_reply(
+                                    inner,
+                                    peer.reserved_ip,
+                                    peer.network_state.gateway(),
+                                ) {
+                                    Ok(Some(reply)) => {
+                                        peer.stats.rx_bytes += inner.len() as u64;
+                                        direct_reply = Some(reply);
                                     }
+                                    Ok(None) => {
+                                        if let Ok(route) = validate_broadcast_inner_ipv4(
+                                            inner,
+                                            peer.reserved_ip,
+                                            *peer.network_state.network(),
+                                            peer.network_state.gateway(),
+                                        ) {
+                                            peer.stats.rx_bytes += inner.len() as u64;
+                                            relay = Some(WireGuardIngressRelay::Broadcast {
+                                                source: route.source,
+                                                inner: inner.to_vec(),
+                                            });
+                                        } else {
+                                            match validate_inner_ipv4(
+                                                inner,
+                                                peer.reserved_ip,
+                                                *peer.network_state.network(),
+                                                peer.network_state.gateway(),
+                                            ) {
+                                                Ok(route) => {
+                                                    peer.stats.rx_bytes += inner.len() as u64;
+                                                    relay = Some(WireGuardIngressRelay::Unicast {
+                                                        destination: route.destination,
+                                                        data: build_wireguard_relay(inner, route),
+                                                    });
+                                                }
+                                                Err(_) => {
+                                                    let subnet =
+                                                        Ipv4Packet::new(inner).and_then(|packet| {
+                                                            longest_prefix_route(
+                                                                &peer.routes,
+                                                                packet.get_destination(),
+                                                            )
+                                                        });
+                                                    if let Some(route_record) = subnet {
+                                                        match validate_subnet_inner_ipv4(
+                                                            inner,
+                                                            peer.reserved_ip,
+                                                            *peer.network_state.network(),
+                                                            peer.network_state.gateway(),
+                                                            route_record.lan_network,
+                                                        ) {
+                                                            Ok(route) => {
+                                                                peer.stats.rx_bytes +=
+                                                                    inner.len() as u64;
+                                                                relay = Some(
+                                                                        WireGuardIngressRelay::Subnet {
+                                                                            vnt_gateway: route_record
+                                                                                .vnt_cli_ip,
+                                                                            data:
+                                                                                build_wireguard_subnet_relay(
+                                                                                    inner,
+                                                                                    route,
+                                                                                    route_record
+                                                                                        .vnt_cli_ip,
+                                                                                ),
+                                                                        },
+                                                                    );
+                                                            }
+                                                            Err(_) => {
+                                                                peer.stats.rejected_packets += 1;
+                                                            }
+                                                        }
+                                                    } else {
+                                                        peer.stats.rejected_packets += 1;
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    Err(_) => peer.stats.rejected_packets += 1,
                                 }
                             }
                         }
-                        true
                     }
-                    TunnResult::WriteToTunnelV6(_, source_ip) => {
-                        let _ = accepts_inner_source(peer.reserved_ip, IpAddr::V6(source_ip));
-                        peer.stats.rejected_packets += 1;
-                        true
-                    }
-                };
+                    true
+                }
+                TunnResult::WriteToTunnelV6(_, source_ip) => {
+                    let _ = accepts_inner_source(peer.reserved_ip, IpAddr::V6(source_ip));
+                    peer.stats.rejected_packets += 1;
+                    true
+                }
+            };
             if !processed {
                 return;
             }
 
             peer.endpoint = Some(source);
+            if let Some(reply) = direct_reply {
+                match peer.tunnel.encapsulate(&reply, &mut self.output_buffer) {
+                    TunnResult::WriteToNetwork(packet) => {
+                        peer.stats.tx_bytes += reply.len() as u64;
+                        outbound.push(packet.to_vec());
+                    }
+                    TunnResult::Err(_) => peer.stats.rejected_packets += 1,
+                    _ => peer.stats.dropped_packets += 1,
+                }
+            }
             while let TunnResult::WriteToNetwork(packet) =
                 peer.tunnel.decapsulate(None, &[], &mut self.output_buffer)
             {
@@ -426,15 +523,51 @@ impl WireGuardRuntime {
                 peer.stats.dropped_packets += 1;
             }
         }
-        if let Some((destination, data)) = relay {
-            let result = self
-                .control_service
-                .route_wireguard_relay(&key.network_code, destination, data, RelayOrigin::WireGuard)
-                .await;
-            if result != LocalDeliveryResult::Delivered
-                && let Some(peer) = self.peers.get_mut(key)
-            {
-                peer.stats.dropped_packets += 1;
+        if let Some(relay) = relay {
+            match relay {
+                WireGuardIngressRelay::Unicast { destination, data } => {
+                    let result = self
+                        .control_service
+                        .route_wireguard_relay(
+                            &key.network_code,
+                            destination,
+                            data,
+                            RelayOrigin::WireGuard,
+                        )
+                        .await;
+                    if result != LocalDeliveryResult::Delivered
+                        && let Some(peer) = self.peers.get_mut(key)
+                    {
+                        peer.stats.dropped_packets += 1;
+                    }
+                }
+                WireGuardIngressRelay::Broadcast { source, inner } => {
+                    if !self.control_service.route_wireguard_broadcast(
+                        &key.network_code,
+                        source,
+                        &inner,
+                        RelayOrigin::WireGuard,
+                    ) && let Some(peer) = self.peers.get_mut(key)
+                    {
+                        peer.stats.dropped_packets += 1;
+                    }
+                }
+                WireGuardIngressRelay::Subnet { vnt_gateway, data } => {
+                    let result = self
+                        .control_service
+                        .route_wireguard_relay(
+                            &key.network_code,
+                            vnt_gateway,
+                            data,
+                            RelayOrigin::WireGuard,
+                        )
+                        .await;
+                    if result != LocalDeliveryResult::Delivered
+                        && let Some(peer) = self.peers.get_mut(key)
+                    {
+                        peer.stats.dropped_packets += 1;
+                    }
+                }
             }
         }
         if let Some(request) = agent_control {
@@ -520,14 +653,40 @@ impl WireGuardRuntime {
             let Some(peer) = self.peers.get_mut(&key) else {
                 return;
             };
-            if validate_vnt_relay(
-                &packet,
-                Ipv4Addr::from(packet.src_id()),
-                *peer.network_state.network(),
-                peer.network_state.gateway(),
-            )
-            .is_err()
-            {
+            let source = Ipv4Addr::from(packet.src_id());
+            let valid = match packet.msg_type() {
+                Ok(crate::protocol::ip_packet_protocol::MsgType::WireGuardRelay) => {
+                    validate_vnt_relay(
+                        &packet,
+                        source,
+                        *peer.network_state.network(),
+                        peer.network_state.gateway(),
+                    )
+                    .is_ok()
+                }
+                Ok(crate::protocol::ip_packet_protocol::MsgType::WireGuardBroadcastRelay) => {
+                    validate_broadcast_inner_ipv4(
+                        packet.payload(),
+                        source,
+                        *peer.network_state.network(),
+                        peer.network_state.gateway(),
+                    )
+                    .is_ok()
+                }
+                Ok(crate::protocol::ip_packet_protocol::MsgType::WireGuardSubnetRelay) => {
+                    validate_vnt_subnet_relay(
+                        &packet,
+                        source,
+                        *peer.network_state.network(),
+                        peer.network_state.gateway(),
+                    )
+                    .ok()
+                    .and_then(|inner_route| longest_prefix_route(&peer.routes, inner_route.source))
+                    .is_some_and(|route| route.vnt_cli_ip == source)
+                }
+                _ => false,
+            };
+            if !valid {
                 peer.stats.rejected_packets += 1;
                 return;
             }
@@ -631,6 +790,16 @@ fn accepts_inner_source(reserved_ip: Ipv4Addr, source_ip: IpAddr) -> bool {
     source_ip == IpAddr::V4(reserved_ip)
 }
 
+fn longest_prefix_route(
+    routes: &[WireGuardPeerRouteRecord],
+    destination: Ipv4Addr,
+) -> Option<&WireGuardPeerRouteRecord> {
+    routes
+        .iter()
+        .filter(|route| route.lan_network.contains(&destination))
+        .max_by_key(|route| route.lan_network.prefix_len())
+}
+
 fn allocate_receiver_index_with(
     used: &HashSet<u32>,
     mut generate: impl FnMut() -> u32,
@@ -678,6 +847,33 @@ mod tests {
             reserved,
             "2001:db8::1".parse().unwrap()
         ));
+    }
+
+    #[test]
+    fn subnet_routes_use_longest_prefix_match() {
+        let routes = vec![
+            WireGuardPeerRouteRecord {
+                lan_network: "192.168.0.0/16".parse().unwrap(),
+                vnt_cli_ip: Ipv4Addr::new(10, 26, 0, 10),
+            },
+            WireGuardPeerRouteRecord {
+                lan_network: "192.168.10.0/24".parse().unwrap(),
+                vnt_cli_ip: Ipv4Addr::new(10, 26, 0, 11),
+            },
+        ];
+        assert_eq!(
+            longest_prefix_route(&routes, Ipv4Addr::new(192, 168, 10, 25))
+                .unwrap()
+                .vnt_cli_ip,
+            Ipv4Addr::new(10, 26, 0, 11)
+        );
+        assert_eq!(
+            longest_prefix_route(&routes, Ipv4Addr::new(192, 168, 20, 25))
+                .unwrap()
+                .vnt_cli_ip,
+            Ipv4Addr::new(10, 26, 0, 10)
+        );
+        assert!(longest_prefix_route(&routes, Ipv4Addr::new(172, 16, 0, 1)).is_none());
     }
 
     #[tokio::test]
@@ -788,6 +984,7 @@ mod tests {
                     stats: ActivePeerStats::default(),
                     last_p2p_request: None,
                     p2p_leases: HashMap::new(),
+                    routes: vec![],
                 },
             )]),
             peers_by_public_key: HashMap::from([(client_public.to_bytes(), key.clone())]),

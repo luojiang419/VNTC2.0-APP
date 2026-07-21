@@ -169,6 +169,7 @@ namespace Vnts2.WindowsManager
                         { "WireGuardMasterKeyFile", settings.WireGuardMasterKeyFile },
                         { "WireGuardBind", settings.WireGuardBind },
                         { "WireGuardPublicEndpoint", settings.WireGuardPublicEndpoint },
+                        { "WireGuardDns", settings.WireGuardDns },
                         { "ServerQuicEnabled", settings.ServerQuicEnabled },
                         { "BackupPath", backupPath },
                         { "StructuredEditor", true }
@@ -529,6 +530,7 @@ namespace Vnts2.WindowsManager
         internal string WireGuardBind;
         internal string WireGuardPublicEndpoint;
         internal int WireGuardMaxActivePeers;
+        internal List<string> WireGuardDns = new List<string>();
         internal bool ServerQuicEnabled;
         internal string ServerQuicBind;
         internal List<string> PeerServers = new List<string>();
@@ -626,7 +628,7 @@ namespace Vnts2.WindowsManager
         {
             "tcp_bind", "quic_bind", "ws_bind", "network", "white_list", "lease_duration", "persistence",
             "web_bind", "username", "password", "cert", "key",
-            "wireguard_master_key_file", "wireguard_bind", "wireguard_public_endpoint", "wireguard_max_active_peers",
+            "wireguard_master_key_file", "wireguard_bind", "wireguard_public_endpoint", "wireguard_dns", "wireguard_max_active_peers",
             "server_quic_bind", "peer_servers", "server_token"
         };
 
@@ -654,6 +656,7 @@ namespace Vnts2.WindowsManager
                 WireGuardMasterKeyFile = wireGuardKey,
                 WireGuardBind = wireGuardBind,
                 WireGuardPublicEndpoint = wireGuardEndpoint,
+                WireGuardDns = GetStringList(values, "wireguard_dns"),
                 WireGuardMaxActivePeers = (int)Math.Min(int.MaxValue, GetUnsigned(values, "wireguard_max_active_peers", 4096)),
                 ServerQuicBind = GetString(values, "server_quic_bind"),
                 PeerServers = GetStringList(values, "peer_servers"),
@@ -770,6 +773,7 @@ namespace Vnts2.WindowsManager
                 values["wireguard_master_key_file"] = Quote(settings.WireGuardMasterKeyFile);
                 values["wireguard_bind"] = Quote(settings.WireGuardBind);
                 AddOptional(values, "wireguard_public_endpoint", settings.WireGuardPublicEndpoint);
+                values["wireguard_dns"] = QuoteList(settings.WireGuardDns);
             }
             if (settings.ServerQuicEnabled)
             {
@@ -910,6 +914,7 @@ namespace Vnts2.WindowsManager
         private readonly TextBox wireGuardKeyBox;
         private readonly TextBox wireGuardBindBox;
         private readonly TextBox wireGuardPublicBox;
+        private readonly TextBox wireGuardDnsBox;
         private readonly TextBox wireGuardMaxBox;
         private readonly CheckBox serverQuicEnabledBox;
         private readonly TextBox serverQuicBindBox;
@@ -1102,8 +1107,20 @@ namespace Vnts2.WindowsManager
             };
             RestrictToDigits(wireGuardMaxBox);
             wireGuardPage.Controls.Add(wireGuardMaxBox);
-            AddHint(wireGuardPage, "关闭 WireGuard 时会移除三项启用配置，但保留最大 Peer 数设置。", 205, 364);
-            wireGuardSettingControls.AddRange(new Control[] { wireGuardKeyBox, wireGuardBindBox, wireGuardPublicBox, wireGuardMaxBox });
+            AddLabel(wireGuardPage, "默认 DNS", 402);
+            wireGuardDnsBox = new TextBox
+            {
+                Location = new Point(205, 397),
+                Size = new Size(670, 68),
+                Multiline = true,
+                ScrollBars = ScrollBars.Vertical,
+                Font = new Font("Segoe UI", 11F),
+                Text = string.Join(Environment.NewLine, settings.WireGuardDns)
+            };
+            wireGuardPage.Controls.Add(wireGuardDnsBox);
+            FitToRight(wireGuardPage, wireGuardDnsBox, 24);
+            AddHint(wireGuardPage, "每行或逗号分隔一个 IPv4/IPv6 DNS，最多 4 个；Peer 可在 Web/Flutter 管理端覆盖。", 205, 472);
+            wireGuardSettingControls.AddRange(new Control[] { wireGuardKeyBox, wireGuardBindBox, wireGuardPublicBox, wireGuardMaxBox, wireGuardDnsBox });
             tabs.TabPages.Add(wireGuardPage);
 
             TabPage serverPage = CreatePage("服务器互联");
@@ -1360,6 +1377,7 @@ namespace Vnts2.WindowsManager
                 WireGuardMasterKeyFile = wireGuardKeyBox.Text.Trim(),
                 WireGuardBind = wireGuardBindBox.Text.Trim(),
                 WireGuardPublicEndpoint = wireGuardPublicBox.Text.Trim(),
+                WireGuardDns = ReadDelimitedValues(wireGuardDnsBox.Text),
                 WireGuardMaxActivePeers = (int)ParseUnsigned(wireGuardMaxBox.Text, "最大活跃 Peer", 1, 1000000),
                 ServerQuicEnabled = serverQuicEnabledBox.Checked,
                 ServerQuicBind = serverQuicBindBox.Text.Trim(),
@@ -1373,6 +1391,15 @@ namespace Vnts2.WindowsManager
         private static List<string> ReadLines(string value)
         {
             return (value ?? string.Empty).Replace("\r\n", "\n").Split('\n')
+                .Select(delegate(string item) { return item.Trim(); })
+                .Where(delegate(string item) { return item.Length > 0; })
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .ToList();
+        }
+
+        private static List<string> ReadDelimitedValues(string value)
+        {
+            return (value ?? string.Empty).Replace("\r\n", "\n").Split(new[] { '\n', ',' })
                 .Select(delegate(string item) { return item.Trim(); })
                 .Where(delegate(string item) { return item.Length > 0; })
                 .Distinct(StringComparer.OrdinalIgnoreCase)
@@ -1407,6 +1434,14 @@ namespace Vnts2.WindowsManager
                 if (settings.WireGuardPublicEndpoint.StartsWith("0.0.0.0:", StringComparison.OrdinalIgnoreCase) ||
                     settings.WireGuardPublicEndpoint.StartsWith("[::]:", StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException("WireGuard 外部访问地址不能使用未指定地址。");
+                if (settings.WireGuardDns.Count > 4)
+                    throw new InvalidOperationException("WireGuard 默认 DNS 最多允许填写 4 个地址。");
+                foreach (string dns in settings.WireGuardDns)
+                {
+                    IPAddress address;
+                    if (!IPAddress.TryParse(dns, out address))
+                        throw new InvalidOperationException("WireGuard 默认 DNS 不是有效的 IPv4/IPv6 地址：" + dns);
+                }
             }
             if (settings.ServerQuicEnabled)
             {

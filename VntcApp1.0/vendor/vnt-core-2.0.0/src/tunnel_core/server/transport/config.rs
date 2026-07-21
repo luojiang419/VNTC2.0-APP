@@ -1,4 +1,6 @@
-use crate::protocol::control_message::{RegRequestMsg, RegistrationMode, WireGuardP2pRegistration};
+use crate::protocol::control_message::{
+    CLIENT_CAP_WIREGUARD_EXTENDED_RELAY, RegRequestMsg, RegistrationMode, WireGuardP2pRegistration,
+};
 use crate::tls::verifier::CertValidationMode;
 use anyhow::Context;
 use rand::seq::SliceRandom;
@@ -106,6 +108,11 @@ impl ConnectRegConfig {
             registration_mode,
             allow_wire_guard: self.allow_wire_guard,
             wireguard_p2p: self.wireguard_p2p,
+            client_capabilities: if self.allow_wire_guard {
+                CLIENT_CAP_WIREGUARD_EXTENDED_RELAY
+            } else {
+                0
+            },
         }
     }
     pub async fn to_connect_config(&self) -> anyhow::Result<ConnectConfig> {

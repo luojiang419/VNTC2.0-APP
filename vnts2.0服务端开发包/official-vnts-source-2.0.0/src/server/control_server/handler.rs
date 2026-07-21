@@ -1,6 +1,7 @@
 use crate::protocol::control_message::{
-    ClientSimpleInfoList, ConfirmRegResponseMsg, ErrorResponseMsg, RegResponseMsg, RequestMessage,
-    ResponseMessage, SelectiveBroadcast,
+    CLIENT_CAP_WIREGUARD_BROADCAST_RELAY, CLIENT_CAP_WIREGUARD_SUBNET_RELAY, ClientSimpleInfoList,
+    ConfirmRegResponseMsg, ErrorResponseMsg, RegResponseMsg, RequestMessage, ResponseMessage,
+    SelectiveBroadcast,
 };
 use crate::protocol::ip_packet_protocol::{HEAD_LENGTH, MsgType, NetPacket};
 use crate::protocol::rpc_message::rpc_message_request::RpcReqPayload;
@@ -8,7 +9,9 @@ use crate::protocol::rpc_message::rpc_message_response::RpcResPayload;
 use crate::protocol::rpc_message::{ClientListResponse, RpcMessageRequest, RpcMessageResponse};
 use crate::server::control_server::service::{ControlService, RegistrationStatus, Session};
 use crate::server::network_state_provider::LocalDeliveryResult;
-use crate::server::wireguard_bridge::{RelayOrigin, validate_vnt_relay};
+use crate::server::wireguard_bridge::{
+    RelayOrigin, validate_vnt_broadcast_relay, validate_vnt_relay, validate_vnt_subnet_relay,
+};
 use anyhow::bail;
 use bytes::{Bytes, BytesMut};
 use pnet_packet::Packet;
@@ -145,6 +148,9 @@ impl ControlHandler {
         let Some(session) = self.session.as_ref() else {
             bail!("Session is not active");
         };
+        if !session.cluster_lease_valid() {
+            bail!("集群租约已过期，请重新连接");
+        }
         let mut packet = NetPacket::new(&mut buf)?;
         let msg_type = packet.msg_type()?;
         let Some(sender) = self.sender.upgrade() else {
@@ -240,6 +246,9 @@ impl ControlHandler {
         }
 
         let session = self.session.as_ref().unwrap();
+        if !session.cluster_lease_valid() {
+            bail!("集群租约已过期，请重新连接");
+        }
 
         session.network_state.record_tx_traffic(src, packet_len);
 
@@ -289,6 +298,48 @@ impl ControlHandler {
             MsgType::WireGuardRelay => {
                 if !session.allow_wire_guard
                     || validate_vnt_relay(
+                        &packet,
+                        session.ip,
+                        *session.network_state.network(),
+                        session.network_state.gateway(),
+                    )
+                    .is_err()
+                    || !packet.decr_ttl()
+                {
+                    return Ok(());
+                }
+                let data = buf.freeze();
+                self.control_service
+                    .route_wireguard_relay(&session.network_code, dest, data, RelayOrigin::Vnt)
+                    .await;
+            }
+            MsgType::WireGuardBroadcastRelay => {
+                if !session.allow_wire_guard
+                    || session.client_capabilities & CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+                        != CLIENT_CAP_WIREGUARD_BROADCAST_RELAY
+                    || validate_vnt_broadcast_relay(
+                        &packet,
+                        session.ip,
+                        *session.network_state.network(),
+                        session.network_state.gateway(),
+                    )
+                    .is_err()
+                    || !packet.decr_ttl()
+                {
+                    return Ok(());
+                }
+                self.control_service.route_wireguard_broadcast(
+                    &session.network_code,
+                    session.ip,
+                    packet.payload(),
+                    RelayOrigin::Vnt,
+                );
+            }
+            MsgType::WireGuardSubnetRelay => {
+                if !session.allow_wire_guard
+                    || session.client_capabilities & CLIENT_CAP_WIREGUARD_SUBNET_RELAY
+                        != CLIENT_CAP_WIREGUARD_SUBNET_RELAY
+                    || validate_vnt_subnet_relay(
                         &packet,
                         session.ip,
                         *session.network_state.network(),
