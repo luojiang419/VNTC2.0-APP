@@ -469,7 +469,10 @@ end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
 begin
-  if CurStep = ssPostInstall then
+  // [Run] entries execute before ssPostInstall. Extract the payload during
+  // ssInstall so the bundled vntcrustdesk bootstrap script and MSI exist
+  // before the bootstrap command is invoked on a clean machine.
+  if CurStep = ssInstall then
   begin
     ForceDirectories(ExpandConstant('{app}'));
     ExtractTemporaryFile('brand_payload.zip');

@@ -280,5 +280,8 @@ void main() {
         contains('Remove-WithRetry -Path \$payloadConfigDir -Recurse'));
     expect(installerScript, contains('Source: "{#MyBrandPayload}"'));
     expect(installerScript, contains("ExtractArchive("));
+    expect(installerScript, contains('if CurStep = ssInstall then'));
+    expect(installerScript, isNot(contains('if CurStep = ssPostInstall then')));
+    expect(installerScript, contains('bootstrap_vntcrustdesk.ps1'));
   });
 }
