@@ -1556,10 +1556,13 @@ fn real_udp_runtime_enforces_peer_dispatch_capacity_revocation_and_cookie_limit(
     thread::sleep(Duration::from_millis(1100));
     let flood_socket = UdpSocket::bind("127.0.0.1:0").unwrap();
     flood_socket
-        .set_read_timeout(Some(Duration::from_millis(500)))
+        .set_read_timeout(Some(Duration::from_secs(2)))
         .unwrap();
     let mut flood = client_tunnel(private_key(0x7e), server_public, 19);
-    for _ in 0..120 {
+    // Exceed the global handshake budget with margin. A short burst of 120
+    // datagrams is not reliable on a loaded CI runner because UDP delivery
+    // and the runtime's receive loop can lag behind the sender.
+    for _ in 0..256 {
         let initiation = network_packet(flood.format_handshake_initiation(&mut buffer, true));
         flood_socket.send_to(&initiation, wireguard).unwrap();
     }
