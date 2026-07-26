@@ -82,8 +82,8 @@ impl NetworkManager {
         let device_io_manager = DeviceIOManager::new(task_group.clone());
         let allow_subnet = AllowSubnetExternalRoute::new(config.output.clone());
 
-        let (puncher, p2p_socket, p2p_task) = if !config.no_punch {
-            let (puncher, p2p_socket_manager, p2p_task) = init_tunnel(
+        let (puncher, p2p_socket, p2p_task, symmetric_udp_pool) = if !config.no_punch {
+            let (puncher, p2p_socket_manager, p2p_task, symmetric_udp_pool) = init_tunnel(
                 task_group.clone(),
                 app_state.clone(),
                 tunnel_to_server.clone(),
@@ -93,14 +93,21 @@ impl NetworkManager {
             )
             .await?;
 
-            (Some(puncher), Some(p2p_socket_manager), Some(p2p_task))
+            (
+                Some(puncher),
+                Some(p2p_socket_manager),
+                Some(p2p_task),
+                Some(symmetric_udp_pool),
+            )
         } else {
-            (None, None, None)
+            (None, None, None, None)
         };
         let puncher = NatPuncher::new(
             app_state.network.clone(),
             app_state.punch_backoff.clone(),
+            app_state.nat_info.clone(),
             puncher,
+            symmetric_udp_pool,
             packet_crypto.clone(),
         );
         let subnet_external_route = app_state.subnet_route.clone();

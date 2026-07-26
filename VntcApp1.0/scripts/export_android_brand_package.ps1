@@ -132,7 +132,7 @@ function Publish-ApkAndHashAtomically {
             $ownsMutex = $true
         }
         if (-not $ownsMutex) {
-            throw '等待 Android 母版发布锁超时'
+            throw '等待 Android 兼容客户端发布锁超时'
         }
 
         if (Test-Path -LiteralPath $OutputApk) {
@@ -165,7 +165,7 @@ function Publish-ApkAndHashAtomically {
                     Move-Item -LiteralPath $backupSidecar -Destination $sidecarPath
                 }
             } catch {
-                throw "Android 母版发布失败且旧产物恢复失败；备份仍位于 $outputDirectory。原始错误：$($publishError.Exception.Message)；恢复错误：$($_.Exception.Message)"
+                throw "Android 兼容客户端发布失败且旧产物恢复失败；备份仍位于 $outputDirectory。原始错误：$($publishError.Exception.Message)；恢复错误：$($_.Exception.Message)"
             }
             throw $publishError
         }
@@ -202,7 +202,7 @@ try {
         $_.FullName -ceq 'assets/flutter_assets/assets/android_branding.json'
     }
     if ($null -eq $manifestEntry -or $null -eq $brandingEntry) {
-        throw 'APK 缺少 Android 品牌母版协议文件'
+        throw 'APK 缺少 Android 换牌兼容协议文件'
     }
     if ($manifestEntry.Length -gt 65536 -or $brandingEntry.Length -gt 65536) {
         throw 'APK 品牌协议文件大小异常'
@@ -217,11 +217,11 @@ try {
         $reader.Dispose()
     }
     if ($manifest.brandReady -ne $true -or $manifest.platform -cne 'android') {
-        throw 'APK 不是 Android 品牌母版'
+        throw 'APK 未声明 Android 换牌能力'
     }
     if ($manifest.brandId -cne 'official' -or
         $manifest.applicationId -cne 'top.wherewego.vnt_app') {
-        throw 'APK 品牌母版身份不匹配，期望 official / top.wherewego.vnt_app'
+        throw 'APK 官方客户端身份不匹配，期望 official / top.wherewego.vnt_app'
     }
 } finally {
     $archive.Dispose()
@@ -244,7 +244,7 @@ if ($LASTEXITCODE -ne 0) {
 $inputBadgingText = $inputBadging -join "`n"
 if ($inputBadgingText -notmatch
     "package: name='top\.wherewego\.vnt_app'.*versionName='$([regex]::Escape($version))'") {
-    throw '未签名 APK 的 applicationId/versionName 与官方母版不一致'
+    throw '未签名 APK 的 applicationId/versionName 与官方客户端不一致'
 }
 if ($inputBadgingText -notmatch "native-code: 'arm64-v8a'") {
     throw '未签名 APK 不是 arm64-v8a 构建'
@@ -344,6 +344,6 @@ try {
     Remove-Item -LiteralPath $signedPath -Force -ErrorAction SilentlyContinue
 }
 
-Write-Host "[OK] Android 官方品牌母版：$outputPath"
+Write-Host "[OK] Android 官方兼容客户端：$outputPath"
 Write-Host "[OK] 官方证书 SHA-256：$($identity.CertificateSha256)"
 Write-Host "[OK] APK SHA-256：$hash"

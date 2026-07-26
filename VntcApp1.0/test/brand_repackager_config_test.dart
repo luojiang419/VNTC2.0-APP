@@ -38,7 +38,7 @@ void main() {
     expect(packager, contains('--set-version-string'));
   });
 
-  test('Windows 安装包提供可重复换牌的母包导出协议', () {
+  test('Windows 客户端提供可重复换牌的兼容导出协议', () {
     final installer = _read('scripts/export_installer_package.ps1');
     final packager = _read(
       'tools/brand_repackager/src/BrandPackager.cs',
@@ -64,6 +64,9 @@ void main() {
     final detector = _read(
       'tools/brand_repackager/src/PackageDetection.cs',
     );
+    final binaryManifestReader = _read(
+      'tools/brand_repackager/src/AndroidBinaryManifestReader.cs',
+    );
 
     expect(mainForm, contains('*.exe;*.apk'));
     expect(mainForm, contains('PackageDetector.Inspect'));
@@ -75,6 +78,12 @@ void main() {
     expect(detector, contains('resources.arsc'));
     expect(detector, contains('classes.dex'));
     expect(detector, contains('android_brand_package_manifest.json'));
+    expect(detector, contains('AndroidBinaryManifestReader.Read'));
+    expect(binaryManifestReader, contains('TryReadManifestElement'));
+    expect(binaryManifestReader, contains('versionName'));
+    expect(binaryManifestReader, contains('VersionCode'));
+    expect(detector, contains('binaryManifestInfo.VersionCode'));
+    expect(detector, contains('public string VersionCode'));
   });
 
   test('Android 签名档案使用 DPAPI 且不会明文落盘密码', () {
@@ -189,30 +198,25 @@ void main() {
     expect(signing, contains('return existing;'));
   });
 
-  test('Windows 导出协议执行前强制 SHA-256 来源信任门', () {
+  test('Windows 后续兼容版本不再依赖固定版本哈希白名单', () {
     final packager = _read(
       'tools/brand_repackager/src/BrandPackager.cs',
     );
-    final trustStore = _read(
-      'tools/brand_repackager/src/WindowsPackageTrustStore.cs',
+    final detector = _read(
+      'tools/brand_repackager/src/PackageDetection.cs',
     );
 
-    for (final hash in <String>[
-      '6D1741B0C5DD859F6389848021C105F673F5E8CB070FB12193BD1ECA047DA14A',
-      'E1457C5F7C05D10172554375F32E8686E574F6AE11B221ECCD1799668E4EFDC4',
-      'F736C1E0F262449D386FC37DAEE4428FAF85349AB841EF4C7CB7239FCB21481A',
-      '29B0D2C39E0EA205092362130D454D146D2599096D8DBBEF91B454C92E470E28',
-    ]) {
-      expect(trustStore, contains(hash));
-    }
-    expect(trustStore, contains('ProtectedData.Protect'));
-    expect(trustStore, contains('ProtectedData.Unprotect'));
-    expect(trustStore, contains('DataProtectionScope.CurrentUser'));
-    expect(trustStore, contains('内容识别不等于来源可信'));
-    expect(packager, contains('trustStore.RequireTrustedInput('));
-    expect(packager, contains('trustStore.RegisterTrustedOutput(hash)'));
     expect(
-      packager.indexOf('trustStore.RequireTrustedInput('),
+      File('tools/brand_repackager/src/WindowsPackageTrustStore.cs')
+          .existsSync(),
+      isFalse,
+    );
+    expect(packager, isNot(contains('OfficialMotherHashes')));
+    expect(packager, isNot(contains('RequireTrustedInput')));
+    expect(packager, contains('sourceSnapshot.Sha256'));
+    expect(detector, contains('WindowsBrandReadyMarker'));
+    expect(
+      packager.indexOf('PackageInputSnapshot.Create('),
       lessThan(packager.indexOf('ExportPayload(sourceSnapshot.Path')),
     );
   });
@@ -293,6 +297,7 @@ void main() {
     expect(packager, contains('--v2-signing-enabled true'));
     expect(packager, contains('--v3-signing-enabled true'));
     expect(packager, contains('PackageDetector.RequireSupported(signedApk)'));
+    expect(packager, contains('manifest["versionCode"]'));
     expect(packager, contains('LoadRequired('));
     expect(packager, contains('GetOrCreateByBrandId('));
   });
@@ -374,18 +379,18 @@ void main() {
     );
   });
 
-  test('Windows 母包主程序名禁止绝对路径和目录穿越', () {
+  test('Windows 客户端主程序名禁止绝对路径和目录穿越', () {
     final packager = _read(
       'tools/brand_repackager/src/BrandPackager.cs',
     );
 
     expect(packager, contains('Path.IsPathRooted(executableName)'));
     expect(packager, contains('Path.GetFileName(executableName)'));
-    expect(packager, contains('品牌母包主程序路径越界'));
+    expect(packager, contains('客户端主程序路径越界'));
     expect(packager, contains('executableName 必须是根目录下的有效 EXE 文件名'));
   });
 
-  test('换牌工具提供隐藏关于页面选项并校验母版能力', () {
+  test('换牌工具提供隐藏关于页面选项并校验客户端能力', () {
     final mainForm = _read('tools/brand_repackager/src/MainForm.cs');
     final program = _read('tools/brand_repackager/src/Program.cs');
     final packager = _read(

@@ -28,6 +28,7 @@ namespace VntBrandRepackager
             bool isSupported,
             string errorMessage,
             string version,
+            string versionCode,
             string brandId,
             string applicationId,
             IEnumerable<string> capabilities)
@@ -37,6 +38,7 @@ namespace VntBrandRepackager
             IsSupported = isSupported;
             ErrorMessage = errorMessage ?? string.Empty;
             Version = version ?? string.Empty;
+            VersionCode = versionCode ?? string.Empty;
             BrandId = brandId ?? string.Empty;
             ApplicationId = applicationId ?? string.Empty;
             _capabilities = capabilities == null
@@ -53,6 +55,8 @@ namespace VntBrandRepackager
         public string ErrorMessage { get; private set; }
 
         public string Version { get; private set; }
+
+        public string VersionCode { get; private set; }
 
         public string BrandId { get; private set; }
 
@@ -99,6 +103,7 @@ namespace VntBrandRepackager
             string inputPath,
             PackageFormat format,
             string version,
+            string versionCode,
             string brandId,
             string applicationId,
             IEnumerable<string> capabilities)
@@ -109,6 +114,7 @@ namespace VntBrandRepackager
                 true,
                 string.Empty,
                 version,
+                versionCode,
                 brandId,
                 applicationId,
                 capabilities);
@@ -124,6 +130,7 @@ namespace VntBrandRepackager
                 format,
                 false,
                 errorMessage,
+                string.Empty,
                 string.Empty,
                 string.Empty,
                 string.Empty,
@@ -224,7 +231,7 @@ namespace VntBrandRepackager
             return PackageDetectionResult.Unsupported(
                 fullPath,
                 PackageFormat.Unknown,
-                "无法按文件内容识别安装包；仅支持品牌母版 Windows EXE 或 Android APK");
+                "无法按文件内容识别安装包；仅支持具备换牌能力的 Windows EXE 或 Android APK 客户端");
         }
 
         public static PackageDetectionResult RequireSupported(string inputPath)
@@ -254,7 +261,7 @@ namespace VntBrandRepackager
                     StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "该 Windows 安装包不是支持一键换牌的品牌母版（缺少品牌母版标记）");
+                        "该 Windows 客户端未声明一键换牌能力（缺少兼容协议标记）");
                 }
 
                 var version = FirstNotEmpty(
@@ -264,6 +271,7 @@ namespace VntBrandRepackager
                     path,
                     PackageFormat.WindowsExecutable,
                     version,
+                    string.Empty,
                     string.Empty,
                     string.Empty,
                     null);
@@ -298,13 +306,15 @@ namespace VntBrandRepackager
                         AndroidBrandingEntryPath);
 
                     ValidateBinaryXml(binaryManifest);
+                    var binaryManifestInfo =
+                        AndroidBinaryManifestReader.Read(binaryManifest);
                     ValidateResourcesTable(resources);
                     ValidateDexEntries(entries);
                     ValidateEntrySize(
                         brandManifest,
                         2,
                         MaximumBrandManifestBytes,
-                        "Android 品牌母版清单");
+                        "Android 换牌能力清单");
                     ValidateEntrySize(
                         branding,
                         2,
@@ -314,23 +324,35 @@ namespace VntBrandRepackager
                     var manifest = ReadJsonObject(
                         brandManifest,
                         MaximumBrandManifestBytes,
-                        "Android 品牌母版清单");
+                        "Android 换牌能力清单");
                     var capabilities = ValidateAndroidBrandManifest(manifest);
                     var brandingValues = ReadJsonObject(
                         branding,
                         MaximumBrandingBytes,
                         "Android 运行时品牌配置");
-                    var version = ReadOptionalString(manifest, "versionName");
-                    if (string.IsNullOrEmpty(version))
-                    {
-                        version = ReadOptionalString(manifest, "version");
-                    }
+                    var version = binaryManifestInfo.VersionName;
                     if (string.IsNullOrEmpty(version) ||
                         !Regex.IsMatch(version, @"^\d+(\.\d+){1,3}$"))
                     {
-                        throw new InvalidDataException("品牌母版清单版本号无效");
+                        throw new InvalidDataException(
+                            "AndroidManifest.xml 的真实版本号无效");
+                    }
+                    if (!Regex.IsMatch(
+                        binaryManifestInfo.VersionCode,
+                        @"^[1-9][0-9]*$"))
+                    {
+                        throw new InvalidDataException(
+                            "AndroidManifest.xml 的真实 versionCode 无效");
                     }
                     var applicationId = RequireString(manifest, "applicationId");
+                    if (!string.Equals(
+                        applicationId,
+                        binaryManifestInfo.PackageName,
+                        StringComparison.Ordinal))
+                    {
+                        throw new InvalidDataException(
+                            "换牌能力清单 applicationId 与 AndroidManifest.xml 不一致");
+                    }
                     var brandId = RequireString(manifest, "brandId");
                     ValidateAndroidRuntimeBranding(
                         brandingValues,
@@ -341,6 +363,7 @@ namespace VntBrandRepackager
                         path,
                         PackageFormat.AndroidApk,
                         version,
+                        binaryManifestInfo.VersionCode,
                         brandId,
                         applicationId,
                         capabilities);
@@ -562,26 +585,26 @@ namespace VntBrandRepackager
         {
             if (ReadRequiredInteger(manifest, "schemaVersion") != 1)
             {
-                throw new InvalidDataException("品牌母版清单 schemaVersion 不受支持");
+                throw new InvalidDataException("换牌能力清单 schemaVersion 不受支持");
             }
             object brandReady;
             if (!manifest.TryGetValue("brandReady", out brandReady) ||
                 !(brandReady is bool) || !(bool)brandReady)
             {
-                throw new InvalidDataException("品牌母版清单的 brandReady 必须为 true");
+                throw new InvalidDataException("换牌能力清单的 brandReady 必须为 true");
             }
             if (!string.Equals(
                 RequireString(manifest, "platform"),
                 "android",
                 StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException("品牌母版清单 platform 不是 android");
+                throw new InvalidDataException("换牌能力清单 platform 不是 android");
             }
             var applicationId = RequireString(manifest, "applicationId");
             if (applicationId.Length > 255 ||
                 !AndroidApplicationIdPattern.IsMatch(applicationId))
             {
-                throw new InvalidDataException("品牌母版清单 applicationId 无效");
+                throw new InvalidDataException("换牌能力清单 applicationId 无效");
             }
             var brandingAsset = RequireString(manifest, "brandingAsset");
             if (!string.Equals(
@@ -589,19 +612,19 @@ namespace VntBrandRepackager
                 AndroidBrandingEntryPath,
                 StringComparison.Ordinal))
             {
-                throw new InvalidDataException("品牌母版清单 brandingAsset 路径无效");
+                throw new InvalidDataException("换牌能力清单 brandingAsset 路径无效");
             }
 
             object rawCapabilities;
             if (!manifest.TryGetValue("capabilities", out rawCapabilities) ||
                 rawCapabilities == null || rawCapabilities is string)
             {
-                throw new InvalidDataException("品牌母版清单 capabilities 必须为数组");
+                throw new InvalidDataException("换牌能力清单 capabilities 必须为数组");
             }
             var enumerable = rawCapabilities as IEnumerable;
             if (enumerable == null)
             {
-                throw new InvalidDataException("品牌母版清单 capabilities 必须为数组");
+                throw new InvalidDataException("换牌能力清单 capabilities 必须为数组");
             }
 
             var capabilities = new List<string>();
@@ -610,12 +633,12 @@ namespace VntBrandRepackager
                 var capability = value as string;
                 if (string.IsNullOrWhiteSpace(capability))
                 {
-                    throw new InvalidDataException("品牌母版清单包含无效 capability");
+                    throw new InvalidDataException("换牌能力清单包含无效 capability");
                 }
                 if (capabilities.Contains(capability, StringComparer.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "品牌母版清单包含重复 capability：" + capability);
+                        "换牌能力清单包含重复 capability：" + capability);
                 }
                 capabilities.Add(capability);
             }
@@ -624,7 +647,7 @@ namespace VntBrandRepackager
                 if (!capabilities.Contains(required, StringComparer.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "Android 品牌母版缺少能力：" + required);
+                        "Android 客户端缺少换牌能力：" + required);
                 }
             }
             return capabilities;
@@ -646,7 +669,7 @@ namespace VntBrandRepackager
             if (!string.Equals(brandId, expectedBrandId, StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "Android 运行时品牌配置 brandId 与母版清单不一致");
+                    "Android 运行时品牌配置 brandId 与换牌能力清单不一致");
             }
             if (!string.Equals(
                 applicationId,
@@ -654,7 +677,7 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "Android 运行时品牌配置 applicationId 与母版清单不一致");
+                    "Android 运行时品牌配置 applicationId 与换牌能力清单不一致");
             }
             if (productName.Length > 128)
             {
@@ -713,7 +736,7 @@ namespace VntBrandRepackager
             var value = values.TryGetValue(key, out raw) ? raw as string : null;
             if (string.IsNullOrWhiteSpace(value))
             {
-                throw new InvalidDataException("品牌母版清单缺少字段：" + key);
+                throw new InvalidDataException("换牌能力清单缺少字段：" + key);
             }
             return value.Trim();
         }

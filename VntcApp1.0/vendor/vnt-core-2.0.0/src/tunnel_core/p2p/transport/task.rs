@@ -9,7 +9,9 @@ use crate::tunnel_core::p2p::route_table::RouteTable;
 use crate::tunnel_core::p2p::transport::nat_test::{
     my_nat_info, query_tcp_public_addr_loop, query_udp_public_addr_loop,
 };
-use crate::tunnel_core::p2p::transport::punch::{PunchRequestQueue, PunchTaskContext, punch_task};
+use crate::tunnel_core::p2p::transport::punch::{
+    PunchRequestQueue, PunchTaskContext, SymmetricUdpPool, punch_task,
+};
 use crate::tunnel_core::server::outbound::ServerOutbound;
 use crate::tunnel_core::server::rpc::ServerRPC;
 use crate::utils::task_control::TaskGroup;
@@ -30,7 +32,7 @@ pub async fn init_tunnel(
     server_rpc: ServerRPC,
     packet_crypto: PacketCrypto,
     tunnel_port: Option<u16>,
-) -> anyhow::Result<(Puncher, P2pOutbound, P2pTask)> {
+) -> anyhow::Result<(Puncher, P2pOutbound, P2pTask, SymmetricUdpPool)> {
     let tunnel_port = tunnel_port.unwrap_or(0);
     let udp_config = rust_p2p_core::tunnel::config::UdpTunnelConfig::default()
         .set_main_udp_count(2)
@@ -45,19 +47,21 @@ pub async fn init_tunnel(
         .set_udp_tunnel_config(udp_config)
         .set_tcp_tunnel_config(tcp_config);
     let (tunnel_dispatcher, puncher) = new_tunnel_component(config)?;
+    let transport_socket_manager = tunnel_dispatcher.socket_manager();
+    let symmetric_udp_pool = SymmetricUdpPool::new(transport_socket_manager.clone());
     let route_table = app_state.route_table.clone();
     let (priority_punch_queue, priority_punch_requests) = PunchRequestQueue::new();
     let socket_manager = P2pOutbound::new(
-        tunnel_dispatcher.socket_manager(),
+        transport_socket_manager.clone(),
         route_table.clone(),
         packet_crypto,
         priority_punch_queue.clone(),
     );
     task_group.spawn(my_nat_info(
         app_state.clone(),
-        tunnel_dispatcher.socket_manager(),
+        transport_socket_manager.clone(),
     ));
-    let manager = tunnel_dispatcher.socket_manager();
+    let manager = transport_socket_manager;
     task_group.spawn(query_udp_public_addr_loop(
         app_state.clone(),
         manager.clone(),
@@ -75,6 +79,7 @@ pub async fn init_tunnel(
         punch_backoff: app_state.punch_backoff.clone(),
         punch_info_getter: Arc::new(move || app_state_for_punch.get_punch_info()),
         priority_queue: priority_punch_queue,
+        symmetric_udp_pool: symmetric_udp_pool.clone(),
     };
     task_group.spawn(punch_task(
         tunnel_to_server,
@@ -101,7 +106,7 @@ pub async fn init_tunnel(
         socket_manager: socket_manager.clone(),
         tunnel_dispatcher,
     };
-    Ok((puncher, socket_manager, p2p_task))
+    Ok((puncher, socket_manager, p2p_task, symmetric_udp_pool))
 }
 pub struct P2pTask {
     task_group: TaskGroup,
