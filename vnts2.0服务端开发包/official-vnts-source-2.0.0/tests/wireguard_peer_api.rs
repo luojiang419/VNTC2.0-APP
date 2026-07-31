@@ -268,9 +268,11 @@ fn peer_management_api_is_authenticated_persistent_and_ip_consistent() {
     );
     assert_eq!(generated_without_config.status, 503);
     assert_api_code(&generated_without_config, 503);
-    assert!(generated_without_config
-        .body
-        .contains("wireguard_public_endpoint"));
+    assert!(
+        generated_without_config
+            .body
+            .contains("wireguard_public_endpoint")
+    );
     assert!(generated_without_config.body.contains("wireguard_bind"));
     assert!(!generated_without_config.body.contains("private_key"));
 
