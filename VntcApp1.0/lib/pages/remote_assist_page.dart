@@ -7,6 +7,22 @@ import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 
+int remotePeerColumnCount({
+  required double width,
+  required bool compactMode,
+}) {
+  if (compactMode) {
+    return width >= 900 ? 2 : 1;
+  }
+  return width >= 1100
+      ? 3
+      : width >= 680
+          ? 2
+          : 1;
+}
+
+bool usesStackedRemotePeerCard(double width) => width < 480;
+
 @visibleForTesting
 String remoteAccessPasswordActionLabel(bool hasAccessPassword) {
   return hasAccessPassword ? '修改访问密码' : '设置访问密码';
@@ -46,7 +62,12 @@ class RemotePeerConnectRequest {
 }
 
 class RemoteAssistPage extends StatefulWidget {
-  const RemoteAssistPage({super.key});
+  const RemoteAssistPage({
+    super.key,
+    this.compactMode = false,
+  });
+
+  final bool compactMode;
 
   @override
   State<RemoteAssistPage> createState() => _RemoteAssistPageState();
@@ -400,7 +421,20 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
             return RefreshIndicator(
               onRefresh: () => _manager.refresh(),
               child: ListView(
-                padding: EdgeInsets.all(context.spacingLarge),
+                padding: EdgeInsets.fromLTRB(
+                  widget.compactMode
+                      ? context.spacingSmall
+                      : context.spacingLarge,
+                  widget.compactMode
+                      ? context.spacingSmall
+                      : context.spacingLarge,
+                  widget.compactMode
+                      ? context.spacingSmall
+                      : context.spacingLarge,
+                  widget.compactMode
+                      ? context.spacingSmall
+                      : context.spacingLarge,
+                ),
                 children: [
                   _buildHeader(isDark),
                   SizedBox(height: context.spacingMedium),
@@ -1055,11 +1089,10 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
           else
             LayoutBuilder(
               builder: (context, constraints) {
-                final columns = constraints.maxWidth >= 1100
-                    ? 3
-                    : constraints.maxWidth >= 680
-                        ? 2
-                        : 1;
+                final columns = remotePeerColumnCount(
+                  width: constraints.maxWidth,
+                  compactMode: widget.compactMode,
+                );
                 final spacing = context.spacingSmall;
                 final cardWidth =
                     (constraints.maxWidth - spacing * (columns - 1)) / columns;
@@ -1096,109 +1129,167 @@ class _RemoteAssistPageState extends State<RemoteAssistPage> {
       child: InkWell(
         onTap: canConnect ? () => _showPeerConnectDialog(peer) : null,
         borderRadius: BorderRadius.circular(context.cardRadius),
-        child: Container(
-          padding: EdgeInsets.all(context.spacingMedium),
-          decoration: BoxDecoration(
-            color: isDark
-                ? Colors.white.withValues(alpha: 0.04)
-                : Colors.black.withValues(alpha: 0.02),
-            borderRadius: BorderRadius.circular(context.cardRadius),
-            border: Border.all(
-              color: peer.isOnline
-                  ? primaryColor.withValues(alpha: 0.25)
-                  : Colors.grey.withValues(alpha: 0.25),
-            ),
-          ),
-          child: Row(
-            children: [
-              Container(
-                width: context.iconXLarge,
-                height: context.iconXLarge,
-                decoration: BoxDecoration(
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final stacked = usesStackedRemotePeerCard(constraints.maxWidth);
+            return Container(
+              padding: EdgeInsets.all(
+                stacked ? context.spacingSmall : context.spacingMedium,
+              ),
+              decoration: BoxDecoration(
+                color: isDark
+                    ? Colors.white.withValues(alpha: 0.04)
+                    : Colors.black.withValues(alpha: 0.02),
+                borderRadius: BorderRadius.circular(context.cardRadius),
+                border: Border.all(
                   color: peer.isOnline
-                      ? primaryColor.withValues(alpha: 0.12)
-                      : Colors.grey.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(context.cardRadius),
-                ),
-                child: Icon(
-                  Icons.computer,
-                  color: peer.isOnline ? primaryColor : Colors.grey,
+                      ? primaryColor.withValues(alpha: 0.25)
+                      : Colors.grey.withValues(alpha: 0.25),
                 ),
               ),
-              SizedBox(width: context.spacingMedium),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      peer.displayName,
-                      style: TextStyle(
-                        fontSize: context.fontMedium,
-                        fontWeight: FontWeight.w600,
-                        color: isDark
-                            ? AppTheme.darkTextPrimary
-                            : AppTheme.lightTextPrimary,
-                      ),
-                    ),
-                    SizedBox(height: context.spacingXXSmall),
-                    Text(
-                      peer.virtualIp,
-                      style: TextStyle(
-                        fontSize: context.fontSmall,
-                        color: isDark
-                            ? AppTheme.darkTextSecondary
-                            : AppTheme.lightTextSecondary,
-                      ),
-                    ),
-                    SizedBox(height: context.spacingXXSmall),
-                    Text(
-                      peer.networkName,
-                      style: TextStyle(
-                        fontSize: context.fontXSmall,
-                        color: isDark
-                            ? AppTheme.darkTextSecondary
-                            : AppTheme.lightTextSecondary,
-                      ),
-                    ),
-                    if (peer.hasPresence) ...[
-                      SizedBox(height: context.spacingXXSmall),
-                      Text(
-                        _buildPeerCapabilitySummary(peer),
-                        style: TextStyle(
-                          fontSize: context.fontXSmall,
-                          color: isDark
-                              ? AppTheme.darkTextSecondary
-                              : AppTheme.lightTextSecondary,
+              child: stacked
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          children: [
+                            _buildPeerAvatar(peer, compact: true),
+                            SizedBox(width: context.spacingSmall),
+                            Expanded(
+                              child: _buildPeerIdentity(isDark, peer),
+                            ),
+                          ],
                         ),
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: [
-                  _buildChip(
-                    isDark,
-                    label: peer.isOnline ? '在线' : '离线',
-                    isActive: peer.isOnline,
-                  ),
-                  SizedBox(height: context.spacingXXSmall),
-                  Text(
-                    _buildPeerActionLabel(peer, health),
-                    style: TextStyle(
-                      fontSize: context.fontXSmall,
-                      color: isDark
-                          ? AppTheme.darkTextSecondary
-                          : AppTheme.lightTextSecondary,
+                        SizedBox(height: context.spacingSmall),
+                        Row(
+                          children: [
+                            _buildChip(
+                              isDark,
+                              label: peer.isOnline ? '在线' : '离线',
+                              isActive: peer.isOnline,
+                            ),
+                            SizedBox(width: context.spacingSmall),
+                            Expanded(
+                              child: Text(
+                                _buildPeerActionLabel(peer, health),
+                                textAlign: TextAlign.right,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: context.fontXSmall,
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
+                    )
+                  : Row(
+                      children: [
+                        _buildPeerAvatar(peer),
+                        SizedBox(width: context.spacingMedium),
+                        Expanded(child: _buildPeerIdentity(isDark, peer)),
+                        SizedBox(width: context.spacingSmall),
+                        Column(
+                          crossAxisAlignment: CrossAxisAlignment.end,
+                          children: [
+                            _buildChip(
+                              isDark,
+                              label: peer.isOnline ? '在线' : '离线',
+                              isActive: peer.isOnline,
+                            ),
+                            SizedBox(height: context.spacingXXSmall),
+                            ConstrainedBox(
+                              constraints: const BoxConstraints(maxWidth: 170),
+                              child: Text(
+                                _buildPeerActionLabel(peer, health),
+                                textAlign: TextAlign.right,
+                                maxLines: 2,
+                                overflow: TextOverflow.ellipsis,
+                                style: TextStyle(
+                                  fontSize: context.fontXSmall,
+                                  color: isDark
+                                      ? AppTheme.darkTextSecondary
+                                      : AppTheme.lightTextSecondary,
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ],
                     ),
-                  ),
-                ],
-              ),
-            ],
-          ),
+            );
+          },
         ),
       ),
+    );
+  }
+
+  Widget _buildPeerAvatar(RemoteAssistPeer peer, {bool compact = false}) {
+    final primaryColor = Theme.of(context).primaryColor;
+    final size = compact ? context.iconLarge : context.iconXLarge;
+    return Container(
+      width: size,
+      height: size,
+      decoration: BoxDecoration(
+        color: peer.isOnline
+            ? primaryColor.withValues(alpha: 0.12)
+            : Colors.grey.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(context.cardRadius),
+      ),
+      child: Icon(
+        Icons.computer,
+        color: peer.isOnline ? primaryColor : Colors.grey,
+        size: compact ? context.iconSmall : context.iconMedium,
+      ),
+    );
+  }
+
+  Widget _buildPeerIdentity(bool isDark, RemoteAssistPeer peer) {
+    final secondaryColor =
+        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Text(
+          peer.displayName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(
+            fontSize: context.fontMedium,
+            fontWeight: FontWeight.w600,
+            color:
+                isDark ? AppTheme.darkTextPrimary : AppTheme.lightTextPrimary,
+          ),
+        ),
+        SizedBox(height: context.spacingXXSmall),
+        Text(
+          peer.virtualIp,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: context.fontSmall, color: secondaryColor),
+        ),
+        SizedBox(height: context.spacingXXSmall),
+        Text(
+          peer.networkName,
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: TextStyle(fontSize: context.fontXSmall, color: secondaryColor),
+        ),
+        if (peer.hasPresence) ...[
+          SizedBox(height: context.spacingXXSmall),
+          Text(
+            _buildPeerCapabilitySummary(peer),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style:
+                TextStyle(fontSize: context.fontXSmall, color: secondaryColor),
+          ),
+        ],
+      ],
     );
   }
 

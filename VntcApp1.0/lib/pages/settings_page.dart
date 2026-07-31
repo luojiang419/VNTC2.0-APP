@@ -19,6 +19,8 @@ import 'package:vnt_app/update/app_update_preferences.dart';
 import 'package:vnt_app/update/update_dialog.dart';
 import 'package:vnt_app/windows_startup_manager.dart';
 import 'package:vnt_app/widgets/app_glow_surface.dart';
+import 'package:vnt_app/screenshot/screenshot_shortcut_preferences.dart';
+import 'package:vnt_app/screenshot/system_screenshot_service.dart';
 
 /// 设置页面
 class SettingsPage extends StatefulWidget {
@@ -47,6 +49,8 @@ class _SettingsPageState extends State<SettingsPage> {
   final DataPersistence _dataPersistence = DataPersistence();
   final WindowsStartupManager _windowsStartupManager = WindowsStartupManager();
   final AppUpdatePreferences _updatePreferences = AppUpdatePreferences();
+  final ScreenshotShortcutPreferences _screenshotShortcutPreferences =
+      ScreenshotShortcutPreferences();
 
   bool _autoStart = false;
   bool _silentStart = false;
@@ -55,6 +59,7 @@ class _SettingsPageState extends State<SettingsPage> {
   AppUpdateMode _updateMode = AppUpdateMode.manual;
   final List<(String, String)> _configNames = [];
   String _defaultKey = '';
+  String _screenshotShortcut = ScreenshotShortcutPreferences.defaultShortcut;
 
   @override
   void initState() {
@@ -90,6 +95,7 @@ class _SettingsPageState extends State<SettingsPage> {
     }
     _autoConnect = await _dataPersistence.loadAutoConnect() ?? false;
     _closeBehavior = await _dataPersistence.loadWindowCloseBehavior();
+    _screenshotShortcut = await _screenshotShortcutPreferences.load();
     if (AppVersion.updateEnabled) {
       _updateMode = await _updatePreferences.loadMode();
     }
@@ -801,6 +807,103 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildDivider(isDark),
             _buildCloseBehaviorSelector(isDark),
           ],
+          if (Platform.isWindows || Platform.isMacOS || Platform.isLinux) ...[
+            _buildDivider(isDark),
+            _buildScreenshotShortcutSelector(isDark),
+          ],
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScreenshotShortcutSelector(bool isDark) {
+    final primaryColor = Theme.of(context).primaryColor;
+    return Padding(
+      padding: ResponsiveUtils.padding(context, all: 16),
+      child: Row(
+        children: [
+          Container(
+            width: context.listItemIconContainerSize,
+            height: context.listItemIconContainerSize,
+            decoration: BoxDecoration(
+              color: primaryColor.withValues(alpha: 0.1),
+              borderRadius: BorderRadius.circular(context.cardRadius),
+            ),
+            child: Icon(
+              Icons.screenshot_monitor_outlined,
+              color: primaryColor,
+              size: context.iconSmall,
+            ),
+          ),
+          SizedBox(width: context.spacingMedium),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  '截图快捷键',
+                  style: TextStyle(
+                    fontSize: context.fontMedium,
+                    fontWeight: FontWeight.w500,
+                    color: isDark
+                        ? AppTheme.darkTextPrimary
+                        : AppTheme.lightTextPrimary,
+                  ),
+                ),
+                Text(
+                  Platform.isWindows ? '全局截图并保存为原始分辨率 PNG' : '应用在前台时截图并保存为 PNG',
+                  style: TextStyle(
+                    fontSize: context.fontSmall,
+                    color: isDark
+                        ? AppTheme.darkTextSecondary
+                        : AppTheme.lightTextSecondary,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          DropdownButton<String>(
+            key: const ValueKey('screenshot-shortcut-selector'),
+            value: _screenshotShortcut,
+            underline: const SizedBox(),
+            dropdownColor: isDark
+                ? AppTheme.darkCardBackground
+                : AppTheme.lightCardBackground,
+            borderRadius: BorderRadius.circular(context.cardRadius),
+            onChanged: (shortcut) async {
+              if (shortcut == null || shortcut == _screenshotShortcut) {
+                return;
+              }
+              try {
+                await SystemScreenshotService.instance.updateShortcut(shortcut);
+                if (!mounted) {
+                  return;
+                }
+                setState(() => _screenshotShortcut = shortcut);
+                showTopToast(
+                  context,
+                  '截图快捷键已设置为 $shortcut',
+                  isSuccess: true,
+                );
+              } catch (error) {
+                if (mounted) {
+                  showTopToast(
+                    context,
+                    '快捷键设置失败，可能已被其他程序占用: $error',
+                    isSuccess: false,
+                  );
+                }
+              }
+            },
+            items: ScreenshotShortcutPreferences.supportedShortcuts
+                .map(
+                  (shortcut) => DropdownMenuItem<String>(
+                    value: shortcut,
+                    child: Text(shortcut),
+                  ),
+                )
+                .toList(growable: false),
+          ),
         ],
       ),
     );

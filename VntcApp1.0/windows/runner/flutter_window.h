@@ -2,7 +2,9 @@
 #define RUNNER_FLUTTER_WINDOW_H_
 
 #include <flutter/dart_project.h>
+#include <flutter/encodable_value.h>
 #include <flutter/flutter_view_controller.h>
+#include <flutter/method_channel.h>
 
 #include <memory>
 
@@ -26,9 +28,12 @@ class FlutterWindow : public Win32Window {
   // The project to run.
   flutter::DartProject project_;
   bool start_hidden_ = false;
+  static constexpr int kScreenshotHotKeyId = 0x564E;
 
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
+  std::unique_ptr<flutter::MethodChannel<flutter::EncodableValue>>
+      screenshot_channel_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_
