@@ -47,6 +47,10 @@ class RuntimeStoragePaths {
     return path.join(resolveRuntimeRootPathSync(), 'logs');
   }
 
+  static String resolveDataDirectoryPathSync() {
+    return path.join(resolveRuntimeRootPathSync(), 'data');
+  }
+
   static String resolveBundledPathSync(String relativePath) {
     return resolveBundledPathForExecutable(
       executablePath: Platform.resolvedExecutable,

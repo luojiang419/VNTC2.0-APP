@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -18,7 +19,9 @@ import 'package:vnt_app/pages/settings_page.dart';
 import 'package:vnt_app/pages/about_page.dart';
 import 'package:vnt_app/pages/remote_assist_page.dart';
 import 'package:vnt_app/pages/chat_page.dart';
+import 'package:vnt_app/pages/compact_chat_page.dart';
 import 'package:vnt_app/remote_assist/remote_assist_constants.dart';
+import 'package:vnt_app/screenshot/system_screenshot_service.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
@@ -53,10 +56,13 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   final AppExperiencePreferences _experiencePreferences =
       AppExperiencePreferences();
   AppExperienceMode _experienceMode = AppExperienceMode.regular;
+  StreamSubscription<ScreenshotCaptureResult>? _screenshotCaptureSubscription;
 
   bool get _showChatPage => true;
   bool get _showRemoteAssistPage =>
       !Platform.isAndroid || RemoteAssistConstants.androidRemoteAssistEnabled;
+  bool get _includeRemoteAssistPage =>
+      _showRemoteAssistPage || !_experienceMode.isProfessional;
   bool get _showAboutPage => AppVersion.showAboutPage;
 
   List<_NavItem> get _navItems => [
@@ -98,7 +104,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     if (_showChatPage) {
       index += 1;
     }
-    if (_showRemoteAssistPage) {
+    if (_includeRemoteAssistPage) {
       index += 1;
     }
     return index;
@@ -106,11 +112,46 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
   int get _settingsIndex => _configIndex + 1;
 
+  int get _chatIndex => 2;
+
+  int get _remoteAssistIndex => _chatIndex + (_showChatPage ? 1 : 0);
+
   @override
   void initState() {
     super.initState();
+    _initializeScreenshotShortcut();
     _loadExperienceMode();
     _autoConnect();
+  }
+
+  Future<void> _initializeScreenshotShortcut() async {
+    final screenshotService = SystemScreenshotService.instance;
+    _screenshotCaptureSubscription =
+        screenshotService.shortcutCaptures.listen((result) {
+      if (!mounted) {
+        return;
+      }
+      if (result.isSuccess) {
+        showTopToast(
+          context,
+          '截图已保存到 ${result.filePath}',
+          isSuccess: true,
+        );
+      } else {
+        showTopToast(context, '截图失败: ${result.error}', isSuccess: false);
+      }
+    });
+    try {
+      await screenshotService.initialize();
+    } catch (error) {
+      debugPrint('初始化截图快捷键失败: $error');
+    }
+  }
+
+  @override
+  void dispose() {
+    unawaited(_screenshotCaptureSubscription?.cancel());
+    super.dispose();
   }
 
   Future<void> _loadExperienceMode() async {
@@ -902,8 +943,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     final isWideScreen = screenWidth > 800;
     final isMediumScreen = screenWidth > 600 && screenWidth <= 800;
     final showProfessionalNavigation = _experienceMode.isProfessional;
-    final useCompactBottomDock =
+    final useProfessionalBottomDock =
         showProfessionalNavigation && !isWideScreen && !isMediumScreen;
+    final useCompactModeDock = !showProfessionalNavigation;
 
     // 设置状态栏颜色以适配当前主题（仅移动端）
     if (Platform.isAndroid || Platform.isIOS) {
@@ -917,7 +959,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
     }
 
     return Scaffold(
-      extendBody: useCompactBottomDock,
+      extendBody: useProfessionalBottomDock,
       backgroundColor: context.themeTokens.canvas,
       body: Column(
         children: [
@@ -944,8 +986,143 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         ],
       ),
       // 底部导航栏（窄屏显示）
-      bottomNavigationBar:
-          useCompactBottomDock ? _buildBottomNavigation(isDark) : null,
+      bottomNavigationBar: useCompactModeDock
+          ? _buildCompactModeDock(isDark)
+          : useProfessionalBottomDock
+              ? _buildBottomNavigation(isDark)
+              : null,
+    );
+  }
+
+  Widget _buildCompactModeDock(bool isDark) {
+    final destinations = <_CompactNavDestination>[
+      const _CompactNavDestination(
+        index: 0,
+        icon: Icons.hub_outlined,
+        activeIcon: Icons.hub_rounded,
+        label: '组网',
+      ),
+      _CompactNavDestination(
+        index: _chatIndex,
+        icon: Icons.chat_bubble_outline_rounded,
+        activeIcon: Icons.chat_bubble_rounded,
+        label: '聊天',
+      ),
+      _CompactNavDestination(
+        index: _remoteAssistIndex,
+        icon: Icons.desktop_windows_outlined,
+        activeIcon: Icons.desktop_windows_rounded,
+        label: '远程',
+      ),
+    ];
+    final primaryColor = Theme.of(context).primaryColor;
+    final tokens = context.themeTokens;
+    final windowWidth = MediaQuery.sizeOf(context).width;
+    final compact = windowWidth < 520;
+    final inactiveColor =
+        isDark ? AppTheme.darkTextSecondary : AppTheme.lightTextSecondary;
+
+    return SafeArea(
+      top: false,
+      child: Center(
+        heightFactor: 1,
+        child: Container(
+          key: const ValueKey('compact-mode-bottom-dock'),
+          constraints: const BoxConstraints(maxWidth: 420),
+          margin: EdgeInsets.fromLTRB(
+            compact ? 12 : 20,
+            0,
+            compact ? 12 : 20,
+            compact ? 10 : 14,
+          ),
+          padding: EdgeInsets.all(compact ? 6 : 8),
+          decoration: BoxDecoration(
+            color: tokens.navigation.withValues(alpha: 0.96),
+            borderRadius: BorderRadius.circular(compact ? 24 : 28),
+            border: Border.all(color: tokens.outline),
+            boxShadow: [
+              BoxShadow(
+                color: tokens.shadow,
+                blurRadius: 26,
+                offset: const Offset(0, 10),
+              ),
+            ],
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: destinations.map((destination) {
+              final selected = _selectedIndex == destination.index;
+              return Expanded(
+                child: Semantics(
+                  button: true,
+                  selected: selected,
+                  label: destination.label,
+                  child: InkWell(
+                    key: ValueKey('compact-dock-${destination.label}'),
+                    onTap: () => setState(
+                      () => _selectedIndex = destination.index,
+                    ),
+                    borderRadius: BorderRadius.circular(compact ? 18 : 20),
+                    child: AnimatedContainer(
+                      duration: const Duration(milliseconds: 220),
+                      curve: Curves.easeOutCubic,
+                      constraints: const BoxConstraints(minWidth: 88),
+                      padding: EdgeInsets.symmetric(
+                        horizontal: compact ? 12 : 18,
+                        vertical: compact ? 7 : 9,
+                      ),
+                      decoration: BoxDecoration(
+                        gradient: selected
+                            ? LinearGradient(
+                                colors: [
+                                  primaryColor,
+                                  primaryColor.withValues(alpha: 0.82),
+                                ],
+                                begin: Alignment.topCenter,
+                                end: Alignment.bottomCenter,
+                              )
+                            : null,
+                        borderRadius: BorderRadius.circular(compact ? 18 : 20),
+                        boxShadow: selected
+                            ? [
+                                BoxShadow(
+                                  color: primaryColor.withValues(alpha: 0.24),
+                                  blurRadius: 12,
+                                  offset: const Offset(0, 4),
+                                ),
+                              ]
+                            : null,
+                      ),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            selected
+                                ? destination.activeIcon
+                                : destination.icon,
+                            color: selected ? Colors.white : inactiveColor,
+                            size: compact ? 20 : 22,
+                          ),
+                          SizedBox(height: compact ? 2 : 4),
+                          Text(
+                            destination.label,
+                            style: TextStyle(
+                              fontSize: compact ? 10 : 11,
+                              fontWeight:
+                                  selected ? FontWeight.w700 : FontWeight.w500,
+                              color: selected ? Colors.white : inactiveColor,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+              );
+            }).toList(growable: false),
+          ),
+        ),
+      ),
     );
   }
 
@@ -1406,8 +1583,12 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
                 }
               : null,
         ),
-        if (_showChatPage) const ChatPage(),
-        if (_showRemoteAssistPage) const RemoteAssistPage(),
+        if (_showChatPage)
+          _experienceMode.isProfessional
+              ? const ChatPage()
+              : const CompactChatPage(),
+        if (_includeRemoteAssistPage)
+          RemoteAssistPage(compactMode: !_experienceMode.isProfessional),
         // 配置
         ConfigListPage(
           onConfigSelected: (config) {
@@ -1472,4 +1653,18 @@ class _NavItem {
     required this.label,
     this.mobileLabel,
   });
+}
+
+class _CompactNavDestination {
+  const _CompactNavDestination({
+    required this.index,
+    required this.icon,
+    required this.activeIcon,
+    required this.label,
+  });
+
+  final int index;
+  final IconData icon;
+  final IconData activeIcon;
+  final String label;
 }
