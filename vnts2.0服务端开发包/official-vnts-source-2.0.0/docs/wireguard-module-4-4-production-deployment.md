@@ -32,7 +32,7 @@ WireGuard 一键生成配置版本已部署到正式 Windows 服务。部署只�
 - 官方诊断：0 失败、0 警告。
 - 数据库：Ready，可读取现有网络和 WireGuard Peer 列表。
 - 新 Web 控制台：首页、应用脚本、离线二维码资源均为 HTTP 200。
-- 监听：TCP/UDP 2222，Web 仅回环地址 29871。
+- 监听：TCP/UDP 2222；Web 默认回环地址 29871，也可按需绑定公网地址。
 - 最近日志没有 ERROR、panic 或 failed。
 
 ## 当前 WireGuard 状态

@@ -588,11 +588,41 @@ pub async fn delete_network(network_code: &str) -> anyhow::Result<bool> {
         return Ok(false);
     };
 
+    delete_network_with_pool(pool, network_code).await
+}
+
+async fn delete_network_with_pool(pool: &SqlitePool, network_code: &str) -> anyhow::Result<bool> {
+    let mut transaction = pool
+        .begin()
+        .await
+        .context("Failed to start network deletion transaction")?;
+
+    for statement in [
+        "DELETE FROM wireguard_peer_profiles WHERE network_code = ?",
+        "DELETE FROM wireguard_peer_routes WHERE network_code = ?",
+        "DELETE FROM wireguard_peer_secrets WHERE network_code = ?",
+        "DELETE FROM wireguard_peers WHERE network_code = ?",
+        "DELETE FROM devices WHERE network_code = ?",
+        "DELETE FROM ip_allocations WHERE network_code = ?",
+        "DELETE FROM cluster_leases WHERE network_code = ?",
+    ] {
+        query(statement)
+            .bind(network_code)
+            .execute(&mut *transaction)
+            .await
+            .with_context(|| format!("Failed to clean network resources: {statement}"))?;
+    }
+
     let result = query(r#"DELETE FROM networks WHERE network_code = ?"#)
         .bind(network_code)
-        .execute(pool)
+        .execute(&mut *transaction)
         .await
         .context("Failed to delete network")?;
+
+    transaction
+        .commit()
+        .await
+        .context("Failed to commit network deletion")?;
 
     Ok(result.rows_affected() > 0)
 }
@@ -2153,6 +2183,74 @@ mod tests {
                 .await
                 .unwrap()
         );
+    }
+
+    #[tokio::test]
+    async fn deleting_network_cascades_devices_peers_allocations_and_leases() {
+        let pool = legacy_pool().await;
+        migrations::apply(&pool).await.unwrap();
+        insert_test_network(&pool, "network-a").await;
+        let peer = wireguard_peer_record("network-a", "peer-a", [0x22; 32]);
+        insert_wireguard_peer_with_pool(&pool, &peer).await.unwrap();
+        reserve_wireguard_peer_ip_with_pool(
+            &pool,
+            "network-a",
+            "peer-a",
+            "10.26.0.2".parse().unwrap(),
+        )
+        .await
+        .unwrap();
+        insert_device(&pool, "network-a", "device-a", Some("10.26.0.3"))
+            .await
+            .unwrap();
+        query(
+            "INSERT INTO wireguard_peer_profiles (
+                 network_code, peer_id, dns_servers, persistent_keepalive, created_at, updated_at
+             ) VALUES ('network-a', 'peer-a', '[]', 25, 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        query(
+            "INSERT INTO wireguard_peer_routes (
+                 network_code, peer_id, lan_network, vnt_cli_ip, sort_order
+             ) VALUES ('network-a', 'peer-a', '192.168.1.0/24', '10.26.0.2', 0)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+        query(
+            "INSERT INTO cluster_leases (
+                 network_code, owner_type, owner_id, ip, authority_id, origin_server_id,
+                 revision, expires_at, static_reservation, updated_at
+             ) VALUES ('network-a', 'wireguard_peer', 'peer-a', '10.26.0.2', 'authority', 'origin', 1, 10, 1, 1)",
+        )
+        .execute(&pool)
+        .await
+        .unwrap();
+
+        assert!(delete_network_with_pool(&pool, "network-a").await.unwrap());
+        for table in [
+            "networks",
+            "devices",
+            "ip_allocations",
+            "wireguard_peers",
+            "wireguard_peer_profiles",
+            "wireguard_peer_routes",
+            "wireguard_peer_secrets",
+            "cluster_leases",
+        ] {
+            let count: i64 = query(&format!(
+                "SELECT COUNT(*) AS count FROM {table} WHERE network_code = ?"
+            ))
+            .bind("network-a")
+            .fetch_one(&pool)
+            .await
+            .unwrap()
+            .get("count");
+            assert_eq!(count, 0, "network resources remained in {table}");
+        }
+        assert!(!delete_network_with_pool(&pool, "network-a").await.unwrap());
     }
 
     #[tokio::test]

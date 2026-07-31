@@ -110,10 +110,6 @@ impl ConfigFile {
         let Some(web_bind) = self.web_bind else {
             return Ok(None);
         };
-        anyhow::ensure!(
-            web_bind.ip().is_loopback(),
-            "Web 管理端在当前版本只允许绑定回环地址；远程管理请等待 TLS/反向代理阶段"
-        );
         let username = self
             .username
             .as_deref()
@@ -348,7 +344,7 @@ network = "10.26.0.0/24"
 white_list = []
 # IP租约时长，单位秒，默认24小时，离线超过这个时间IP就会被回收
 lease_duration = 86400
-# Web管理端绑定地址，不写则不启用web服务
+# Web管理端绑定地址，不写则不启用web服务；公网开放时请使用强密码并优先配置 HTTPS 反向代理
 web_bind = "127.0.0.1:29871"
 # 管理端登录用户名密码
 username = "admin"
@@ -419,7 +415,7 @@ mod tests {
     }
 
     #[test]
-    fn web_management_rejects_remote_bind_and_unsafe_credentials() {
+    fn web_management_accepts_remote_bind_and_rejects_unsafe_credentials() {
         let mut config = ConfigFile {
             password: Some("strong-password-123".to_string()),
             ..ConfigFile::default()
@@ -427,7 +423,7 @@ mod tests {
         assert!(config.web_management_config().is_ok());
 
         config.web_bind = Some("0.0.0.0:29871".parse().unwrap());
-        assert!(config.web_management_config().is_err());
+        assert!(config.web_management_config().is_ok());
 
         config.web_bind = Some("127.0.0.1:29871".parse().unwrap());
         config.password = Some("admin".to_string());

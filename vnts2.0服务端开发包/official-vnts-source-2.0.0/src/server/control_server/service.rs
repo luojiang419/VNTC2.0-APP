@@ -52,6 +52,7 @@ pub struct ControlService {
 
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct WireGuardPeerIpVO {
+    pub network_code: String,
     pub peer_id: String,
     pub ip: Ipv4Addr,
 }
@@ -622,18 +623,22 @@ impl ControlService {
             bail!("网络编号 '{}' 不存在", network_code);
         }
 
-        if db::network_has_resource_owners(network_code).await? {
-            bail!("网络下存在设备或 WireGuard peer，无法删除");
-        }
-
-        if let Some(state) = self.network_state_provider.get(network_code) {
-            let (all, _) = state.count();
-            if all > 0 {
-                bail!("网络下存在设备，无法删除");
+        let peers = db::load_wireguard_peers(network_code).await?;
+        for peer in &peers {
+            self.revoke_wireguard_peer(network_code, &peer.peer_id)
+                .await?;
+            if let Some(peer_manager) = self.get_peer_manager() {
+                peer_manager
+                    .release_lease(network_code, "wireguard_peer", &peer.peer_id)
+                    .await?;
             }
         }
 
-        db::delete_network(network_code).await?;
+        anyhow::ensure!(
+            db::delete_network(network_code).await?,
+            "网络编号 '{}' 删除失败",
+            network_code
+        );
 
         self.db_nets.write().remove(network_code);
         self.network_state_provider.remove(network_code);
@@ -850,7 +855,11 @@ impl ControlService {
             .list_wireguard_peer_ips()
             .await
             .into_iter()
-            .map(|(peer_id, ip)| WireGuardPeerIpVO { peer_id, ip })
+            .map(|(peer_id, ip)| WireGuardPeerIpVO {
+                network_code: network_code.to_string(),
+                peer_id,
+                ip,
+            })
             .collect())
     }
 

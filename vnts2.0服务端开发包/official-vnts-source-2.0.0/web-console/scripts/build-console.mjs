@@ -52,6 +52,7 @@ const document = `<!DOCTYPE html>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>VNTS 控制中心</title>
+  <script src="/assets/theme-init.js"></script>
   <link rel="stylesheet" href="/assets/app.css">
   <link rel="stylesheet" href="/assets/fontawesome.min.css">
   <script defer src="/assets/vue.runtime.global.prod.js"></script>
@@ -87,6 +88,7 @@ await Promise.all([
     join(consoleRoot, "node_modules", "vue", "dist", "vue.runtime.global.prod.js"),
     join(assetsRoot, "vue.runtime.global.prod.js"),
   ),
+  copyFile(join(consoleRoot, "src", "theme-init.js"), join(assetsRoot, "theme-init.js")),
   copyFile(
     join(consoleRoot, "node_modules", "@fortawesome", "fontawesome-free", "css", "all.min.css"),
     join(assetsRoot, "fontawesome.min.css"),

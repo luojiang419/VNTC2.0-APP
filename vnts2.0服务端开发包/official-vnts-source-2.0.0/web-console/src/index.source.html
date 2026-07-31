@@ -4,6 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>VNTS 控制中心</title>
+    <script src="/assets/theme-init.js"></script>
     <link rel="stylesheet" href="/assets/app.css">
     <link rel="stylesheet" href="/assets/fontawesome.min.css">
     <script defer src="/assets/vue.runtime.global.prod.js"></script>
@@ -42,11 +43,18 @@
                         </button>
                     </nav>
                 </div>
-                <div v-if="isLoggedIn" class="flex items-center self-end lg:self-auto">
-                    <span class="mr-4 text-sm text-gray-600">
-                        <i class="fa-solid fa-user mr-1"></i> {{ username || 'Admin' }}
-                    </span>
-                    <button @click="logout" class="text-sm text-red-500 hover:text-red-700 font-medium">退出登录</button>
+                <div class="flex items-center self-end lg:self-auto gap-3">
+                    <button type="button" @click="toggleTheme" class="theme-toggle"
+                        :aria-pressed="isDarkTheme" :aria-label="isDarkTheme ? '切换为浅色主题' : '切换为深色主题'"
+                        :title="isDarkTheme ? '切换为浅色主题' : '切换为深色主题'">
+                        <i class="fa-solid" :class="isDarkTheme ? 'fa-sun' : 'fa-moon'"></i>
+                    </button>
+                    <div v-if="isLoggedIn" class="flex items-center">
+                        <span class="mr-4 text-sm text-gray-600">
+                            <i class="fa-solid fa-user mr-1"></i> {{ username || 'Admin' }}
+                        </span>
+                        <button @click="logout" class="text-sm text-red-500 hover:text-red-700 font-medium">退出登录</button>
+                    </div>
                 </div>
             </div>
         </div>
@@ -505,16 +513,16 @@
                     </div>
                     <div class="flex flex-col sm:flex-row gap-3 w-full xl:w-auto">
                         <label class="flex flex-col text-sm text-gray-600 min-w-64">
-                            <span class="mb-1">选择网络</span>
+                            <span class="mb-1">筛选网络</span>
                             <select v-model="wireguardNetworkCode" @change="fetchWireGuardData"
                                 class="rounded-lg border bg-white px-3 py-2 focus:outline-none focus:ring-2 focus:ring-blue-500">
-                                <option value="" disabled>请选择网络</option>
+                                <option value="">全部网络</option>
                                 <option v-for="net in networks" :key="net.network_code" :value="net.network_code">
                                     {{ net.network_code }}（{{ net.net }}）
                                 </option>
                             </select>
                         </label>
-                        <button @click="openWireGuardPeerModal" :disabled="!wireguardNetworkCode || loading"
+                        <button @click="openWireGuardPeerModal" :disabled="networks.length === 0 || loading"
                             class="self-end bg-green-500 hover:bg-green-600 disabled:bg-gray-300 text-white px-4 py-2 rounded-lg font-medium transition whitespace-nowrap">
                             <i class="fa-solid fa-plus mr-2"></i>新增 Peer
                         </button>
@@ -533,12 +541,13 @@
                 <div v-else class="bg-white shadow rounded-lg overflow-x-auto">
                     <div class="px-6 py-4 border-b flex justify-between items-center">
                         <span class="font-semibold text-gray-700">Peer 列表</span>
-                        <span class="text-sm text-gray-500">{{ wireguardPeers.length }} 个</span>
+                        <span class="text-sm text-gray-500">{{ wireguardPeers.length }} 个{{ wireguardNetworkCode ? '' : '（全部网络）' }}</span>
                     </div>
                     <table class="min-w-full divide-y divide-gray-200">
                         <thead class="bg-gray-50">
                             <tr>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Peer ID</th>
+                                <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">网络</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">公钥</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">状态</th>
                                 <th class="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider min-w-72">保留 IP</th>
@@ -548,8 +557,10 @@
                             </tr>
                         </thead>
                         <tbody class="bg-white divide-y divide-gray-200">
-                            <tr v-for="peer in wireguardPeers" :key="peer.peer_id" class="hover:bg-gray-50">
+                            <tr v-for="(peer, index) in wireguardPeers" :key="wireguardPeerKey(peer)"
+                                :class="wireguardPeerRowClass(peer, index)">
                                 <td class="px-4 py-4 whitespace-nowrap font-medium text-gray-900">{{ peer.peer_id }}</td>
+                                <td class="px-4 py-4 whitespace-nowrap text-sm text-gray-600">{{ peer.network_code }}</td>
                                 <td class="px-4 py-4">
                                     <code class="block max-w-64 truncate text-xs text-gray-600" :title="peer.public_key">{{ peer.public_key }}</code>
                                 </td>
@@ -561,11 +572,11 @@
                                 </td>
                                 <td class="px-4 py-4">
                                     <div class="flex items-center gap-2">
-                                        <input v-model="wireguardIpDrafts[peer.peer_id]" type="text" placeholder="如 10.26.0.2"
+                                        <input v-model="wireguardIpDrafts[wireguardPeerKey(peer)]" type="text" placeholder="如 10.26.0.2"
                                             class="w-36 rounded border px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
                                         <button @click="reserveWireGuardPeerIp(peer)" :disabled="loading"
                                             class="text-sm text-blue-600 hover:text-blue-800 disabled:text-gray-300">预留</button>
-                                        <button v-if="wireguardIpMap[peer.peer_id]" @click="releaseWireGuardPeerIp(peer)" :disabled="loading"
+                                        <button v-if="wireguardIpMap[wireguardPeerKey(peer)]" @click="releaseWireGuardPeerIp(peer)" :disabled="loading"
                                             class="text-sm text-red-600 hover:text-red-800 disabled:text-gray-300">释放</button>
                                     </div>
                                 </td>
@@ -590,7 +601,9 @@
                                 </td>
                             </tr>
                             <tr v-if="wireguardPeers.length === 0">
-                                <td colspan="7" class="px-6 py-10 text-center text-gray-500">当前网络暂无 WireGuard Peer</td>
+                                <td colspan="8" class="px-6 py-10 text-center text-gray-500">
+                                    {{ wireguardNetworkCode ? '当前筛选网络暂无 WireGuard Peer' : '暂无 WireGuard Peer' }}
+                                </td>
                             </tr>
                         </tbody>
                     </table>
@@ -688,7 +701,7 @@
     </div>
 
     <!-- 新增 WireGuard Peer 模态框 -->
-    <div v-if="showWireGuardPeerModal" class="modal-mask" @click.self="closeWireGuardPeerModal">
+    <div v-if="showWireGuardPeerModal" class="modal-mask">
         <div class="bg-white rounded-lg shadow-xl w-full max-w-2xl mx-4 p-6 max-h-screen overflow-y-auto">
             <h3 class="text-xl font-bold mb-4">
                 {{ generatedWireGuardPeer ? (wireguardGeneratedPeerNew ? '保存 WireGuard 客户端密钥' : '下载 WireGuard 客户端配置') : (wireguardEditingPeer ? '编辑 WireGuard Peer 配置' : '新增 WireGuard Peer') }}
@@ -795,7 +808,14 @@
             <form v-else @submit.prevent="submitWireGuardPeer">
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2">网络</label>
-                    <input :value="wireguardNetworkCode" type="text" disabled
+                    <select v-if="!wireguardEditingPeer" v-model="wireguardPeerForm.network_code" required
+                        class="border rounded w-full py-2 px-3 bg-white focus:outline-none focus:ring-2 focus:ring-blue-500">
+                        <option value="" disabled>请选择网络</option>
+                        <option v-for="net in networks" :key="net.network_code" :value="net.network_code">
+                            {{ net.network_code }}（{{ net.net }}）
+                        </option>
+                    </select>
+                    <input v-else :value="wireguardEditingPeer.network_code" type="text" disabled
                         class="border rounded w-full py-2 px-3 bg-gray-100 text-gray-600">
                 </div>
                 <div class="mb-4">
@@ -846,10 +866,38 @@
                 </div>
                 <div class="mb-4">
                     <label class="block text-gray-700 text-sm font-bold mb-2">Peer 后方局域网路由</label>
-                    <textarea v-model="wireguardPeerForm.routes" rows="4" spellcheck="false"
-                        class="border rounded w-full py-2 px-3 font-mono text-sm resize-y focus:outline-none focus:ring-2 focus:ring-blue-500"
-                        placeholder="每行一条：192.168.10.0/24 -> 10.26.0.10"></textarea>
-                    <p class="text-gray-400 text-xs mt-1">左侧为局域网 CIDR，右侧为负责转发的 VNT 客户端虚拟 IP。</p>
+                    <div class="space-y-3">
+                        <div v-for="(route, index) in wireguardPeerForm.routes" :key="index"
+                            class="flex flex-col sm:flex-row sm:items-end gap-3 rounded border border-gray-200 p-3">
+                            <div class="flex-1 min-w-0">
+                                <label class="block text-gray-600 text-xs font-medium mb-1">局域网 CIDR</label>
+                                <div class="flex items-center">
+                                    <input v-model="route.lan_network" type="text" inputmode="decimal" autocomplete="off"
+                                        class="border rounded-l w-full py-2 px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                        placeholder="如：192.168.10.0">
+                                    <select v-model="route.lan_prefix" aria-label="局域网 CIDR 前缀"
+                                        class="border border-l-0 rounded-r bg-gray-100 text-gray-500 px-2 py-2 font-mono text-sm whitespace-nowrap focus:outline-none focus:ring-2 focus:ring-blue-500">
+                                        <option v-if="!['24', '32'].includes(String(route.lan_prefix))" :value="route.lan_prefix">/{{ route.lan_prefix }}（现有）</option>
+                                        <option value="24">/24</option>
+                                        <option value="32">/32</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="flex-1 min-w-0">
+                                <label class="block text-gray-600 text-xs font-medium mb-1">VNT 客户端虚拟 IP</label>
+                                <input v-model="route.vnt_cli_ip" type="text" inputmode="decimal" autocomplete="off"
+                                    class="border rounded w-full py-2 px-3 font-mono text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                                    placeholder="如：10.26.0.10">
+                            </div>
+                            <button type="button" @click="removeWireGuardRoute(index)"
+                                class="shrink-0 px-3 py-2 text-gray-500 hover:text-red-600 text-sm">删除</button>
+                        </div>
+                    </div>
+                    <button type="button" @click="addWireGuardRoute"
+                        class="mt-3 px-3 py-2 border border-blue-200 text-blue-600 hover:bg-blue-50 rounded text-sm">
+                        <i class="fa-solid fa-plus mr-1"></i>添加一条路由
+                    </button>
+                    <p class="text-gray-400 text-xs mt-1">局域网地址默认使用 /24，也可选择 /32；右侧填写负责转发的 VNT 客户端虚拟 IP。</p>
                 </div>
                 <label v-if="!wireguardEditingPeer" class="flex items-center mb-6 text-sm text-gray-700">
                     <input v-model="wireguardPeerForm.enabled" type="checkbox" class="mr-2 h-4 w-4">
@@ -877,6 +925,17 @@ createApp({
     setup() {
         const csrfToken = ref(sessionStorage.getItem('csrf_token') || '');
         const isLoggedIn = computed(() => !!csrfToken.value);
+        const theme = ref(document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light');
+        const isDarkTheme = computed(() => theme.value === 'dark');
+        const applyTheme = () => {
+            document.documentElement.dataset.theme = theme.value;
+            document.documentElement.style.colorScheme = theme.value;
+        };
+        const toggleTheme = () => {
+            theme.value = isDarkTheme.value ? 'light' : 'dark';
+            localStorage.setItem('vnts_theme', theme.value);
+            applyTheme();
+        };
         const currentView = ref('status');
         const loading = ref(false);
         const errorMsg = ref('');
@@ -895,9 +954,12 @@ createApp({
         const wireguardPeerIps = ref([]);
         const wireguardIpDrafts = reactive({});
         const showWireGuardPeerModal = ref(false);
+        const emptyWireGuardRoute = () => ({
+            lan_network: '', lan_prefix: '24', vnt_cli_ip: ''
+        });
         const emptyWireGuardPeerForm = () => ({
-            peer_id: '', public_key: '', enabled: true, dns_inherited: true,
-            dns_servers: '', persistent_keepalive: 25, routes: ''
+            network_code: '', peer_id: '', public_key: '', enabled: true, dns_inherited: true,
+            dns_servers: '', persistent_keepalive: 25, routes: [emptyWireGuardRoute()]
         });
         const wireguardPeerForm = ref(emptyWireGuardPeerForm());
         const wireguardEditingPeer = ref(null);
@@ -1329,9 +1391,21 @@ createApp({
         };
 
         // WireGuard 管理
+        const wireguardPeerKey = (peer) => `${peer.network_code}::${peer.peer_id}`;
+
+        const wireguardAllocationKey = (allocation) =>
+            `${allocation.network_code || wireguardNetworkCode.value}::${allocation.peer_id}`;
+
         const wireguardIpMap = computed(() => Object.fromEntries(
-            wireguardPeerIps.value.map(allocation => [allocation.peer_id, allocation.ip])
+            wireguardPeerIps.value.map(allocation => [wireguardAllocationKey(allocation), allocation.ip])
         ));
+
+        const wireguardPeerRowClass = (peer, index) => [
+            'hover:bg-gray-50',
+            index > 0 && wireguardPeers.value[index - 1]?.network_code !== peer.network_code
+                ? 'border-t-2 border-gray-200'
+                : ''
+        ];
 
         const initializeWireGuardPage = async () => {
             const availableNetworks = await fetchNetworks();
@@ -1341,35 +1415,43 @@ createApp({
                 wireguardPeerIps.value = [];
                 return;
             }
-            if (!availableNetworks.some(net => net.network_code === wireguardNetworkCode.value)) {
-                wireguardNetworkCode.value = availableNetworks[0].network_code;
+            if (wireguardNetworkCode.value && !availableNetworks.some(net => net.network_code === wireguardNetworkCode.value)) {
+                wireguardNetworkCode.value = '';
             }
             await fetchWireGuardData();
         };
 
         const fetchWireGuardData = async () => {
-            if (!wireguardNetworkCode.value) return;
             wireguardPeers.value = [];
             wireguardPeerIps.value = [];
             Object.keys(wireguardIpDrafts).forEach(key => delete wireguardIpDrafts[key]);
-            const networkCode = encodeURIComponent(wireguardNetworkCode.value);
-            const peers = await request(`/wireguard/peers?network_code=${networkCode}`);
+            const query = wireguardNetworkCode.value
+                ? `?network_code=${encodeURIComponent(wireguardNetworkCode.value)}`
+                : '';
+            const peers = await request(`/wireguard/peers${query}`);
             if (!Array.isArray(peers)) return;
-            const allocations = await request(`/wireguard/peer_ips?network_code=${networkCode}`);
+            const allocations = await request(`/wireguard/peer_ips${query}`);
             if (!Array.isArray(allocations)) return;
-            wireguardPeers.value = peers;
+            wireguardPeers.value = peers.slice().sort((left, right) =>
+                left.network_code.localeCompare(right.network_code)
+                || left.peer_id.localeCompare(right.peer_id)
+            );
             wireguardPeerIps.value = allocations;
             const allocationMap = Object.fromEntries(
-                allocations.map(allocation => [allocation.peer_id, allocation.ip])
+                allocations.map(allocation => [wireguardAllocationKey(allocation), allocation.ip])
             );
             Object.keys(wireguardIpDrafts).forEach(key => delete wireguardIpDrafts[key]);
-            peers.forEach(peer => {
-                wireguardIpDrafts[peer.peer_id] = allocationMap[peer.peer_id] || peer.ip || '';
+            wireguardPeers.value.forEach(peer => {
+                const key = wireguardPeerKey(peer);
+                wireguardIpDrafts[key] = allocationMap[key] || peer.ip || '';
             });
         };
 
         const openWireGuardPeerModal = () => {
-            wireguardPeerForm.value = emptyWireGuardPeerForm();
+            wireguardPeerForm.value = {
+                ...emptyWireGuardPeerForm(),
+                network_code: wireguardNetworkCode.value || networks.value[0]?.network_code || ''
+            };
             wireguardEditingPeer.value = null;
             wireguardPeerMode.value = 'generated';
             generatedWireGuardPeer.value = null;
@@ -1393,17 +1475,43 @@ createApp({
             modalErrorMsg.value = '';
         };
 
-        const parseWireGuardRoutes = (value) => value
-            .split(/\r?\n/)
-            .map(line => line.trim())
-            .filter(Boolean)
-            .map((line, index) => {
-                const parts = line.split(/\s*(?:->|,|\s+)\s*/).filter(Boolean);
-                if (parts.length !== 2) {
-                    throw new Error(`第 ${index + 1} 条路由格式错误，应为“局域网 CIDR -> VNT 客户端 IP”`);
+        const normalizeWireGuardRoute = (route) => {
+            const rawLanNetwork = String(route?.lan_network || '').trim();
+            const slashIndex = rawLanNetwork.indexOf('/');
+            return {
+                lan_network: slashIndex >= 0 ? rawLanNetwork.slice(0, slashIndex).trim() : rawLanNetwork,
+                lan_prefix: slashIndex >= 0 ? rawLanNetwork.slice(slashIndex + 1).trim() || '24' : '24',
+                vnt_cli_ip: String(route?.vnt_cli_ip || '').trim()
+            };
+        };
+
+        const addWireGuardRoute = () => {
+            wireguardPeerForm.value.routes.push(emptyWireGuardRoute());
+        };
+
+        const removeWireGuardRoute = (index) => {
+            if (wireguardPeerForm.value.routes.length <= 1) {
+                wireguardPeerForm.value.routes[0] = emptyWireGuardRoute();
+                return;
+            }
+            wireguardPeerForm.value.routes.splice(index, 1);
+        };
+
+        const parseWireGuardRoutes = (routes) => routes
+            .map((route, index) => {
+                const lanNetwork = String(route?.lan_network || '').trim();
+                const lanPrefix = String(route?.lan_prefix || '24').trim();
+                const vntCliIp = String(route?.vnt_cli_ip || '').trim();
+                if (!lanNetwork && !vntCliIp) return null;
+                if (!lanNetwork || !vntCliIp) {
+                    throw new Error(`第 ${index + 1} 条路由请同时填写局域网 CIDR 和 VNT 客户端虚拟 IP。`);
                 }
-                return { lan_network: parts[0], vnt_cli_ip: parts[1] };
-            });
+                if (!/^\d{1,2}$/.test(lanPrefix) || Number(lanPrefix) < 0 || Number(lanPrefix) > 32) {
+                    throw new Error(`第 ${index + 1} 条路由的 CIDR 前缀无效。`);
+                }
+                return { lan_network: `${lanNetwork}/${lanPrefix}`, vnt_cli_ip: vntCliIp };
+            })
+            .filter(Boolean);
 
         const wireguardProfilePayload = () => ({
             dns_servers: wireguardPeerForm.value.dns_inherited
@@ -1416,13 +1524,16 @@ createApp({
         const openWireGuardProfileModal = (peer) => {
             wireguardEditingPeer.value = peer;
             wireguardPeerForm.value = {
+                network_code: peer.network_code,
                 peer_id: peer.peer_id,
                 public_key: peer.public_key,
                 enabled: peer.enabled,
                 dns_inherited: peer.dns_inherited,
                 dns_servers: peer.dns_servers?.join(', ') || '',
                 persistent_keepalive: peer.persistent_keepalive ?? 25,
-                routes: (peer.routes || []).map(route => `${route.lan_network} -> ${route.vnt_cli_ip}`).join('\n')
+                routes: (peer.routes || []).length
+                    ? peer.routes.map(normalizeWireGuardRoute)
+                    : [emptyWireGuardRoute()]
             };
             generatedWireGuardPeer.value = null;
             wireguardGeneratedPeerNew.value = false;
@@ -1462,6 +1573,13 @@ createApp({
                 modalErrorMsg.value = 'PersistentKeepalive 必须是 0 到 65535 之间的整数。';
                 return;
             }
+            const targetNetworkCode = wireguardEditingPeer.value
+                ? wireguardEditingPeer.value.network_code
+                : wireguardPeerForm.value.network_code.trim();
+            if (!targetNetworkCode) {
+                modalErrorMsg.value = '请选择网络。';
+                return;
+            }
             if (wireguardEditingPeer.value) {
                 const result = await request('/wireguard/peers/profile', {
                     method: 'PUT',
@@ -1482,7 +1600,7 @@ createApp({
                 const generated = await request('/wireguard/peers/generated', {
                     method: 'POST',
                     body: JSON.stringify({
-                        network_code: wireguardNetworkCode.value,
+                        network_code: targetNetworkCode,
                         peer_id: peerId,
                         enabled: wireguardPeerForm.value.enabled,
                         ...profile
@@ -1503,7 +1621,7 @@ createApp({
             const result = await request('/wireguard/peers', {
                 method: 'POST',
                 body: JSON.stringify({
-                    network_code: wireguardNetworkCode.value,
+                    network_code: targetNetworkCode,
                     peer_id: peerId,
                     public_key: wireguardPeerForm.value.public_key.trim(),
                     enabled: wireguardPeerForm.value.enabled,
@@ -1644,7 +1762,7 @@ createApp({
                 body: JSON.stringify({
                     network_code: peer.network_code,
                     peer_id: peer.peer_id,
-                    ip: (wireguardIpDrafts[peer.peer_id] || '').trim()
+                    ip: (wireguardIpDrafts[wireguardPeerKey(peer)] || '').trim()
                 })
             });
             if (result) await fetchWireGuardData();
@@ -2032,6 +2150,7 @@ createApp({
         };
 
         onMounted(() => {
+            applyTheme();
             window.addEventListener('hashchange', handleRouteChange);
             if (isLoggedIn.value) {
                 handleRouteChange();
@@ -2045,6 +2164,9 @@ createApp({
 
         return {
             isLoggedIn,
+            theme,
+            isDarkTheme,
+            toggleTheme,
             loginForm,
             handleLogin,
             logout,
@@ -2110,6 +2232,8 @@ createApp({
             wireguardPeers,
             wireguardIpDrafts,
             wireguardIpMap,
+            wireguardPeerKey,
+            wireguardPeerRowClass,
             showWireGuardPeerModal,
             wireguardPeerForm,
             wireguardEditingPeer,
@@ -2128,6 +2252,8 @@ createApp({
             openWireGuardProfileModal,
             openStoredWireGuardConfig,
             closeWireGuardPeerModal,
+            addWireGuardRoute,
+            removeWireGuardRoute,
             submitWireGuardPeer,
             copyGeneratedWireGuardPrivateKey,
             copyGeneratedWireGuardConfig,

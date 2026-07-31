@@ -224,9 +224,9 @@ impl WireGuardAutostart {
                     self.config_path.display()
                 )
             })?;
-        let endpoint = config
-            .effective_wireguard_public_endpoint()?
-            .context("尚未配置 WireGuard UDP 监听地址，无法生成可连接的客户端配置")?;
+        let endpoint = config.effective_wireguard_public_endpoint()?.context(
+            "尚未配置 wireguard_public_endpoint；如需自动推导公网 Endpoint，请配置 wireguard_bind",
+        )?;
         let master_key_file = config
             .wireguard_master_key_file
             .clone()
@@ -828,7 +828,8 @@ async fn delete_device(
 
 #[derive(Deserialize)]
 struct WireGuardPeerListParams {
-    network_code: String,
+    #[serde(default)]
+    network_code: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -1118,37 +1119,47 @@ async fn list_wireguard_peers(
     State(state): State<AppState>,
     Query(params): Query<WireGuardPeerListParams>,
 ) -> Response {
-    let network_state = match state
-        .control_service
-        .wireguard_network_state(&params.network_code)
-        .await
+    let network_codes = if let Some(network_code) = params
+        .network_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
-        Ok(network_state) => network_state,
-        Err(error) => return service_error(error),
+        vec![network_code.to_string()]
+    } else {
+        let mut codes = state.control_service.get_network_codes();
+        codes.sort();
+        codes
     };
-    match state
-        .control_service
-        .list_wireguard_peers(&params.network_code)
-        .await
-    {
-        Ok(peers) => {
-            let mut responses = Vec::with_capacity(peers.len());
-            for peer in peers {
-                match wireguard_peer_response(
-                    peer,
-                    &state.status_config.wireguard_dns,
-                    &network_state,
-                )
+
+    let mut responses = Vec::new();
+    for network_code in network_codes {
+        let network_state = match state
+            .control_service
+            .wireguard_network_state(&network_code)
+            .await
+        {
+            Ok(network_state) => network_state,
+            Err(error) => return service_error(error),
+        };
+        let peers = match state
+            .control_service
+            .list_wireguard_peers(&network_code)
+            .await
+        {
+            Ok(peers) => peers,
+            Err(error) => return service_error(error),
+        };
+        for peer in peers {
+            match wireguard_peer_response(peer, &state.status_config.wireguard_dns, &network_state)
                 .await
-                {
-                    Ok(response) => responses.push(response),
-                    Err(error) => return service_error(error),
-                }
+            {
+                Ok(response) => responses.push(response),
+                Err(error) => return service_error(error),
             }
-            ApiResponse::ok(responses).into_response()
         }
-        Err(error) => service_error(error),
     }
+    ApiResponse::ok(responses).into_response()
 }
 
 async fn create_wireguard_peer(
@@ -1232,7 +1243,7 @@ async fn generate_wireguard_peer(
         };
         let Some(endpoint) = state.status_config.wireguard_public_endpoint.clone() else {
             return ApiResponse::<GeneratedWireGuardPeerResponse>::unavailable(
-                "尚未配置 wireguard_public_endpoint，无法生成可连接的客户端配置",
+                "尚未配置 wireguard_public_endpoint，无法生成可连接的客户端配置；如需自动推导 Endpoint，请配置 wireguard_bind",
             )
             .into_response();
         };
@@ -1600,21 +1611,39 @@ async fn delete_wireguard_peer(
 
 #[derive(Deserialize)]
 struct WireGuardPeerIpListParams {
-    network_code: String,
+    #[serde(default)]
+    network_code: Option<String>,
 }
 
 async fn list_wireguard_peer_ips(
     State(state): State<AppState>,
     Query(params): Query<WireGuardPeerIpListParams>,
 ) -> Response {
-    match state
-        .control_service
-        .list_wireguard_peer_ips(&params.network_code)
-        .await
+    let network_codes = if let Some(network_code) = params
+        .network_code
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
     {
-        Ok(allocations) => ApiResponse::<Vec<WireGuardPeerIpVO>>::ok(allocations).into_response(),
-        Err(error) => service_error(error),
+        vec![network_code.to_string()]
+    } else {
+        let mut codes = state.control_service.get_network_codes();
+        codes.sort();
+        codes
+    };
+
+    let mut allocations = Vec::new();
+    for network_code in network_codes {
+        match state
+            .control_service
+            .list_wireguard_peer_ips(&network_code)
+            .await
+        {
+            Ok(items) => allocations.extend(items),
+            Err(error) => return service_error(error),
+        }
     }
+    ApiResponse::<Vec<WireGuardPeerIpVO>>::ok(allocations).into_response()
 }
 
 #[derive(Deserialize)]
@@ -2009,6 +2038,7 @@ mod tests {
         assert!(index.contains("/assets/app.js"));
         assert!(index.contains("/assets/app.css"));
         assert!(index.contains("/assets/fontawesome.min.css"));
+        assert!(index.contains("/assets/theme-init.js"));
         assert!(!index.contains("http://"));
         assert!(!index.contains("https://"));
         assert!(!index.contains("<style"));
@@ -2030,13 +2060,21 @@ mod tests {
         assert!(application.contains("PersistentKeepalive = ${keepalive}"));
         assert!(application.contains("window.QRCode.toCanvas"));
         assert!(application.contains("downloadGeneratedWireGuardConfig"));
+        assert!(application.contains("筛选网络"));
+        assert!(application.contains("全部网络"));
+        assert!(application.contains("wireguardPeerKey"));
+        assert!(application.contains("wireguardPeerRowClass"));
+        assert!(application.contains("toggleTheme"));
+        assert!(application.contains("切换为深色主题"));
+        assert!(application.contains("bg-cyan-50"));
+        assert!(application.contains("局域网 CIDR 前缀"));
         for endpoint in [
-            "/wireguard/peers?network_code=",
+            "request(`/wireguard/peers${query}`)",
             "request('/wireguard/peers/generated'",
             "/wireguard/peers/enabled",
             "/wireguard/peers/profile",
             "/wireguard/peers/config?network_code=",
-            "/wireguard/peer_ips?network_code=",
+            "request(`/wireguard/peer_ips${query}`)",
             "request('/wireguard/peers'",
             "request('/wireguard/peer_ips'",
         ] {
@@ -2262,6 +2300,26 @@ mod tests {
         assert_eq!(reserve.status(), StatusCode::OK);
         let reserve_body = to_bytes(reserve.into_body(), usize::MAX).await.unwrap();
         assert!(String::from_utf8_lossy(&reserve_body).contains("预留成功"));
+
+        let all_allocations = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/api/wireguard/peer_ips")
+                    .header(header::AUTHORIZATION, &authorization)
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(all_allocations.status(), StatusCode::OK);
+        let all_allocations_body = to_bytes(all_allocations.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let all_allocations_body = String::from_utf8_lossy(&all_allocations_body);
+        assert!(all_allocations_body.contains(r#""network_code":"network-a""#));
+        assert!(all_allocations_body.contains(r#""peer_id":"peer-a""#));
+        assert!(all_allocations_body.contains(r#""ip":"10.26.0.2""#));
 
         let list = app
             .clone()
