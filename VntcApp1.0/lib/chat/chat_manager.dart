@@ -1540,6 +1540,7 @@ class ChatManager extends ChangeNotifier {
     required String sourceFilePath,
     ChatMessageContentType? explicitContentType,
     int? durationMs,
+    String? caption,
   }) async {
     final conversation = _conversations
         .where((item) => item.id == conversationId)
@@ -1599,7 +1600,9 @@ class ChatManager extends ChangeNotifier {
       direction: ChatMessageDirection.outgoing,
       contentType: contentType,
       status: ChatMessageStatus.sending,
-      text: attachment.fileName,
+      text: caption?.trim().isNotEmpty == true
+          ? caption!.trim()
+          : attachment.fileName,
       isSyncMessage: false,
       isRead: true,
       sentAtEpochMs: now,
@@ -1769,6 +1772,7 @@ class ChatManager extends ChangeNotifier {
       sourceFilePath: filePath,
       explicitContentType: message.contentType,
       durationMs: attachment.durationMs,
+      caption: message.text,
     );
   }
 

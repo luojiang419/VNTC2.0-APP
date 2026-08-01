@@ -11,6 +11,7 @@ add_definitions(-D_WIN32_WINNT=0x0601)
 add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "main.cpp"
+  "screen_capture_selector.cpp"
   "utils.cpp"
   "win32_window.cpp"
   "${FLUTTER_MANAGED_DIR}/generated_plugin_registrant.cc"

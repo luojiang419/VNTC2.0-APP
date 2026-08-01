@@ -131,7 +131,9 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
       if (!mounted) {
         return;
       }
-      if (result.isSuccess) {
+      if (result.isCanceled) {
+        return;
+      } else if (result.isSuccess) {
         showTopToast(
           context,
           '截图已保存到 ${result.filePath}',

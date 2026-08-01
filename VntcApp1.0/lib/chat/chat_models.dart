@@ -590,6 +590,17 @@ class ChatMessageRecord {
 
   bool get hasAttachment => attachmentId != null && attachmentId!.isNotEmpty;
 
+  String? get attachmentCaption {
+    if (!hasAttachment) {
+      return null;
+    }
+    final caption = text.trim();
+    if (caption.isEmpty || caption == attachment?.fileName) {
+      return null;
+    }
+    return caption;
+  }
+
   Map<String, Object?> toDbMap() {
     return {
       'id': id,

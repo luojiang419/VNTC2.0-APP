@@ -12,6 +12,7 @@ import 'package:vnt_app/chat/chat_manager.dart';
 import 'package:vnt_app/chat/chat_models.dart';
 import 'package:vnt_app/chat/chat_security.dart';
 import 'package:vnt_app/file_saver.dart';
+import 'package:vnt_app/screenshot/system_screenshot_service.dart';
 import 'package:vnt_app/theme/app_theme.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
@@ -60,6 +61,8 @@ class _ChatPageState extends State<ChatPage>
   bool _isRecording = false;
   DateTime? _recordingStartedAt;
   String? _playingAttachmentId;
+  String? _pendingScreenshotPath;
+  bool _sendingComposer = false;
   final Set<String> _pendingDeletedConversationIds = {};
 
   @override
@@ -94,6 +97,10 @@ class _ChatPageState extends State<ChatPage>
 
   @override
   void dispose() {
+    final pendingScreenshotPath = _pendingScreenshotPath;
+    if (pendingScreenshotPath != null && !_sendingComposer) {
+      unawaited(_deletePendingScreenshot(pendingScreenshotPath));
+    }
     _textController.dispose();
     _audioRecorder.dispose();
     unawaited(_audioPlayer.dispose());
@@ -1680,9 +1687,11 @@ class _ChatPageState extends State<ChatPage>
                 ),
                 SizedBox(height: context.spacingXSmall),
                 Text(
-                  attachment.fileName,
+                  message.attachmentCaption ?? attachment.fileName,
                   style: TextStyle(
-                    fontSize: context.fontSmall,
+                    fontSize: message.attachmentCaption == null
+                        ? context.fontSmall
+                        : context.fontBody,
                     color: textColor,
                   ),
                 ),
@@ -1860,58 +1869,137 @@ class _ChatPageState extends State<ChatPage>
           ),
         ),
       ),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          IconButton(
-            onPressed: () => _pickAndSendAttachment(conversation),
-            tooltip: '发送图片/视频/文件',
-            icon: const Icon(Icons.attach_file),
-          ),
-          IconButton(
-            onPressed: () => _toggleVoiceRecording(conversation),
-            tooltip: _isRecording ? '结束录音并发送' : '录制语音消息',
-            icon: Icon(
-              _isRecording
-                  ? Icons.stop_circle_outlined
-                  : Icons.mic_none_outlined,
-              color: _isRecording ? Colors.red : null,
-            ),
-          ),
-          Expanded(
-            child: Shortcuts(
-              shortcuts: const <ShortcutActivator, Intent>{
-                SingleActivator(
-                  LogicalKeyboardKey.enter,
-                  includeRepeats: false,
-                ): _SubmitChatComposerIntent(),
-                SingleActivator(
-                  LogicalKeyboardKey.numpadEnter,
-                  includeRepeats: false,
-                ): _SubmitChatComposerIntent(),
-              },
-              child: Actions(
-                actions: <Type, Action<Intent>>{
-                  _SubmitChatComposerIntent: _SubmitChatComposerAction(
-                    shouldHandle: _shouldHandleComposerSubmitShortcut,
-                    onSubmit: () => _submitComposerFromKeyboard(conversation),
+          if (_pendingScreenshotPath case final screenshotPath?) ...[
+            _buildPendingScreenshot(isDark, screenshotPath),
+            SizedBox(height: context.spacingSmall),
+          ],
+          Row(
+            children: [
+              IconButton(
+                key: const ValueKey('professional-chat-screenshot-button'),
+                onPressed: _sendingComposer ? null : _captureScreenshot,
+                tooltip: '截取屏幕',
+                icon: const Icon(Icons.screenshot_monitor_outlined),
+              ),
+              IconButton(
+                onPressed: _sendingComposer
+                    ? null
+                    : () => _pickAndSendAttachment(conversation),
+                tooltip: '发送图片/视频/文件',
+                icon: const Icon(Icons.attach_file),
+              ),
+              IconButton(
+                onPressed: _sendingComposer
+                    ? null
+                    : () => _toggleVoiceRecording(conversation),
+                tooltip: _isRecording ? '结束录音并发送' : '录制语音消息',
+                icon: Icon(
+                  _isRecording
+                      ? Icons.stop_circle_outlined
+                      : Icons.mic_none_outlined,
+                  color: _isRecording ? Colors.red : null,
+                ),
+              ),
+              Expanded(
+                child: Shortcuts(
+                  shortcuts: const <ShortcutActivator, Intent>{
+                    SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      includeRepeats: false,
+                    ): _SubmitChatComposerIntent(),
+                    SingleActivator(
+                      LogicalKeyboardKey.numpadEnter,
+                      includeRepeats: false,
+                    ): _SubmitChatComposerIntent(),
+                  },
+                  child: Actions(
+                    actions: <Type, Action<Intent>>{
+                      _SubmitChatComposerIntent: _SubmitChatComposerAction(
+                        shouldHandle: _shouldHandleComposerSubmitShortcut,
+                        onSubmit: () =>
+                            _submitComposerFromKeyboard(conversation),
+                      ),
+                    },
+                    child: TextField(
+                      key: const ValueKey('professional-chat-text-input'),
+                      controller: _textController,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      minLines: 1,
+                      maxLines: 5,
+                      enabled: !_sendingComposer,
+                      decoration: const InputDecoration(hintText: '输入消息后按发送'),
+                    ),
                   ),
-                },
-                child: TextField(
-                  controller: _textController,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  minLines: 1,
-                  maxLines: 5,
-                  decoration: const InputDecoration(hintText: '输入消息后按发送'),
+                ),
+              ),
+              SizedBox(width: context.spacingSmall),
+              ElevatedButton.icon(
+                key: const ValueKey('professional-chat-send-button'),
+                onPressed: _sendingComposer
+                    ? null
+                    : () => _sendCurrentText(conversation),
+                icon: _sendingComposer
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.send),
+                label: const Text('发送'),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildPendingScreenshot(bool isDark, String screenshotPath) {
+    final outline = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.12);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            key: const ValueKey('professional-chat-screenshot-preview'),
+            width: 112,
+            height: 72,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              border: Border.all(color: outline),
+              borderRadius: BorderRadius.circular(context.radius(10)),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(context.radius(7)),
+              child: Image.file(
+                File(screenshotPath),
+                fit: BoxFit.cover,
+                cacheWidth: 224,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Icon(Icons.broken_image_outlined),
                 ),
               ),
             ),
           ),
-          SizedBox(width: context.spacingSmall),
-          ElevatedButton.icon(
-            onPressed: () => _sendCurrentText(conversation),
-            icon: const Icon(Icons.send),
-            label: const Text('发送'),
+          Positioned(
+            right: -10,
+            top: -10,
+            child: IconButton.filled(
+              key: const ValueKey(
+                'professional-chat-remove-screenshot-button',
+              ),
+              onPressed: _sendingComposer ? null : _removePendingScreenshot,
+              tooltip: '移除截图',
+              icon: const Icon(Icons.close_rounded, size: 16),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+            ),
           ),
         ],
       ),
@@ -2385,43 +2473,117 @@ class _ChatPageState extends State<ChatPage>
     if (!_shouldHandleComposerSubmitShortcut()) {
       return;
     }
-    if (_textController.text.trim().isEmpty) {
+    if (_textController.text.trim().isEmpty && _pendingScreenshotPath == null) {
       return;
     }
     unawaited(_sendCurrentText(conversation));
   }
 
   Future<void> _sendCurrentText(ChatConversation conversation) async {
-    final text = _textController.text;
-    _textController.clear();
+    if (_sendingComposer) {
+      return;
+    }
+    final text = _textController.text.trim();
+    final screenshotPath = _pendingScreenshotPath;
+    if (text.isEmpty && screenshotPath == null) {
+      return;
+    }
+    setState(() => _sendingComposer = true);
     try {
-      final result = await _manager.sendText(
-        conversationId: conversation.id,
-        text: text,
-      );
+      final result = screenshotPath == null
+          ? await _manager.sendText(
+              conversationId: conversation.id,
+              text: text,
+            )
+          : await _manager.sendAttachment(
+              conversationId: conversation.id,
+              sourceFilePath: screenshotPath,
+              explicitContentType: ChatMessageContentType.image,
+              caption: text,
+            );
       if (!mounted) {
+        if (screenshotPath != null) {
+          await _deletePendingScreenshot(screenshotPath);
+        }
         return;
+      }
+      _textController.clear();
+      if (screenshotPath != null) {
+        setState(() => _pendingScreenshotPath = null);
+        unawaited(_deletePendingScreenshot(screenshotPath));
       }
       if (result.isPartialSuccess || result.isFailure) {
         showTopToast(
           context,
           _buildSendResultMessage(
             result,
-            successLabel: '消息已发送',
-            partialLabel: '消息部分送达',
-            failureLabel: '消息发送失败',
+            successLabel: screenshotPath == null ? '消息已发送' : '截图已发送',
+            partialLabel: screenshotPath == null ? '消息部分送达' : '截图部分送达',
+            failureLabel: screenshotPath == null ? '消息发送失败' : '截图发送失败',
           ),
           isSuccess: result.isPartialSuccess,
         );
+      } else if (screenshotPath != null) {
+        showTopToast(context, '截图已发送', isSuccess: true);
       }
     } catch (error) {
       if (!mounted) {
+        if (screenshotPath != null) {
+          await _deletePendingScreenshot(screenshotPath);
+        }
         return;
       }
-      if (_textController.text.isEmpty) {
-        _textController.text = text;
+      showTopToast(
+        context,
+        '${screenshotPath == null ? '发送失败' : '截图发送失败'}: $error',
+        isSuccess: false,
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _sendingComposer = false);
       }
-      showTopToast(context, '发送失败: $error', isSuccess: false);
+    }
+  }
+
+  Future<void> _captureScreenshot() async {
+    final capture = await SystemScreenshotService.instance.captureInteractive();
+    if (capture.isCanceled) {
+      return;
+    }
+    if (!capture.isSuccess) {
+      if (mounted) {
+        showTopToast(context, '截图失败: ${capture.error}', isSuccess: false);
+      }
+      return;
+    }
+    final previousPath = _pendingScreenshotPath;
+    if (!mounted) {
+      await _deletePendingScreenshot(capture.filePath!);
+      return;
+    }
+    setState(() => _pendingScreenshotPath = capture.filePath);
+    if (previousPath != null && previousPath != capture.filePath) {
+      unawaited(_deletePendingScreenshot(previousPath));
+    }
+  }
+
+  void _removePendingScreenshot() {
+    final screenshotPath = _pendingScreenshotPath;
+    if (screenshotPath == null) {
+      return;
+    }
+    setState(() => _pendingScreenshotPath = null);
+    unawaited(_deletePendingScreenshot(screenshotPath));
+  }
+
+  Future<void> _deletePendingScreenshot(String screenshotPath) async {
+    try {
+      final file = File(screenshotPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // 截图缓存稍后由统一缓存清理流程处理。
     }
   }
 

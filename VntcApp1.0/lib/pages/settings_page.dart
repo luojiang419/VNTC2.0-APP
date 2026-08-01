@@ -851,7 +851,7 @@ class _SettingsPageState extends State<SettingsPage> {
                   ),
                 ),
                 Text(
-                  Platform.isWindows ? '全局截图并保存为原始分辨率 PNG' : '应用在前台时截图并保存为 PNG',
+                  Platform.isWindows ? '全局唤起截屏选择器，可自由框选或吸附窗口' : '应用在前台时唤起截屏选择器',
                   style: TextStyle(
                     fontSize: context.fontSmall,
                     color: isDark

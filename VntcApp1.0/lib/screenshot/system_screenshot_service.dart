@@ -7,12 +7,22 @@ import 'package:vnt_app/screenshot/screenshot_shortcut_preferences.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 
 class ScreenshotCaptureResult {
-  const ScreenshotCaptureResult.success(this.filePath) : error = null;
+  const ScreenshotCaptureResult.success(this.filePath)
+      : error = null,
+        isCanceled = false;
 
-  const ScreenshotCaptureResult.failure(this.error) : filePath = null;
+  const ScreenshotCaptureResult.failure(this.error)
+      : filePath = null,
+        isCanceled = false;
+
+  const ScreenshotCaptureResult.canceled()
+      : filePath = null,
+        error = null,
+        isCanceled = true;
 
   final String? filePath;
   final Object? error;
+  final bool isCanceled;
 
   bool get isSuccess => filePath != null;
 }
@@ -75,17 +85,7 @@ class SystemScreenshotService {
     }
     _captureInProgress = true;
     try {
-      final directory = Directory(
-        path.join(
-          RuntimeStoragePaths.resolveDataDirectoryPathSync(),
-          'screenshots',
-        ),
-      );
-      await directory.create(recursive: true);
-      final targetPath = path.join(
-        directory.path,
-        'screenshot_${_formatTimestamp(DateTime.now())}.png',
-      );
+      final targetPath = await _createTargetPath();
 
       if (Platform.isWindows) {
         final savedPath = await _channel.invokeMethod<String>(
@@ -113,6 +113,46 @@ class SystemScreenshotService {
     }
   }
 
+  Future<ScreenshotCaptureResult> captureInteractive() async {
+    if (_captureInProgress) {
+      return const ScreenshotCaptureResult.failure('截图正在进行中');
+    }
+    _captureInProgress = true;
+    try {
+      final targetPath = await _createTargetPath();
+      if (Platform.isWindows) {
+        final savedPath = await _channel.invokeMethod<String?>(
+          'captureRegion',
+          <String, Object>{'outputPath': targetPath},
+        );
+        if (savedPath == null || savedPath.trim().isEmpty) {
+          return const ScreenshotCaptureResult.canceled();
+        }
+        return ScreenshotCaptureResult.success(savedPath);
+      }
+      if (Platform.isMacOS) {
+        final result = await Process.run(
+          '/usr/sbin/screencapture',
+          <String>['-i', '-x', '-t', 'png', targetPath],
+        );
+        if (result.exitCode != 0) {
+          return const ScreenshotCaptureResult.canceled();
+        }
+        return await File(targetPath).exists()
+            ? ScreenshotCaptureResult.success(targetPath)
+            : const ScreenshotCaptureResult.canceled();
+      }
+      if (Platform.isLinux) {
+        return _captureLinuxInteractive(targetPath);
+      }
+      return const ScreenshotCaptureResult.failure('当前平台暂不支持系统截图');
+    } catch (error) {
+      return ScreenshotCaptureResult.failure(error);
+    } finally {
+      _captureInProgress = false;
+    }
+  }
+
   Future<dynamic> _handleNativeCall(MethodCall call) async {
     if (call.method == 'shortcutPressed') {
       await _captureFromShortcut();
@@ -131,8 +171,22 @@ class SystemScreenshotService {
   }
 
   Future<void> _captureFromShortcut() async {
-    final result = await captureFullScreen();
+    final result = await captureInteractive();
     _shortcutCaptureController.add(result);
+  }
+
+  Future<String> _createTargetPath() async {
+    final directory = Directory(
+      path.join(
+        RuntimeStoragePaths.resolveDataDirectoryPathSync(),
+        'screenshots',
+      ),
+    );
+    await directory.create(recursive: true);
+    return path.join(
+      directory.path,
+      'screenshot_${_formatTimestamp(DateTime.now())}.png',
+    );
   }
 
   Future<void> _registerWindowsShortcut(String shortcut) async {
@@ -160,6 +214,37 @@ class SystemScreenshotService {
       }
     }
     throw StateError('未找到可用的 Linux 截图工具: $lastError');
+  }
+
+  Future<ScreenshotCaptureResult> _captureLinuxInteractive(
+    String targetPath,
+  ) async {
+    final commands = <(String, List<String>)>[
+      ('gnome-screenshot', <String>['-a', '-f', targetPath]),
+      ('spectacle', <String>['-b', '-n', '-r', '-o', targetPath]),
+    ];
+    Object? lastError;
+    for (final command in commands) {
+      try {
+        final result = await Process.run(command.$1, command.$2);
+        if (result.exitCode == 0) {
+          return await File(targetPath).exists()
+              ? ScreenshotCaptureResult.success(targetPath)
+              : const ScreenshotCaptureResult.canceled();
+        }
+        lastError = ProcessException(
+          command.$1,
+          command.$2,
+          result.stderr.toString().trim(),
+          result.exitCode,
+        );
+      } catch (error) {
+        lastError = error;
+      }
+    }
+    return ScreenshotCaptureResult.failure(
+      StateError('未找到可用的 Linux 截屏选择器: $lastError'),
+    );
   }
 
   Future<void> _runCaptureCommand(

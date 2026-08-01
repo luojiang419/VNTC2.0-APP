@@ -14,27 +14,47 @@ void main() {
     expect(source, contains("label: '远程'"));
   });
 
-  test('极简聊天仅暴露文本、截图、文件和发送操作', () {
+  test('极简聊天提供大厅清空、截图预览、文件和统一发送操作', () {
     final source = File('lib/pages/compact_chat_page.dart').readAsStringSync();
 
+    expect(source, contains("ValueKey('compact-chat-clear-button')"));
     expect(source, contains("ValueKey('compact-chat-text-input')"));
     expect(source, contains("ValueKey('compact-chat-screenshot-button')"));
+    expect(source, contains("ValueKey('compact-chat-screenshot-preview')"));
+    expect(
+      source,
+      contains("ValueKey('compact-chat-remove-screenshot-button')"),
+    );
     expect(source, contains("ValueKey('compact-chat-file-button')"));
     expect(source, contains("ValueKey('compact-chat-send-button')"));
+    expect(source, contains('captureInteractive()'));
+    expect(source, contains('caption: text'));
+    expect(source, contains('_manager.clearConversationMessages('));
+    expect(source, isNot(contains('_captureAndSend')));
     expect(source, isNot(contains('ChatMainTab.direct')));
     expect(source, isNot(contains('hallPeers(')));
   });
 
-  test('Windows 截图使用全虚拟屏幕原始像素与 PNG 编码', () {
+  test('Windows 截图选择器支持自由框选、窗口吸附和键鼠确认', () {
     final runner = File('windows/runner/flutter_window.cpp').readAsStringSync();
+    final selector =
+        File('windows/runner/screen_capture_selector.cpp').readAsStringSync();
     final service = File('lib/screenshot/system_screenshot_service.dart')
         .readAsStringSync();
 
-    expect(runner, contains('SM_CXVIRTUALSCREEN'));
-    expect(runner, contains('SM_CYVIRTUALSCREEN'));
-    expect(runner, contains('SRCCOPY | CAPTUREBLT'));
-    expect(runner, contains('L"image/png"'));
+    expect(selector, contains('SM_CXVIRTUALSCREEN'));
+    expect(selector, contains('SM_CYVIRTUALSCREEN'));
+    expect(selector, contains('SRCCOPY | CAPTUREBLT'));
+    expect(selector, contains('L"image/png"'));
+    expect(selector, contains('DwmGetWindowAttribute'));
+    expect(selector, contains('CS_DBLCLKS'));
+    expect(selector, contains('WM_LBUTTONDBLCLK'));
+    expect(selector, contains('VK_RETURN'));
+    expect(selector, contains('VK_ESCAPE'));
     expect(runner, contains('RegisterHotKey'));
+    expect(runner, contains('captureRegion'));
+    expect(service, contains('captureInteractive()'));
+    expect(service, contains('ScreenshotCaptureResult.canceled()'));
     expect(service, contains("'screenshots'"));
     expect(service, contains("'screenshot_\${_formatTimestamp"));
   });

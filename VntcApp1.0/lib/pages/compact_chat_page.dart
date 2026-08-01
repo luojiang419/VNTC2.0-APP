@@ -22,7 +22,9 @@ class _CompactChatPageState extends State<CompactChatPage> {
   final ChatManager _manager = ChatManager.instance;
   final TextEditingController _textController = TextEditingController();
   String? _openingHallId;
+  String? _pendingScreenshotPath;
   bool _sending = false;
+  bool _clearing = false;
 
   @override
   void initState() {
@@ -32,6 +34,10 @@ class _CompactChatPageState extends State<CompactChatPage> {
 
   @override
   void dispose() {
+    final pendingScreenshotPath = _pendingScreenshotPath;
+    if (pendingScreenshotPath != null && !_sending) {
+      unawaited(_deletePendingScreenshot(pendingScreenshotPath));
+    }
     _textController.dispose();
     super.dispose();
   }
@@ -85,6 +91,7 @@ class _CompactChatPageState extends State<CompactChatPage> {
                 ),
                 child: Column(
                   children: [
+                    _buildHeader(isDark, conversation),
                     Expanded(
                       child: messages.isEmpty
                           ? Center(
@@ -114,6 +121,53 @@ class _CompactChatPageState extends State<CompactChatPage> {
             );
           },
         ),
+      ),
+    );
+  }
+
+  Widget _buildHeader(bool isDark, ChatConversation conversation) {
+    final outline = isDark
+        ? Colors.white.withValues(alpha: 0.08)
+        : Colors.black.withValues(alpha: 0.08);
+    return Container(
+      padding: EdgeInsets.only(
+        left: context.spacingMedium,
+        right: context.spacingXSmall,
+        top: context.spacingXSmall,
+        bottom: context.spacingXSmall,
+      ),
+      decoration: BoxDecoration(
+        border: Border(bottom: BorderSide(color: outline)),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              conversation.title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: TextStyle(
+                color: isDark
+                    ? AppTheme.darkTextPrimary
+                    : AppTheme.lightTextPrimary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+          ),
+          IconButton(
+            key: const ValueKey('compact-chat-clear-button'),
+            onPressed: _clearing
+                ? null
+                : () => _confirmClearHallMessages(conversation),
+            tooltip: '清空聊天大厅内容',
+            icon: _clearing
+                ? const SizedBox.square(
+                    dimension: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.delete_sweep_outlined),
+          ),
+        ],
       ),
     );
   }
@@ -259,16 +313,27 @@ class _CompactChatPageState extends State<CompactChatPage> {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     );
                   }
-                  return ClipRRect(
-                    borderRadius: BorderRadius.circular(context.radius(10)),
-                    child: Image.file(
-                      File(snapshot.data!),
-                      width: 260,
-                      cacheWidth: 520,
-                      fit: BoxFit.contain,
-                      errorBuilder: (_, __, ___) =>
-                          _buildAttachmentLabel(message, textColor),
-                    ),
+                  return Column(
+                    crossAxisAlignment: outgoing
+                        ? CrossAxisAlignment.end
+                        : CrossAxisAlignment.start,
+                    children: [
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(context.radius(10)),
+                        child: Image.file(
+                          File(snapshot.data!),
+                          width: 260,
+                          cacheWidth: 520,
+                          fit: BoxFit.contain,
+                          errorBuilder: (_, __, ___) =>
+                              _buildAttachmentLabel(message, textColor),
+                        ),
+                      ),
+                      if (message.attachmentCaption case final caption?) ...[
+                        SizedBox(height: context.spacingXSmall),
+                        Text(caption, style: TextStyle(color: textColor)),
+                      ],
+                    ],
                   );
                 },
               )
@@ -321,109 +386,194 @@ class _CompactChatPageState extends State<CompactChatPage> {
       padding: EdgeInsets.all(context.spacingSmall),
       decoration:
           BoxDecoration(border: Border(top: BorderSide(color: outline))),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          IconButton(
-            key: const ValueKey('compact-chat-screenshot-button'),
-            onPressed: _sending ? null : () => _captureAndSend(conversation),
-            tooltip: '截图并发送',
-            icon: const Icon(Icons.screenshot_monitor_outlined),
-          ),
-          IconButton(
-            key: const ValueKey('compact-chat-file-button'),
-            onPressed: _sending ? null : () => _pickAndSend(conversation),
-            tooltip: '发送文件',
-            icon: const Icon(Icons.attach_file_rounded),
-          ),
-          Expanded(
-            child: Shortcuts(
-              shortcuts: const <ShortcutActivator, Intent>{
-                SingleActivator(
-                  LogicalKeyboardKey.enter,
-                  includeRepeats: false,
-                ): _CompactSubmitIntent(),
-                SingleActivator(
-                  LogicalKeyboardKey.numpadEnter,
-                  includeRepeats: false,
-                ): _CompactSubmitIntent(),
-              },
-              child: Actions(
-                actions: <Type, Action<Intent>>{
-                  _CompactSubmitIntent: CallbackAction<_CompactSubmitIntent>(
-                    onInvoke: (_) {
-                      unawaited(_sendText(conversation));
-                      return null;
+          if (_pendingScreenshotPath case final screenshotPath?) ...[
+            _buildPendingScreenshot(isDark, screenshotPath),
+            SizedBox(height: context.spacingSmall),
+          ],
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              IconButton(
+                key: const ValueKey('compact-chat-screenshot-button'),
+                onPressed: _sending ? null : _captureScreenshot,
+                tooltip: '截取屏幕',
+                icon: const Icon(Icons.screenshot_monitor_outlined),
+              ),
+              IconButton(
+                key: const ValueKey('compact-chat-file-button'),
+                onPressed: _sending ? null : () => _pickAndSend(conversation),
+                tooltip: '发送文件',
+                icon: const Icon(Icons.attach_file_rounded),
+              ),
+              Expanded(
+                child: Shortcuts(
+                  shortcuts: const <ShortcutActivator, Intent>{
+                    SingleActivator(
+                      LogicalKeyboardKey.enter,
+                      includeRepeats: false,
+                    ): _CompactSubmitIntent(),
+                    SingleActivator(
+                      LogicalKeyboardKey.numpadEnter,
+                      includeRepeats: false,
+                    ): _CompactSubmitIntent(),
+                  },
+                  child: Actions(
+                    actions: <Type, Action<Intent>>{
+                      _CompactSubmitIntent:
+                          CallbackAction<_CompactSubmitIntent>(
+                        onInvoke: (_) {
+                          unawaited(_sendMessage(conversation));
+                          return null;
+                        },
+                      ),
                     },
-                  ),
-                },
-                child: TextField(
-                  key: const ValueKey('compact-chat-text-input'),
-                  controller: _textController,
-                  minLines: 1,
-                  maxLines: 4,
-                  keyboardType: TextInputType.multiline,
-                  textInputAction: TextInputAction.newline,
-                  enabled: !_sending,
-                  decoration: const InputDecoration(
-                    hintText: '输入消息',
-                    isDense: true,
+                    child: TextField(
+                      key: const ValueKey('compact-chat-text-input'),
+                      controller: _textController,
+                      minLines: 1,
+                      maxLines: 4,
+                      keyboardType: TextInputType.multiline,
+                      textInputAction: TextInputAction.newline,
+                      enabled: !_sending,
+                      decoration: const InputDecoration(
+                        hintText: '输入消息',
+                        isDense: true,
+                      ),
+                    ),
                   ),
                 ),
               ),
-            ),
-          ),
-          SizedBox(width: context.spacingXSmall),
-          IconButton.filled(
-            key: const ValueKey('compact-chat-send-button'),
-            onPressed: _sending ? null : () => _sendText(conversation),
-            tooltip: '发送',
-            icon: _sending
-                ? const SizedBox.square(
-                    dimension: 18,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2,
-                      color: Colors.white,
-                    ),
-                  )
-                : const Icon(Icons.send_rounded),
+              SizedBox(width: context.spacingXSmall),
+              IconButton.filled(
+                key: const ValueKey('compact-chat-send-button'),
+                onPressed: _sending ? null : () => _sendMessage(conversation),
+                tooltip: '发送',
+                icon: _sending
+                    ? const SizedBox.square(
+                        dimension: 18,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: Colors.white,
+                        ),
+                      )
+                    : const Icon(Icons.send_rounded),
+              ),
+            ],
           ),
         ],
       ),
     );
   }
 
-  Future<void> _sendText(ChatConversation conversation) async {
-    final text = _textController.text.trim();
-    final composing = _textController.value.composing;
-    if (text.isEmpty || (composing.isValid && !composing.isCollapsed)) {
-      return;
-    }
-    _textController.clear();
-    await _runSend(
-      () => _manager.sendText(conversationId: conversation.id, text: text),
-      failurePrefix: '消息发送失败',
-      restoreText: text,
+  Widget _buildPendingScreenshot(bool isDark, String screenshotPath) {
+    final outline = isDark
+        ? Colors.white.withValues(alpha: 0.12)
+        : Colors.black.withValues(alpha: 0.12);
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Container(
+            key: const ValueKey('compact-chat-screenshot-preview'),
+            width: 112,
+            height: 72,
+            padding: const EdgeInsets.all(3),
+            decoration: BoxDecoration(
+              border: Border.all(color: outline),
+              borderRadius: BorderRadius.circular(context.radius(10)),
+            ),
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(context.radius(7)),
+              child: Image.file(
+                File(screenshotPath),
+                fit: BoxFit.cover,
+                cacheWidth: 224,
+                errorBuilder: (_, __, ___) => const Center(
+                  child: Icon(Icons.broken_image_outlined),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            right: -10,
+            top: -10,
+            child: IconButton.filled(
+              key: const ValueKey('compact-chat-remove-screenshot-button'),
+              onPressed: _sending ? null : _removePendingScreenshot,
+              tooltip: '移除截图',
+              icon: const Icon(Icons.close_rounded, size: 16),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints.tightFor(width: 24, height: 24),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
-  Future<void> _captureAndSend(ChatConversation conversation) async {
-    final capture = await SystemScreenshotService.instance.captureFullScreen();
+  Future<void> _sendMessage(ChatConversation conversation) async {
+    final text = _textController.text.trim();
+    final composing = _textController.value.composing;
+    final screenshotPath = _pendingScreenshotPath;
+    if ((text.isEmpty && screenshotPath == null) ||
+        (composing.isValid && !composing.isCollapsed)) {
+      return;
+    }
+    final completed = await _runSend(
+      screenshotPath == null
+          ? () => _manager.sendText(
+                conversationId: conversation.id,
+                text: text,
+              )
+          : () => _manager.sendAttachment(
+                conversationId: conversation.id,
+                sourceFilePath: screenshotPath,
+                explicitContentType: ChatMessageContentType.image,
+                caption: text,
+              ),
+      failurePrefix: screenshotPath == null ? '消息发送失败' : '截图发送失败',
+      savedPath: screenshotPath,
+    );
+    if (!mounted) {
+      if (screenshotPath != null) {
+        await _deletePendingScreenshot(screenshotPath);
+      }
+      return;
+    }
+    if (!completed) {
+      return;
+    }
+    _textController.clear();
+    if (screenshotPath != null) {
+      setState(() => _pendingScreenshotPath = null);
+      unawaited(_deletePendingScreenshot(screenshotPath));
+    }
+  }
+
+  Future<void> _captureScreenshot() async {
+    final capture = await SystemScreenshotService.instance.captureInteractive();
+    if (capture.isCanceled) {
+      return;
+    }
     if (!capture.isSuccess) {
       if (mounted) {
         showTopToast(context, '截图失败: ${capture.error}', isSuccess: false);
       }
       return;
     }
-    await _runSend(
-      () => _manager.sendAttachment(
-        conversationId: conversation.id,
-        sourceFilePath: capture.filePath!,
-        explicitContentType: ChatMessageContentType.image,
-      ),
-      failurePrefix: '截图发送失败',
-      savedPath: capture.filePath,
-    );
+    final previousPath = _pendingScreenshotPath;
+    if (!mounted) {
+      await _deletePendingScreenshot(capture.filePath!);
+      return;
+    }
+    setState(() => _pendingScreenshotPath = capture.filePath);
+    if (previousPath != null && previousPath != capture.filePath) {
+      unawaited(_deletePendingScreenshot(previousPath));
+    }
   }
 
   Future<void> _pickAndSend(ChatConversation conversation) async {
@@ -450,20 +600,19 @@ class _CompactChatPageState extends State<CompactChatPage> {
     }
   }
 
-  Future<void> _runSend(
+  Future<bool> _runSend(
     Future<ChatSendResult> Function() operation, {
     required String failurePrefix,
-    String? restoreText,
     String? savedPath,
   }) async {
     if (_sending) {
-      return;
+      return false;
     }
     setState(() => _sending = true);
     try {
       final result = await operation();
       if (!mounted) {
-        return;
+        return true;
       }
       if (result.isFailure ||
           result.isPartialSuccess ||
@@ -477,19 +626,86 @@ class _CompactChatPageState extends State<CompactChatPage> {
                 : failurePrefix;
         showTopToast(context, message, isSuccess: result.isPartialSuccess);
       } else if (savedPath != null) {
-        showTopToast(context, '截图已保存并发送', isSuccess: true);
+        showTopToast(context, '截图已发送', isSuccess: true);
       }
+      return true;
     } catch (error) {
-      if (restoreText != null && _textController.text.isEmpty) {
-        _textController.text = restoreText;
-      }
       if (mounted) {
         showTopToast(context, '$failurePrefix: $error', isSuccess: false);
       }
+      return false;
     } finally {
       if (mounted) {
         setState(() => _sending = false);
       }
+    }
+  }
+
+  Future<void> _confirmClearHallMessages(ChatConversation conversation) async {
+    final confirmed = await showDialog<bool>(
+          context: context,
+          builder: (dialogContext) => AlertDialog(
+            title: const Text('清空聊天大厅内容'),
+            content: Text(
+              '确定清空“${conversation.title}”中的全部聊天内容吗？\n\n'
+              '此操作只清理本机记录，且无法撤销。',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('清空'),
+              ),
+            ],
+          ),
+        ) ??
+        false;
+    if (!confirmed || !mounted) {
+      return;
+    }
+    setState(() => _clearing = true);
+    try {
+      final clearedCount = await _manager.clearConversationMessages(
+        conversation.id,
+      );
+      if (mounted) {
+        showTopToast(
+          context,
+          clearedCount > 0 ? '已清空 $clearedCount 条聊天内容' : '聊天大厅已经为空',
+          isSuccess: true,
+        );
+      }
+    } catch (error) {
+      if (mounted) {
+        showTopToast(context, '清空聊天大厅失败: $error', isSuccess: false);
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _clearing = false);
+      }
+    }
+  }
+
+  void _removePendingScreenshot() {
+    final screenshotPath = _pendingScreenshotPath;
+    if (screenshotPath == null) {
+      return;
+    }
+    setState(() => _pendingScreenshotPath = null);
+    unawaited(_deletePendingScreenshot(screenshotPath));
+  }
+
+  Future<void> _deletePendingScreenshot(String screenshotPath) async {
+    try {
+      final file = File(screenshotPath);
+      if (await file.exists()) {
+        await file.delete();
+      }
+    } catch (_) {
+      // 截图缓存稍后由统一缓存清理流程处理。
     }
   }
 }

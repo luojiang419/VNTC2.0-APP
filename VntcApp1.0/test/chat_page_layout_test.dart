@@ -81,6 +81,29 @@ void main() {
     expect(source, contains('此操作只清理本机记录，且无法撤销。'));
   });
 
+  test('professional chat composer supports screenshot preview and send', () {
+    final source = File(
+      '${Directory.current.path}/lib/pages/chat_page.dart',
+    ).readAsStringSync();
+
+    expect(
+      source,
+      contains("ValueKey('professional-chat-screenshot-button')"),
+    );
+    expect(
+      source,
+      contains("ValueKey('professional-chat-screenshot-preview')"),
+    );
+    expect(
+      source,
+      contains("'professional-chat-remove-screenshot-button'"),
+    );
+    expect(source, contains("ValueKey('professional-chat-text-input')"));
+    expect(source, contains("ValueKey('professional-chat-send-button')"));
+    expect(source, contains('captureInteractive()'));
+    expect(source, contains('caption: text'));
+  });
+
   test('direct conversation cards expose delete and mobile swipe actions', () {
     final source = File(
       '${Directory.current.path}/lib/pages/chat_page.dart',
