@@ -32,7 +32,7 @@ namespace VntBrandRepackager
 
             var title = new Label
             {
-                Text = "导入 EXE 或 APK，自动识别后重新打包",
+                Text = "直接导入新版 EXE 或 APK 客户端并重新打包",
                 Dock = DockStyle.Top,
                 Height = 54,
                 Font = new Font("Microsoft YaHei UI", 17F, FontStyle.Bold),
@@ -66,7 +66,7 @@ namespace VntBrandRepackager
                 grid.RowStyles.Add(new RowStyle(SizeType.Absolute, 47));
             }
 
-            AddRow(grid, 0, "源安装包", _installerText, "导入", BrowseInstaller);
+            AddRow(grid, 0, "客户端安装包", _installerText, "导入", BrowseInstaller);
             AddStatusRow(grid, 1, "自动识别", _packageStatusLabel);
             AddRow(grid, 2, "输入新名称", _productNameText, null, null);
             AddRow(grid, 3, "添加新图标（可选）", _iconText, "添加", BrowseIcon);
@@ -213,7 +213,7 @@ namespace VntBrandRepackager
                 Filter = "支持的安装包 (*.exe;*.apk)|*.exe;*.apk|" +
                     "Windows 安装包 (*.exe)|*.exe|Android 安装包 (*.apk)|*.apk|" +
                     "所有文件 (*.*)|*.*",
-                Title = "选择支持换牌的 EXE 或 APK 母版安装包"
+                Title = "选择支持换牌的新版 EXE 或 APK 客户端"
             })
             {
                 if (dialog.ShowDialog(this) == DialogResult.OK)

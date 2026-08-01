@@ -1,5 +1,6 @@
 use parking_lot::{Mutex, RwLock};
-use rust_p2p_core::route::{DEFAULT_RTT, RouteKey};
+use rust_p2p_core::route::{DEFAULT_RTT, Index, RouteKey};
+use rust_p2p_core::tunnel::udp::UDPIndex;
 use std::collections::HashMap;
 use std::net::Ipv4Addr;
 use std::sync::Arc;
@@ -150,6 +151,14 @@ impl RouteTable {
             return 0;
         };
         list.iter().filter(|r| r.is_direct()).count()
+    }
+
+    /// 子 UDP Socket 仍承载直连路由时不能回收打洞池。
+    pub fn has_direct_sub_udp_route(&self) -> bool {
+        let guard = self.inner.route_table.read();
+        guard.values().flatten().any(|route| {
+            route.is_direct() && matches!(route.route_key().index(), Index::Udp(UDPIndex::SubV4(_)))
+        })
     }
 
     /// 添加 owner 路由（打洞请求响应时调用）

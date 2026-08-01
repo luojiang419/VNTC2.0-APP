@@ -4,17 +4,23 @@ import 'dart:io';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('Android 母版声明完整品牌能力', () {
+  test('Android 客户端声明完整换牌能力', () {
     final manifest = jsonDecode(
       File('assets/android_brand_package_manifest.json').readAsStringSync(),
     ) as Map<String, dynamic>;
+    final pubspec = File('pubspec.yaml').readAsStringSync();
+    final sourceVersion = RegExp(
+      r'^version:\s*([^+\s]+)\+(\d+)\s*$',
+      multiLine: true,
+    ).firstMatch(pubspec);
     final capabilities = (manifest['capabilities'] as List).cast<String>();
 
+    expect(sourceVersion, isNotNull);
     expect(manifest['platform'], 'android');
     expect(manifest['brandReady'], isTrue);
     expect(manifest['brandId'], 'official');
-    expect(manifest['version'], '4.8.22');
-    expect(manifest['versionCode'], 40822);
+    expect(manifest['version'], sourceVersion!.group(1));
+    expect(manifest['versionCode'], int.parse(sourceVersion.group(2)!));
     expect(capabilities, contains('androidRuntimeBrandingV1'));
     expect(capabilities, contains('hideAboutPage'));
     expect(capabilities, contains('removeUpdateFeature'));
@@ -52,7 +58,7 @@ void main() {
     expect(manifest, isNot(contains('android:label="VNT')));
   });
 
-  test('Android 官方母版启动器名称与运行时品牌名称一致', () {
+  test('Android 官方客户端启动器名称与运行时品牌名称一致', () {
     final branding = jsonDecode(
       File('assets/android_branding.json').readAsStringSync(),
     ) as Map<String, dynamic>;
@@ -90,7 +96,7 @@ void main() {
     expect(remote, contains('R.string.remote_assist_running_description'));
   });
 
-  test('Android 品牌母版导出会验证协议、签名和 16KB 对齐', () {
+  test('Android 兼容客户端导出会验证协议、签名和 16KB 对齐', () {
     final exporter = File(
       'scripts/export_android_brand_package.ps1',
     ).readAsStringSync();
@@ -101,6 +107,10 @@ void main() {
     expect(exporter, contains('-P 16'));
     expect(exporter, contains('apksigner.jar'));
     expect(exporter, contains("native-code: 'arm64-v8a'"));
+    expect(
+      exporter,
+      contains(r'VNT_App_${version}_Android_arm64_Brand_Master.apk'),
+    );
   });
 
   test('Android RustDesk 原生库由云端重建并验证 ELF 16KB 对齐', () {
@@ -145,7 +155,7 @@ void main() {
     expect(workflow, contains('verify_android_16kb_alignment.py'));
   });
 
-  test('Android 正式母版使用独立官方签名且公开信任配置不含私密信息', () {
+  test('Android 正式客户端使用独立官方签名且公开信任配置不含私密信息', () {
     final gradle = File('android/app/build.gradle').readAsStringSync();
     final signing = File(
       'scripts/android_official_signing.ps1',

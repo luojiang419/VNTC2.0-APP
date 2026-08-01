@@ -108,6 +108,17 @@ namespace VntBrandRepackager
                 var metadata = ReadAndValidateDecodedPackage(
                     decodedDirectory,
                     inspection);
+                var sourceVersion = metadata.Version;
+                if (!string.Equals(
+                    inspection.Version,
+                    sourceVersion,
+                    StringComparison.Ordinal))
+                {
+                    _log(
+                        "客户端兼容元数据版本 " + inspection.Version +
+                        " 与 AndroidManifest.xml 真实版本 " + sourceVersion +
+                        " 不一致，将按真实版本处理并自动修正");
+                }
                 if (!string.Equals(
                     metadata.SourceCertificateSha256,
                     string.Empty,
@@ -133,15 +144,15 @@ namespace VntBrandRepackager
                         StringComparison.Ordinal))
                     {
                         throw new InvalidDataException(
-                            "官方 Android 母版 applicationId 与公开信任配置不一致");
+                            "官方 Android 客户端 applicationId 与公开信任配置不一致");
                     }
                     EnsureCertificateMatches(
                         sourceSignature.CertificateSha256,
                         officialTrust.CertificateSha256,
-                        "官方 Android 母版证书指纹不受信任。" +
-                        "内容识别不等于来源可信，请使用官方原始母版 APK");
+                        "官方 Android 客户端证书指纹不受信任。" +
+                        "内容识别不等于来源可信，请使用官方原始客户端 APK");
                     _log(
-                        "已通过官方 Android 母版公开签名信任校验（" +
+                        "已通过官方 Android 客户端公开签名信任校验（" +
                         officialTrust.KeyId + " / " +
                         officialTrust.Alias + "）");
                 }
@@ -273,7 +284,11 @@ namespace VntBrandRepackager
                         StringComparison.Ordinal) ||
                     !string.Equals(
                         finalInspection.Version,
-                        inspection.Version,
+                        sourceVersion,
+                        StringComparison.Ordinal) ||
+                    !string.Equals(
+                        finalInspection.VersionCode,
+                        metadata.VersionCode,
                         StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
@@ -300,14 +315,14 @@ namespace VntBrandRepackager
                     targetBrandId,
                     targetApplicationId,
                     productName,
-                    inspection.Version,
+                    sourceVersion,
                     request.UpdateEnabled,
                     signingProfile.CertificateSha256);
 
                 var outputPath = ResolveOutputPath(
                     request,
                     productName,
-                    inspection.Version);
+                    sourceVersion);
                 var hash = ComputeFileSha256(signedApk);
                 var shaPath = PackageOutputPublisher.Publish(
                     signedApk,
@@ -320,7 +335,7 @@ namespace VntBrandRepackager
                     InstallerPath = outputPath,
                     Sha256Path = shaPath,
                     Sha256 = hash,
-                    Version = inspection.Version,
+                    Version = sourceVersion,
                     ExecutableName = targetApplicationId,
                     Format = PackageFormat.AndroidApk,
                     ApplicationId = targetApplicationId
@@ -563,49 +578,49 @@ namespace VntBrandRepackager
                     Path.DirectorySeparatorChar));
             RequireNonEmptyFile(manifestPath, "APK 解码结果缺少 AndroidManifest.xml");
             RequireNonEmptyFile(brandingPath, "APK 解码结果缺少 Android 运行时品牌配置");
-            RequireNonEmptyFile(brandManifestPath, "APK 解码结果缺少 Android 品牌母版清单");
+            RequireNonEmptyFile(brandManifestPath, "APK 解码结果缺少 Android 换牌能力清单");
 
             var manifestValues = ReadJsonObject(
                 brandManifestPath,
                 64L * 1024L,
-                "Android 品牌母版清单");
+                "Android 换牌能力清单");
             var brandingValues = ReadJsonObject(
                 brandingPath,
                 64L * 1024L,
                 "Android 运行时品牌配置");
-            RequireSchemaVersion(manifestValues, "Android 品牌母版清单");
+            RequireSchemaVersion(manifestValues, "Android 换牌能力清单");
             RequireSchemaVersion(brandingValues, "Android 运行时品牌配置");
-            if (!RequireBoolean(manifestValues, "brandReady", "Android 品牌母版清单"))
+            if (!RequireBoolean(manifestValues, "brandReady", "Android 换牌能力清单"))
             {
-                throw new InvalidDataException("Android 品牌母版清单 brandReady 必须为 true");
+                throw new InvalidDataException("Android 换牌能力清单 brandReady 必须为 true");
             }
             if (!string.Equals(
-                RequireString(manifestValues, "platform", "Android 品牌母版清单"),
+                RequireString(manifestValues, "platform", "Android 换牌能力清单"),
                 "android",
                 StringComparison.OrdinalIgnoreCase))
             {
-                throw new InvalidDataException("Android 品牌母版清单 platform 不是 android");
+                throw new InvalidDataException("Android 换牌能力清单 platform 不是 android");
             }
             if (!string.Equals(
                 RequireString(
                     manifestValues,
                     "brandingAsset",
-                    "Android 品牌母版清单"),
+                    "Android 换牌能力清单"),
                 PackageDetector.AndroidBrandingEntryPath,
                 StringComparison.Ordinal))
             {
-                throw new InvalidDataException("Android 品牌母版清单 brandingAsset 路径无效");
+                throw new InvalidDataException("Android 换牌能力清单 brandingAsset 路径无效");
             }
             ValidateCapabilities(manifestValues, inspection);
 
             var sourceApplicationId = RequireString(
                 manifestValues,
                 "applicationId",
-                "Android 品牌母版清单");
+                "Android 换牌能力清单");
             var sourcePackageName = RequireString(
                 manifestValues,
                 "sourcePackageName",
-                "Android 品牌母版清单");
+                "Android 换牌能力清单");
             ValidateApplicationId(sourceApplicationId, "源 applicationId");
             ValidateApplicationId(sourcePackageName, "源 Java 包名");
             if (!string.Equals(
@@ -614,7 +629,7 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "品牌母版清单 applicationId 与导入检测结果不一致");
+                    "换牌能力清单 applicationId 与导入检测结果不一致");
             }
 
             var markerBrandId = ReadOptionalString(manifestValues, "brandId");
@@ -632,7 +647,7 @@ namespace VntBrandRepackager
                     StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "已换牌 APK 的品牌母版清单缺少 brandId");
+                        "已换牌 APK 的换牌能力清单缺少 brandId");
                 }
                 sourceBrandId = "official";
             }
@@ -645,7 +660,7 @@ namespace VntBrandRepackager
                     StringComparison.Ordinal))
                 {
                     throw new InvalidDataException(
-                        "品牌母版清单与运行时配置的 brandId 不一致");
+                        "换牌能力清单与运行时配置的 brandId 不一致");
                 }
                 sourceBrandId = markerBrandId;
             }
@@ -660,7 +675,7 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "运行时品牌配置与母版清单的 applicationId 不一致");
+                    "运行时品牌配置与换牌能力清单的 applicationId 不一致");
             }
 
             var document = LoadXmlDocument(manifestPath, 32L * 1024L * 1024L);
@@ -677,20 +692,37 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "AndroidManifest.xml 包名与品牌母版清单不一致");
+                    "AndroidManifest.xml 包名与换牌能力清单不一致");
             }
 
-            var version = ReadOptionalString(manifestValues, "versionName");
+            XNamespace android = "http://schemas.android.com/apk/res/android";
+            var version = ((string)root.Attribute(android + "versionName") ??
+                string.Empty).Trim();
             if (string.IsNullOrEmpty(version))
             {
-                version = RequireString(
-                    manifestValues,
-                    "version",
-                    "Android 品牌母版清单");
+                version = ReadApktoolVersionName(decodedDirectory);
             }
-            if (!string.Equals(version, inspection.Version, StringComparison.Ordinal))
+            if (!Regex.IsMatch(version, @"^\d+(\.\d+){1,3}$"))
             {
-                throw new InvalidDataException("解码后品牌母版版本与导入检测结果不一致");
+                throw new InvalidDataException(
+                    "AndroidManifest.xml 的真实版本号无效");
+            }
+            var declaredVersion = ReadOptionalString(
+                manifestValues,
+                "versionName");
+            if (string.IsNullOrEmpty(declaredVersion))
+            {
+                declaredVersion = ReadOptionalString(manifestValues, "version");
+            }
+            if (!string.IsNullOrEmpty(declaredVersion) &&
+                !string.Equals(
+                    declaredVersion,
+                    version,
+                    StringComparison.Ordinal))
+            {
+                _log(
+                    "检测到客户端换牌能力清单仍记录版本 " + declaredVersion +
+                    "，真实 APK 版本为 " + version + "；输出时将自动同步");
             }
 
             var sourceCertificate = ReadOptionalString(
@@ -701,7 +733,7 @@ namespace VntBrandRepackager
                 if (string.IsNullOrEmpty(sourceCertificate))
                 {
                     throw new InvalidDataException(
-                        "已换牌 APK 的品牌母版清单缺少签名证书指纹");
+                        "已换牌 APK 的换牌能力清单缺少签名证书指纹");
                 }
                 sourceCertificate = NormalizeCertificateSha256(sourceCertificate);
             }
@@ -722,7 +754,8 @@ namespace VntBrandRepackager
                 SourcePackageName = sourcePackageName,
                 SourceBrandId = sourceBrandId,
                 SourceCertificateSha256 = sourceCertificate,
-                Version = version
+                Version = version,
+                VersionCode = inspection.VersionCode
             };
         }
 
@@ -792,7 +825,7 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "Android 品牌母版 application 必须引用 @string/app_name");
+                    "Android 客户端 application 必须引用 @string/app_name");
             }
             ValidateComponentLabel(
                 application,
@@ -1185,7 +1218,7 @@ namespace VntBrandRepackager
                 "strings.xml");
             RequireNonEmptyFile(
                 baseStringsPath,
-                "Android 品牌母版缺少基础 strings.xml");
+                "Android 客户端缺少基础 strings.xml");
             var missingBaseNames = replacements.Keys
                 .Where(name => baseCounts[name] == 0)
                 .ToList();
@@ -1222,7 +1255,7 @@ namespace VntBrandRepackager
                 if (counts[name] == 0 || baseCounts[name] != 1)
                 {
                     throw new InvalidDataException(
-                        "Android 品牌母版基础字符串资源重复或无效：" + name);
+                        "Android 客户端基础字符串资源重复或无效：" + name);
                 }
             }
         }
@@ -1257,6 +1290,11 @@ namespace VntBrandRepackager
             manifest["brandingAsset"] = PackageDetector.AndroidBrandingEntryPath;
             manifest["brandId"] = targetBrandId;
             manifest["sourceProductName"] = productName;
+            manifest["version"] = metadata.Version;
+            manifest["versionName"] = metadata.Version;
+            manifest["versionCode"] = Convert.ToInt32(
+                metadata.VersionCode,
+                CultureInfo.InvariantCulture);
             manifest["hideAboutPage"] = request.HideAboutPage;
             manifest["updateEnabled"] = request.UpdateEnabled;
             manifest["removeUpdateFeature"] = !request.UpdateEnabled;
@@ -1544,12 +1582,12 @@ namespace VntBrandRepackager
             if (!manifest.TryGetValue("capabilities", out raw) || raw == null ||
                 raw is string)
             {
-                throw new InvalidDataException("Android 品牌母版 capabilities 必须为数组");
+                throw new InvalidDataException("Android 换牌能力清单 capabilities 必须为数组");
             }
             var values = raw as IEnumerable;
             if (values == null)
             {
-                throw new InvalidDataException("Android 品牌母版 capabilities 必须为数组");
+                throw new InvalidDataException("Android 换牌能力清单 capabilities 必须为数组");
             }
             var capabilities = new HashSet<string>(StringComparer.Ordinal);
             foreach (var value in values)
@@ -1559,7 +1597,7 @@ namespace VntBrandRepackager
                     !capabilities.Add(capability))
                 {
                     throw new InvalidDataException(
-                        "Android 品牌母版包含无效或重复 capability");
+                        "Android 换牌能力清单包含无效或重复 capability");
                 }
             }
             foreach (var required in PackageDetector.GetRequiredAndroidCapabilities())
@@ -1568,7 +1606,7 @@ namespace VntBrandRepackager
                     !inspection.HasCapability(required))
                 {
                     throw new InvalidDataException(
-                        "Android 品牌母版缺少能力：" + required);
+                        "Android 客户端缺少换牌能力：" + required);
                 }
             }
         }
@@ -1597,7 +1635,7 @@ namespace VntBrandRepackager
                 StringComparison.Ordinal))
             {
                 throw new InvalidDataException(
-                    "Android 品牌母版组件 " + classSuffix +
+                    "Android 客户端组件 " + classSuffix +
                     " 必须引用 " + expectedLabel);
             }
         }
@@ -2188,6 +2226,7 @@ namespace VntBrandRepackager
             public string SourceBrandId { get; set; }
             public string SourceCertificateSha256 { get; set; }
             public string Version { get; set; }
+            public string VersionCode { get; set; }
         }
 
         private sealed class ApkSignatureInfo

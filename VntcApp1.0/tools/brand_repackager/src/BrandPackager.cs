@@ -91,17 +91,9 @@ namespace VntBrandRepackager
                     throw new InvalidDataException(
                         "源安装包在初筛与只读快照复检之间格式不一致");
                 }
-                var trustStore = new WindowsPackageTrustStore(_log);
-                var trustedSourceHash = trustStore.RequireTrustedInput(
-                    sourceSnapshot.Path);
-                if (!string.Equals(
-                    trustedSourceHash,
-                    sourceSnapshot.Sha256,
-                    StringComparison.Ordinal))
-                {
-                    throw new InvalidDataException(
-                        "Windows 源安装包快照与信任校验 SHA-256 不一致");
-                }
+                _log(
+                    "已锁定兼容客户端只读快照，SHA-256：" +
+                    sourceSnapshot.Sha256);
 
                 _log("正在释放内置 Inno Setup 工具链");
                 var toolchainDirectory = ExtractEmbeddedToolchain(tempRoot);
@@ -147,7 +139,7 @@ namespace VntBrandRepackager
                 var payloadDirectory = Path.Combine(tempRoot, "payload");
                 Directory.CreateDirectory(payloadDirectory);
 
-                _log("正在从安装包读取品牌母包数据");
+                _log("正在从客户端安装包读取换牌数据");
                 ExportPayload(sourceSnapshot.Path, payloadZip);
                 SafeExtractZip(payloadZip, payloadDirectory);
                 var packagedConfigDirectory = Path.Combine(payloadDirectory, "config");
@@ -168,7 +160,7 @@ namespace VntBrandRepackager
                     if (!File.Exists(runtimeIconPath))
                     {
                         throw new InvalidDataException(
-                            "品牌母包缺少运行时托盘图标资源");
+                            "客户端换牌数据缺少运行时托盘图标资源");
                     }
                     File.Copy(executableIconPath, runtimeIconPath, true);
                     var launcherIconPath = Path.Combine(
@@ -181,7 +173,7 @@ namespace VntBrandRepackager
                         !File.Exists(appIconPngPath))
                     {
                         throw new InvalidDataException(
-                            "品牌母包缺少应用内图标资源");
+                            "客户端换牌数据缺少应用内图标资源");
                     }
                     IconProcessor.CreateSquarePng(
                         request.IconPath,
@@ -206,13 +198,13 @@ namespace VntBrandRepackager
                     !ManifestHasCapability(manifest, "hideAboutPage"))
                 {
                     throw new InvalidDataException(
-                        "该母版不支持隐藏关于页面，请使用 v4.8.18 或更高版本的品牌母版");
+                        "该客户端不支持隐藏关于页面，请使用 v4.8.18 或更高版本客户端");
                 }
                 if (!request.UpdateEnabled &&
                     !ManifestHasCapability(manifest, "removeUpdateFeature"))
                 {
                     throw new InvalidDataException(
-                        "该母版不支持完整移除升级功能，请使用 v4.8.19 或更高版本的品牌母版");
+                        "该客户端不支持完整移除升级功能，请使用 v4.8.19 或更高版本客户端");
                 }
                 _log(request.UpdateEnabled
                     ? "将保留软件升级功能（请确保使用同品牌更新包）"
@@ -229,12 +221,12 @@ namespace VntBrandRepackager
                     payloadRoot,
                     StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new InvalidDataException("品牌母包主程序路径越界");
+                    throw new InvalidDataException("客户端主程序路径越界");
                 }
                 if (!File.Exists(oldExecutablePath))
                 {
                     throw new InvalidDataException(
-                        "品牌母包缺少主程序：" + oldExecutableName);
+                        "客户端换牌数据缺少主程序：" + oldExecutableName);
                 }
 
                 var productName = request.ProductName.Trim();
@@ -352,7 +344,6 @@ namespace VntBrandRepackager
                 }
 
                 var hash = ComputeFileSha256(stagedSetupPath);
-                trustStore.RegisterTrustedOutput(hash);
                 var shaPath = PackageOutputPublisher.Publish(
                     stagedSetupPath,
                     setupPath,
@@ -509,7 +500,7 @@ namespace VntBrandRepackager
                     request.InstallerPath,
                     StringComparison.OrdinalIgnoreCase))
                 {
-                    throw new ArgumentException("不能覆盖正在使用的源母版安装包");
+                    throw new ArgumentException("不能覆盖正在使用的源客户端安装包");
                 }
                 request.OutputDirectory = Path.GetDirectoryName(
                     request.OutputInstallerPath);
@@ -584,7 +575,7 @@ namespace VntBrandRepackager
             if (!File.Exists(outputZip))
             {
                 throw new InvalidDataException(
-                    "该安装包不是支持一键换牌的品牌母版，或母包数据损坏。" +
+                    "该客户端未提供一键换牌接口，或换牌数据损坏。" +
                     "安装包退出码：" + result);
             }
         }
@@ -594,7 +585,7 @@ namespace VntBrandRepackager
         {
             if (!File.Exists(manifestPath))
             {
-                throw new InvalidDataException("安装包缺少品牌母包清单");
+                throw new InvalidDataException("客户端安装包缺少换牌能力清单");
             }
             var manifest = new JavaScriptSerializer()
                 .Deserialize<Dictionary<string, object>>(
@@ -605,12 +596,12 @@ namespace VntBrandRepackager
                 !manifest.ContainsKey("version") ||
                 !manifest.ContainsKey("executableName"))
             {
-                throw new InvalidDataException("品牌母包清单格式无效");
+                throw new InvalidDataException("客户端换牌能力清单格式无效");
             }
             var version = Convert.ToString(manifest["version"]);
             if (!Regex.IsMatch(version, @"^\d+(\.\d+){1,3}$"))
             {
-                throw new InvalidDataException("品牌母包版本号无效");
+                throw new InvalidDataException("客户端版本号无效");
             }
             var executableName = Convert.ToString(manifest["executableName"]);
             if (string.IsNullOrWhiteSpace(executableName) ||
@@ -626,7 +617,7 @@ namespace VntBrandRepackager
                 executableName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0)
             {
                 throw new InvalidDataException(
-                    "品牌母包 executableName 必须是根目录下的有效 EXE 文件名");
+                    "客户端换牌能力清单 executableName 必须是根目录下的有效 EXE 文件名");
             }
             return manifest;
         }
@@ -799,7 +790,7 @@ begin
     ForceDirectories(ExtractFileDir(ExportPath));
     ExtractTemporaryFile('brand_payload.zip');
     if not FileCopy(ExpandConstant('{{tmp}}\brand_payload.zip'), ExportPath, False) then
-      RaiseException('无法导出品牌母包数据');
+      RaiseException('无法导出客户端换牌数据');
     Result := False;
     exit;
   end;

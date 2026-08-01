@@ -256,7 +256,11 @@ class ChatTransportService {
         onProgress?.call(sentBytes, payload.length);
       }
     } finally {
-      await socket.close();
+      try {
+        await socket.close();
+      } finally {
+        socket.destroy();
+      }
     }
   }
 
@@ -513,11 +517,16 @@ class ChatTransportService {
             '聊天报文解码失败 remote=$remoteEndpoint error=$error bytes=${bytes.length}',
           );
         } finally {
-          await socket.close();
+          try {
+            await socket.close();
+          } finally {
+            socket.destroy();
+          }
         }
       },
       onError: (error) async {
         readTimer?.cancel();
+        socket.destroy();
         await attachmentSink?.abort();
         await ChatLog.write(
           '聊天连接读取失败 remote=$remoteEndpoint error=$error',

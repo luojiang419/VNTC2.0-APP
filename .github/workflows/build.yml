@@ -13,6 +13,14 @@ on:
         description: "手动指定版本号，例如 2.0.1"
         required: false
         type: string
+      release_scope:
+        description: "发布范围：suite 发布全套，client 只发布客户端"
+        required: false
+        default: "suite"
+        type: choice
+        options:
+          - suite
+          - client
 
 concurrency:
   group: ${{ github.workflow }}-production-release
@@ -48,6 +56,7 @@ jobs:
       server_version: ${{ steps.versions.outputs.server_version }}
       release_version: ${{ steps.versions.outputs.release_version }}
       publish_release: ${{ steps.versions.outputs.publish_release }}
+      release_scope: ${{ steps.versions.outputs.release_scope }}
       signing_mode: ${{ steps.versions.outputs.signing_mode }}
     steps:
       - uses: actions/checkout@v4
@@ -62,6 +71,8 @@ jobs:
           set -euo pipefail
 
           input_version="${{ github.event.inputs.release_version || '' }}"
+          input_scope="${{ github.event.inputs.release_scope || '' }}"
+          client_release_marker="${{ github.event_name == 'push' && contains(github.event.head_commit.message, '[client-release]') }}"
           client_pubspec_version="$(grep '^version:' "${CLIENT_APP_DIR}/pubspec.yaml" | awk '{print $2}' | cut -d+ -f1)"
           server_cargo_version="$(grep '^version = ' "${SERVER_SOURCE_DIR}/Cargo.toml" | head -1 | cut -d '"' -f2)"
           semver_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
@@ -69,6 +80,18 @@ jobs:
           already_released="false"
           if [[ "${signing_mode}" != "compatible" && "${signing_mode}" != "official" ]]; then
             echo "VNT_RELEASE_SIGNING_MODE 仅支持 compatible 或 official: ${RELEASE_SIGNING_MODE}" >&2
+            exit 1
+          fi
+
+          if [[ -n "${input_scope}" ]]; then
+            release_scope="${input_scope}"
+          elif [[ "${client_release_marker}" == "true" ]]; then
+            release_scope="client"
+          else
+            release_scope="suite"
+          fi
+          if [[ "${release_scope}" != "suite" && "${release_scope}" != "client" ]]; then
+            echo "release_scope 仅支持 suite 或 client: ${release_scope}" >&2
             exit 1
           fi
 
@@ -141,6 +164,7 @@ jobs:
           echo "客户端构建号: ${client_build_number}"
           echo "服务端版本: ${server_version}"
           echo "是否发布: ${publish_release}"
+          echo "发布范围: ${release_scope}"
           echo "签名策略: ${signing_mode}"
 
           echo "client_version=${client_version}" >> "${GITHUB_OUTPUT}"
@@ -148,6 +172,7 @@ jobs:
           echo "server_version=${server_version}" >> "${GITHUB_OUTPUT}"
           echo "release_version=${release_version}" >> "${GITHUB_OUTPUT}"
           echo "publish_release=${publish_release}" >> "${GITHUB_OUTPUT}"
+          echo "release_scope=${release_scope}" >> "${GITHUB_OUTPUT}"
           echo "signing_mode=${signing_mode}" >> "${GITHUB_OUTPUT}"
 
   test-client:
@@ -183,6 +208,8 @@ jobs:
 
   test-server:
     name: 服务端格式检查与测试
+    needs: meta
+    if: needs.meta.outputs.release_scope == 'suite'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -216,6 +243,8 @@ jobs:
 
   test-console:
     name: 服务端增强控制台静态分析与测试
+    needs: meta
+    if: needs.meta.outputs.release_scope == 'suite'
     runs-on: windows-latest
     permissions:
       contents: read
@@ -971,6 +1000,7 @@ jobs:
 
   build-server-windows-light:
     name: Windows 服务端轻量版
+    if: needs.meta.outputs.release_scope == 'suite'
     needs:
       - meta
       - validate-release-signing
@@ -1023,6 +1053,7 @@ jobs:
 
   build-server-windows-console:
     name: Windows 服务端增强版
+    if: needs.meta.outputs.release_scope == 'suite'
     needs:
       - meta
       - validate-release-signing
@@ -1078,6 +1109,7 @@ jobs:
 
   build-server-linux:
     name: Linux 服务端
+    if: needs.meta.outputs.release_scope == 'suite'
     needs:
       - meta
       - validate-release-signing
@@ -1114,7 +1146,24 @@ jobs:
 
   deploy:
     name: 发布 GitHub Release
-    if: needs.meta.outputs.publish_release == 'true'
+    if: >-
+      ${{
+        always() &&
+        needs.meta.outputs.publish_release == 'true' &&
+        needs.test-client.result == 'success' &&
+        needs.build-client-windows.result == 'success' &&
+        needs.build-client-macos.result == 'success' &&
+        needs.build-client-android.result == 'success' &&
+        needs.build-client-linux-webui.result == 'success' &&
+        (
+          needs.meta.outputs.release_scope == 'client' ||
+          (
+            needs.build-server-windows-light.result == 'success' &&
+            needs.build-server-windows-console.result == 'success' &&
+            needs.build-server-linux.result == 'success'
+          )
+        )
+      }}
     needs:
       - meta
       - test-client
@@ -1154,6 +1203,7 @@ jobs:
           repo = os.environ["GITHUB_REPOSITORY"]
           version = os.environ["RELEASE_VERSION"]
           signing_mode = os.environ["SIGNING_MODE"]
+          release_scope = os.environ["RELEASE_SCOPE"]
           tag = f"v{version}"
 
           def platform_for(name: str) -> str:
@@ -1191,6 +1241,7 @@ jobs:
           manifest = {
               "version": version,
               "tag": tag,
+              "release_scope": release_scope,
               "signing_mode": signing_mode,
               "published_at": datetime.now(timezone.utc).isoformat(),
               "release_url": f"https://github.com/{repo}/releases/tag/{tag}",
@@ -1202,6 +1253,7 @@ jobs:
         env:
           RELEASE_VERSION: ${{ needs.meta.outputs.release_version }}
           SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
+          RELEASE_SCOPE: ${{ needs.meta.outputs.release_scope }}
 
       - name: 创建草稿 Release 并上传资产
         id: create_draft_release
@@ -1209,9 +1261,11 @@ jobs:
         with:
           tag_name: v${{ needs.meta.outputs.release_version }}
           target_commitish: ${{ github.sha }}
-          name: VNT Suite v${{ needs.meta.outputs.release_version }}
+          name: VNT ${{ needs.meta.outputs.release_scope == 'client' && 'Client' || 'Suite' }} v${{ needs.meta.outputs.release_version }}
           body: |
             自动构建发布：
+
+            发布范围：`${{ needs.meta.outputs.release_scope }}`。
 
             签名策略：`${{ needs.meta.outputs.signing_mode }}`。每个平台的签名状态与 SHA-256 见同名 `.signature.json` 和 `.sha256` 文件。
 
@@ -1219,9 +1273,8 @@ jobs:
             - macOS 客户端
             - Android 客户端
             - Linux WebUI 客户端
-            - Windows 服务端轻量版
-            - Windows 服务端增强版
-            - Linux 服务端
+
+            `client` 范围只上传客户端资产；`suite` 范围才包含服务端与增强控制台资产。最终资产清单以 `latest.json` 和 `SHA256SUMS.txt` 为准。
           files: release-assets/*
           draft: true
           prerelease: false

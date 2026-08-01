@@ -230,16 +230,16 @@ async fn my_nat_info_impl(app_context: &AppState, socket_manager: &SocketManager
     nat_info.public_ips = public_ips;
     nat_info.public_port_range = port_range;
     app_context.nat_info.replace_nat_info(nat_info);
-    let model = match nat_type {
-        NatType::Cone => Model::Low,
-        NatType::Symmetric => Model::High,
-    };
-    if let Err(e) = socket_manager
-        .udp_socket_manager_as_ref()
-        .unwrap()
-        .switch_model(model)
-    {
-        log::error!("switch_model error: {e:?}");
+    if nat_type == NatType::Cone {
+        if let Err(e) = socket_manager
+            .udp_socket_manager_as_ref()
+            .unwrap()
+            .switch_model(Model::Low)
+        {
+            log::error!("switch_model error: {e:?}");
+        }
+    } else {
+        log::info!("symmetric NAT detected; defer full UDP punch pool until punching is required");
     }
 }
 
