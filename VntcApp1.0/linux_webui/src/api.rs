@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
-use axum::extract::{Path, Request, State};
+use axum::extract::{Path, Query, Request, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::middleware::{self, Next};
 use axum::response::{IntoResponse, Response};
@@ -19,7 +19,9 @@ use crate::profile_store::{
     ImportProfiles, NetworkProfile, ProfileBackup, ProfileInput, ProfileStore,
 };
 use crate::runtime_log::{LogEntry, RuntimeLog};
-use crate::vnt_service::{VntController, to_core_config};
+use crate::vnt_service::{
+    PeerSnapshot, RouteSnapshot, StatusSnapshot, TrafficSnapshot, VntController, to_core_config,
+};
 
 pub struct ApiState {
     pub config: RwLock<AppConfig>,
@@ -90,6 +92,7 @@ impl ApiState {
 pub fn router(state: Arc<ApiState>) -> Router {
     let protected = Router::new()
         .route("/status", get(status))
+        .route("/snapshot", get(snapshot))
         .route("/config", get(get_config).put(update_config))
         .route("/start", post(start))
         .route("/stop", post(stop))
@@ -132,8 +135,27 @@ async fn index_page() -> Response {
     );
     if cfg!(feature = "openwrt") {
         let mut page = page;
-        *page.body_mut() =
-            Body::from(include_str!("../web/index.html").replace("Linux", "OpenWrt"));
+        static OPENWRT_PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let html = OPENWRT_PAGE.get_or_init(|| {
+            let mut html = include_str!("../web/index.html")
+                .replace("\r\n", "\n")
+                .replace("Linux", "OpenWrt")
+                .replace(
+                    "<html lang=\"zh-CN\"",
+                    "<html lang=\"zh-CN\" data-platform=\"openwrt\"",
+                );
+            for file in ["shell", "components", "pages", "responsive"] {
+                html = html.replace(
+                    &format!("    <link rel=\"stylesheet\" href=\"/assets/styles/{file}.css\">\n"),
+                    "",
+                );
+            }
+            html.replace(
+                "</head>",
+                "<link rel=\"stylesheet\" href=\"/assets/styles/openwrt.css\">\n  </head>",
+            )
+        });
+        *page.body_mut() = Body::from(html.as_str());
         page
     } else {
         page
@@ -178,6 +200,42 @@ async fn health() -> Json<ApiMessage> {
 
 async fn status(State(state): State<Arc<ApiState>>) -> Json<impl Serialize> {
     Json(state.controller.status().await)
+}
+
+#[derive(Default, Deserialize)]
+#[serde(default)]
+struct SnapshotQuery {
+    details: bool,
+}
+
+#[derive(Serialize)]
+struct RuntimeSnapshot {
+    status: StatusSnapshot,
+    traffic: Vec<TrafficSnapshot>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    peers: Option<Vec<PeerSnapshot>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    routes: Option<Vec<RouteSnapshot>>,
+}
+
+async fn snapshot(
+    State(state): State<Arc<ApiState>>,
+    Query(query): Query<SnapshotQuery>,
+) -> Json<RuntimeSnapshot> {
+    Json(RuntimeSnapshot {
+        status: state.controller.status().await,
+        traffic: state.controller.traffic().await,
+        peers: if query.details {
+            Some(state.controller.peers().await)
+        } else {
+            None
+        },
+        routes: if query.details {
+            Some(state.controller.routes().await)
+        } else {
+            None
+        },
+    })
 }
 
 async fn peers(State(state): State<Arc<ApiState>>) -> Json<impl Serialize> {
@@ -899,6 +957,59 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+    }
+
+    #[tokio::test]
+    async fn snapshot_requires_auth_and_only_returns_requested_details() {
+        let app = router(test_state(Some("test-token")));
+        let response = app
+            .clone()
+            .oneshot(Request::get("/api/snapshot").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
+        for (url, details) in [
+            ("/api/snapshot", false),
+            ("/api/snapshot?details=true", true),
+        ] {
+            let response = app
+                .clone()
+                .oneshot(
+                    Request::get(url)
+                        .header("authorization", "Bearer test-token")
+                        .body(Body::empty())
+                        .unwrap(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+                .await
+                .unwrap();
+            let value: serde_json::Value = serde_json::from_slice(&body).unwrap();
+            assert_eq!(value["status"]["phase"], "stopped");
+            assert_eq!(value["traffic"], serde_json::json!([]));
+            assert_eq!(value.get("peers").is_some(), details);
+            assert_eq!(value.get("routes").is_some(), details);
+        }
+    }
+
+    #[cfg(feature = "openwrt")]
+    #[tokio::test]
+    async fn openwrt_page_loads_only_static_lightweight_styles() {
+        let response = router(test_state(None))
+            .oneshot(Request::get("/").body(Body::empty()).unwrap())
+            .await
+            .unwrap();
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .unwrap();
+        let html = String::from_utf8_lossy(&body);
+        assert!(html.contains("data-platform=\"openwrt\""));
+        assert!(html.contains("styles/openwrt.css"));
+        for name in ["shell", "components", "pages", "responsive"] {
+            assert!(!html.contains(&format!("styles/{name}.css")));
+        }
     }
 
     #[tokio::test]

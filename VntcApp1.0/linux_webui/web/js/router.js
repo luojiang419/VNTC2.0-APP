@@ -1,4 +1,4 @@
-import { state, $ } from "./state.js";
+import { state, $, isOpenWrt } from "./state.js";
 
 const routes = new Map();
 const metadata = {
@@ -23,8 +23,14 @@ export async function navigate(route = "dashboard") {
   root.innerHTML = '<div class="loading-block">正在载入页面…</div>';
   try { await routes.get(route)(root); }
   catch (error) { root.innerHTML = `<div class="panel empty-state"><span>!</span><strong>页面载入失败</strong><p>${error.message}</p></div>`; }
-  root.classList.add("page-enter");
-  window.scrollTo({ top: 0, behavior: "smooth" });
+  if (!isOpenWrt) root.classList.add("page-enter");
+  window.scrollTo({ top: 0, behavior: isOpenWrt ? "auto" : "smooth" });
+  document.dispatchEvent(new CustomEvent("vntc:route"));
+}
+
+// 自动刷新只更新内容，不触发页面切换、加载占位或滚动。
+export async function refreshCurrentRoute() {
+  await routes.get(state.route)?.($("pageRoot"));
 }
 
 export function bindRouter() {

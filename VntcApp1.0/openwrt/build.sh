@@ -8,6 +8,7 @@ export CARGO_PROFILE_RELEASE_OPT_LEVEL=s
 export CARGO_PROFILE_RELEASE_LTO=thin
 export CARGO_PROFILE_RELEASE_STRIP=symbols
 export CARGO_PROFILE_RELEASE_CODEGEN_UNITS=1
+export CARGO_PROFILE_RELEASE_PANIC=abort
 version="${1:-$(sed -n 's/^version: *\([^+ ]*\).*/\1/p' "$project_dir/pubspec.yaml" | head -1)}"
 export VNTC_APP_VERSION="$version"
 export VNTC_BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
@@ -20,4 +21,4 @@ binary="$CARGO_TARGET_DIR/x86_64-unknown-linux-musl/release/vntc-linux-webui"
 if readelf -l "$binary" | grep -q INTERP; then
     echo '构建失败：要求静态 musl 可执行文件' >&2; exit 1
 fi
-python3 "$project_dir/openwrt/package.py" --binary "$binary" --version "$version"
+python3 "$project_dir/openwrt/package.py" --binary "$binary" --version "$version" --output "${2:-$project_dir/release/openwrt}"

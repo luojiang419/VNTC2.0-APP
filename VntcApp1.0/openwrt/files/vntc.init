@@ -10,7 +10,7 @@ start_service() {
     /usr/libexec/vntc-firewall install || return 1
     procd_open_instance
     procd_set_param command /usr/bin/vntc-openwrt --config /etc/vntc/config.json
-    procd_set_param env RUST_LOG=info TOKIO_WORKER_THREADS=2
+    procd_set_param env RUST_LOG=warn TOKIO_WORKER_THREADS=1
     procd_set_param respawn 3600 5 5
     procd_set_param stdout 1
     procd_set_param stderr 1

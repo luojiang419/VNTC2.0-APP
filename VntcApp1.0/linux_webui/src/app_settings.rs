@@ -19,7 +19,7 @@ impl Default for AppSettings {
             experience_mode: "minimal".to_string(),
             theme_mode: "system".to_string(),
             theme_accent: "blue".to_string(),
-            refresh_interval_seconds: 5,
+            refresh_interval_seconds: if cfg!(feature = "openwrt") { 30 } else { 5 },
         }
     }
 }

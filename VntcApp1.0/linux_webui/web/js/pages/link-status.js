@@ -1,4 +1,4 @@
-import { state, escapeHtml } from "../state.js";
+import { state, escapeHtml, refreshIntervalMs } from "../state.js";
 import { formatBytes, openModal } from "../ui.js";
 
 let activeTab = "devices";
@@ -38,7 +38,7 @@ function showPeer(ip) {
 }
 
 export async function renderLinkStatus(root) {
-  root.innerHTML = `<section class="section-header"><div><h2>网络成员</h2><p>设备和路由数据每 5 秒自动刷新</p></div><div class="tabs"><button class="tab ${activeTab === "devices" ? "active" : ""}" data-tab="devices">设备 ${state.peers.length}</button><button class="tab ${activeTab === "routes" ? "active" : ""}" data-tab="routes">路由 ${state.routes.length}</button></div></section><div id="linkStatusContent">${activeTab === "devices" ? renderDevices() : renderRoutes()}</div>`;
+  root.innerHTML = `<section class="section-header"><div><h2>网络成员</h2><p>设备和路由数据每 ${refreshIntervalMs(state.settings) / 1000} 秒自动刷新</p></div><div class="tabs"><button class="tab ${activeTab === "devices" ? "active" : ""}" data-tab="devices">设备 ${state.peers.length}</button><button class="tab ${activeTab === "routes" ? "active" : ""}" data-tab="routes">路由 ${state.routes.length}</button></div></section><div id="linkStatusContent">${activeTab === "devices" ? renderDevices() : renderRoutes()}</div>`;
   root.querySelectorAll("[data-tab]").forEach((button) => button.addEventListener("click", () => { activeTab = button.dataset.tab; renderLinkStatus(root); }));
   root.querySelectorAll("[data-peer]").forEach((button) => button.addEventListener("click", () => showPeer(button.dataset.peer)));
 }

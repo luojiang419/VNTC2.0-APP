@@ -1,3 +1,9 @@
+export const isOpenWrt = typeof document !== "undefined" && document.documentElement.dataset.platform === "openwrt";
+
+export function refreshIntervalMs(settings) {
+  return (isOpenWrt ? Math.max(10, Number(settings?.refresh_interval_seconds) || 30) : (Number(settings?.refresh_interval_seconds) || 5)) * 1000;
+}
+
 export const state = {
   token: sessionStorage.getItem("vntcAccessToken") || "",
   route: "dashboard",
@@ -35,6 +41,8 @@ export function updateTraffic(traffic) {
   const rxRate = seconds ? Math.max(0, (rx - previous.rx) / seconds) : 0;
   state.traffic = traffic;
   state.trafficTotals = { tx, rx, txRate, rxRate, sampledAt: now };
-  state.trafficHistory.push({ txRate, rxRate });
-  if (state.trafficHistory.length > 24) state.trafficHistory.shift();
+  if (!isOpenWrt) {
+    state.trafficHistory.push({ txRate, rxRate });
+    if (state.trafficHistory.length > 24) state.trafficHistory.shift();
+  }
 }

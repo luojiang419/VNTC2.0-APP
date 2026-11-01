@@ -8,8 +8,17 @@ use vntc_linux_webui::api::{ApiState, router};
 use vntc_linux_webui::config::AppConfig;
 use vntc_linux_webui::vnt_service::to_core_config;
 
-#[tokio::main]
-async fn main() -> Result<()> {
+fn main() -> Result<()> {
+    let mut runtime = tokio::runtime::Builder::new_multi_thread();
+    #[cfg(feature = "openwrt")]
+    runtime
+        .worker_threads(1)
+        .max_blocking_threads(4)
+        .thread_stack_size(512 * 1024);
+    runtime.enable_all().build()?.block_on(async_main())
+}
+
+async fn async_main() -> Result<()> {
     env_logger::init();
     let command = Command::parse(env::args().skip(1))?;
 

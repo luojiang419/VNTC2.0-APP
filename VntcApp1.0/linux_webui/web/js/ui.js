@@ -1,4 +1,4 @@
-import { $ } from "./state.js";
+import { $, isOpenWrt } from "./state.js";
 
 export function toast(message, type = "success") {
   const element = document.createElement("div");
@@ -80,7 +80,7 @@ export function renderStatusChip(status) {
     uptimeSampledAtMs = sampledAtMs;
     uptime.hidden = false;
     updateUptime();
-    if (uptimeTimer == null) uptimeTimer = window.setInterval(updateUptime, 1000);
+    if (!isOpenWrt && uptimeTimer == null) uptimeTimer = window.setInterval(updateUptime, 1000);
     return;
   }
   uptimeBaseSeconds = null;

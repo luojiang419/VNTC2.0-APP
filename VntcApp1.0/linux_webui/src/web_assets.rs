@@ -1,5 +1,9 @@
 pub fn get(path: &str) -> Option<(&'static str, &'static str)> {
     Some(match path {
+        "styles/openwrt.css" => (
+            "text/css; charset=utf-8",
+            include_str!("../web/styles/openwrt.css"),
+        ),
         "styles/tokens.css" => (
             "text/css; charset=utf-8",
             include_str!("../web/styles/tokens.css"),
@@ -42,7 +46,11 @@ pub fn get(path: &str) -> Option<(&'static str, &'static str)> {
         ),
         "js/pages/dashboard.js" => (
             "text/javascript; charset=utf-8",
-            include_str!("../web/js/pages/dashboard.js"),
+            if cfg!(feature = "openwrt") {
+                include_str!("../web/js/pages/openwrt-dashboard.js")
+            } else {
+                include_str!("../web/js/pages/dashboard.js")
+            },
         ),
         "js/pages/link-status.js" => (
             "text/javascript; charset=utf-8",
