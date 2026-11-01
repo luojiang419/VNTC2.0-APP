@@ -44,30 +44,7 @@ async fn run_server(config: AppConfig, config_path: PathBuf) -> Result<()> {
         .with_context(|| format!("监听 {}:{} 失败", listen_address.0, listen_address.1))?;
 
     if auto_start {
-        let controller = state.controller.clone();
-        let vnt_config = state.config.read().await.vnt.clone();
-        let state_for_profile = state.clone();
-        tokio::spawn(async move {
-            if let Err(error) = controller.start(vnt_config).await {
-                log::error!("自动启动 VNT 失败：{error:#}");
-                state_for_profile
-                    .logs
-                    .push("error", format!("自动连接失败：{error:#}"))
-                    .await;
-            } else {
-                let default_id = state_for_profile
-                    .profiles
-                    .read()
-                    .await
-                    .default_profile_id
-                    .clone();
-                *state_for_profile.active_profile_id.write().await = Some(default_id);
-                state_for_profile
-                    .logs
-                    .push("info", "已自动连接默认配置")
-                    .await;
-            }
-        });
+        tokio::spawn(state.clone().connect_on_startup());
     }
 
     println!(
@@ -81,9 +58,21 @@ async fn run_server(config: AppConfig, config_path: PathBuf) -> Result<()> {
 }
 
 async fn shutdown_signal(state: Arc<ApiState>) {
-    if tokio::signal::ctrl_c().await.is_ok() {
-        state.controller.stop().await;
+    #[cfg(unix)]
+    {
+        // procd 和 systemd 正常停止服务时发送 SIGTERM。
+        let mut terminate =
+            tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                .expect("无法注册 SIGTERM 处理器");
+        tokio::select! {
+            _ = tokio::signal::ctrl_c() => {},
+            _ = terminate.recv() => {},
+        }
     }
+    #[cfg(not(unix))]
+    let _ = tokio::signal::ctrl_c().await;
+
+    state.controller.stop().await;
 }
 
 enum Command {

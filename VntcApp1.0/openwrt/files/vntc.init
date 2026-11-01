@@ -1,0 +1,25 @@
+#!/bin/sh /etc/rc.common
+
+START=95
+STOP=10
+USE_PROCD=1
+
+start_service() {
+    [ -c /dev/net/tun ] || { logger -t vntc '缺少 /dev/net/tun，请安装 kmod-tun'; return 1; }
+    /usr/bin/vntc-openwrt --config /etc/vntc/config.json --check-config >/dev/null || return 1
+    /usr/libexec/vntc-firewall install || return 1
+    procd_open_instance
+    procd_set_param command /usr/bin/vntc-openwrt --config /etc/vntc/config.json
+    procd_set_param env RUST_LOG=info TOKIO_WORKER_THREADS=2
+    procd_set_param respawn 3600 5 5
+    procd_set_param stdout 1
+    procd_set_param stderr 1
+    procd_set_param file /etc/vntc/config.json
+    procd_set_param term_timeout 15
+    procd_close_instance
+}
+
+reload_service() {
+    stop
+    start
+}

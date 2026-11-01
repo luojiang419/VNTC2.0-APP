@@ -1,0 +1,44 @@
+#!/bin/sh
+set -eu
+
+[ -f /etc/config/firewall ] && [ -x /etc/init.d/firewall ] || exit 0
+section=firewall.vntc_openwrt
+marker=/etc/vntc/.firewall-managed
+umask 077
+case "${1:-install}" in
+    install)
+        if uci -q get "$section" >/dev/null; then
+            [ -f "$marker" ] && [ "$(uci -q get "$section.name")" = vntc_openwrt ] || {
+                echo '防火墙节 vntc_openwrt 已被其他配置占用，请先手动处理'; exit 1;
+            }
+        fi
+        tun="$(jsonfilter -i /etc/vntc/config.json -e '@.vnt.tun_name')"
+        tun="${tun:-vnt0}"
+        case "$tun" in *[!a-zA-Z0-9_.-]*|'') echo '无效的 TUN 接口名'; exit 1 ;; esac
+        [ "${#tun}" -le 15 ] || { echo 'TUN 接口名不能超过 15 字节'; exit 1; }
+        if [ "$(uci -q get "$section.device" || true)" = "$tun" ]; then
+            exit 0
+        fi
+        if ! uci -q get "$section" >/dev/null; then
+            uci set "$section=zone"
+            uci set "$section.name=vntc_openwrt"
+            uci set "$section.input=ACCEPT"
+            uci set "$section.output=ACCEPT"
+            uci set "$section.forward=REJECT"
+        fi
+        uci -q delete "$section.device" || true
+        uci add_list "$section.device=$tun"
+        : > "$marker"
+        uci commit firewall
+        /etc/init.d/firewall reload
+        ;;
+    remove)
+        if [ -f "$marker" ] && [ "$(uci -q get "$section.name" || true)" = vntc_openwrt ]; then
+            uci delete "$section"
+            uci commit firewall
+            /etc/init.d/firewall reload
+            rm -f "$marker"
+        fi
+        ;;
+    *) echo '用法：vntc-firewall [install|remove]'; exit 1 ;;
+esac

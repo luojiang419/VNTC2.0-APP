@@ -1,0 +1,30 @@
+#!/bin/sh
+set -eu
+
+# 只在首次安装生成配置；升级和重新安装保留全部业务状态。
+umask 077
+mkdir -p /etc/vntc
+chmod 700 /etc/vntc
+if [ ! -s /etc/vntc/config.json ]; then
+    token="$(cat /proc/sys/kernel/random/uuid /proc/sys/kernel/random/uuid | tr -d '\n-')"
+    device_id="$(cat /proc/sys/kernel/random/uuid | tr -d '\n-')"
+    [ "${#token}" -eq 64 ] && [ "${#device_id}" -eq 32 ] || { echo '生成随机凭据失败'; exit 1; }
+    cat > /etc/vntc/config.json.new <<EOF
+{
+  "auto_start": false,
+  "web": {"listen": "0.0.0.0", "port": 18080, "access_token": "$token"},
+  "vnt": {
+    "server_addresses": ["quic://127.0.0.1:29872"],
+    "network_code": "replace-with-network-code",
+    "device_id": "$device_id",
+    "device_name": "vntc-openwrt",
+    "tun_name": "vnt0"
+  }
+}
+EOF
+    mv /etc/vntc/config.json.new /etc/vntc/config.json
+fi
+chmod 600 /etc/vntc/config.json
+/usr/bin/vntc-openwrt --config /etc/vntc/config.json --check-config >/dev/null
+echo 'VNTC 配置：/etc/vntc/config.json；WebUI：http://路由器LAN地址:18080/'
+echo '请从 config.json 的 web.access_token 读取首次登录令牌。'

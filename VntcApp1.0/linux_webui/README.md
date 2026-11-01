@@ -2,6 +2,8 @@
 
 VNTC 的无界面 Linux 服务与响应式浏览器管理端。后端直接接入 `vnt-core`，支持 Linux TUN、P2P/Relay 状态、实时流量、多配置档案、设置、日志与备份恢复。WebUI 保留与软件版一致的仪表盘、链接状态、配置、设置和关于五项 Linux 功能。
 
+OpenWrt x86_64 安装包、procd 服务及双虚拟机自动验收说明见 [OpenWrt 客户端](../openwrt/README.md)。
+
 ## 配置与启动
 
 ```bash

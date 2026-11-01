@@ -1,5 +1,6 @@
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use axum::Json;
@@ -31,6 +32,7 @@ pub struct ApiState {
     pub settings_path: PathBuf,
     pub logs: RuntimeLog,
     mutation: Mutex<()>,
+    startup_connect_cancelled: AtomicBool,
 }
 
 impl ApiState {
@@ -50,7 +52,38 @@ impl ApiState {
             settings: RwLock::new(settings),
             logs: RuntimeLog::default(),
             mutation: Mutex::new(()),
+            startup_connect_cancelled: AtomicBool::new(false),
         })
+    }
+
+    pub async fn connect_on_startup(self: Arc<Self>) {
+        let mut retry_seconds = 3;
+        loop {
+            {
+                let _mutation = self.mutation.lock().await;
+                if self.startup_connect_cancelled.load(Ordering::Relaxed)
+                    || !self.config.read().await.auto_start
+                {
+                    return;
+                }
+                let profile = self.profiles.read().await.default_profile().clone();
+                match self.controller.start(profile.vnt).await {
+                    Ok(()) => {
+                        *self.active_profile_id.write().await = Some(profile.id);
+                        self.logs.push("info", "已自动连接默认配置").await;
+                        return;
+                    }
+                    Err(error) => {
+                        let message = format!("自动连接失败，{retry_seconds} 秒后重试：{error:#}");
+                        log::warn!("{message}");
+                        self.logs.push("warn", message).await;
+                    }
+                }
+            }
+            // 路由器开机时 WAN/DNS 可能尚未就绪；允许管理 API 在重试间隔内操作。
+            tokio::time::sleep(std::time::Duration::from_secs(retry_seconds)).await;
+            retry_seconds = (retry_seconds * 2).min(30);
+        }
     }
 }
 
@@ -93,10 +126,18 @@ pub fn router(state: Arc<ApiState>) -> Router {
 }
 
 async fn index_page() -> Response {
-    static_asset(
+    let page = static_asset(
         "text/html; charset=utf-8",
         include_str!("../web/index.html"),
-    )
+    );
+    if cfg!(feature = "openwrt") {
+        let mut page = page;
+        *page.body_mut() =
+            Body::from(include_str!("../web/index.html").replace("Linux", "OpenWrt"));
+        page
+    } else {
+        page
+    }
 }
 
 async fn web_asset(Path(path): Path<String>) -> Response {
@@ -200,6 +241,9 @@ async fn update_config(
 }
 
 async fn start(State(state): State<Arc<ApiState>>) -> Result<Json<ApiMessage>, ApiError> {
+    state
+        .startup_connect_cancelled
+        .store(true, Ordering::Relaxed);
     let _mutation = state.mutation.lock().await;
     let profile = state.profiles.read().await.default_profile().clone();
     activate_profile_config(&state, &profile).await?;
@@ -344,6 +388,9 @@ async fn connect_profile(
     State(state): State<Arc<ApiState>>,
     Path(id): Path<String>,
 ) -> Result<Json<ApiMessage>, ApiError> {
+    state
+        .startup_connect_cancelled
+        .store(true, Ordering::Relaxed);
     let _mutation = state.mutation.lock().await;
     let profile = state
         .profiles
@@ -410,6 +457,9 @@ async fn activate_profile_config(
 }
 
 async fn stop(State(state): State<Arc<ApiState>>) -> Json<ApiMessage> {
+    state
+        .startup_connect_cancelled
+        .store(true, Ordering::Relaxed);
     let _mutation = state.mutation.lock().await;
     state.controller.stop().await;
     state.logs.push("info", "VNT 网络已停止").await;
@@ -627,11 +677,25 @@ struct AboutInfo {
 
 async fn about() -> Json<AboutInfo> {
     Json(AboutInfo {
-        product: "VNTC Linux WebUI",
+        product: if cfg!(feature = "openwrt") {
+            "VNTC OpenWrt"
+        } else {
+            "VNTC Linux WebUI"
+        },
         version: app_version(),
         vnt_core_version: "2.0.0",
-        platform: format!("{}/{}", std::env::consts::OS, std::env::consts::ARCH),
-        run_mode: if PathBuf::from("/.dockerenv").exists() {
+        platform: format!(
+            "{}/{}",
+            if cfg!(feature = "openwrt") {
+                "openwrt"
+            } else {
+                std::env::consts::OS
+            },
+            std::env::consts::ARCH
+        ),
+        run_mode: if cfg!(feature = "openwrt") {
+            "OpenWrt / procd"
+        } else if PathBuf::from("/.dockerenv").exists() {
             "Docker 容器"
         } else {
             "Linux 服务"
@@ -784,7 +848,11 @@ mod tests {
             .await
             .unwrap();
         let html = String::from_utf8_lossy(&body);
-        assert!(html.contains("VNTC Linux"));
+        assert!(html.contains(if cfg!(feature = "openwrt") {
+            "VNTC OpenWrt"
+        } else {
+            "VNTC Linux"
+        }));
         assert!(html.contains("statusUptime"));
     }
 
