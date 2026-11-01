@@ -19,6 +19,9 @@ $shaPath = ''
 $vntcRustDeskMsiSource = Join-Path $projectDir 'third_party\vntcrustdesk\windows\dist\vntcrustdesk.msi'
 $bootstrapScriptSource = Join-Path $projectDir 'scripts\bootstrap_vntcrustdesk.ps1'
 $uninstallScriptSource = Join-Path $projectDir 'scripts\uninstall_vntcrustdesk.ps1'
+$vntServiceSource = Join-Path $projectDir 'rust\target\release\vnt_service.exe'
+$installVntServiceScriptSource = Join-Path $projectDir 'scripts\install_vnt_service.ps1'
+$uninstallVntServiceScriptSource = Join-Path $projectDir 'scripts\uninstall_vnt_service.ps1'
 
 function Require-Path {
     param(
@@ -130,6 +133,8 @@ Require-Path -Path $versionUtils -Label 'Build version utility script'
 Require-Path -Path $vntcRustDeskMsiSource -Label 'vntcrustdesk MSI artifact'
 Require-Path -Path $bootstrapScriptSource -Label 'vntcrustdesk bootstrap script'
 Require-Path -Path $uninstallScriptSource -Label 'vntcrustdesk uninstall script'
+Require-Path -Path $installVntServiceScriptSource -Label 'VNT service install script'
+Require-Path -Path $uninstallVntServiceScriptSource -Label 'VNT service uninstall script'
 . $versionUtils
 
 $currentBuildVersionInfo = Resolve-VntBuildVersion `
@@ -156,6 +161,8 @@ Require-Path -Path (Join-Path $outputDir 'data') -Label 'Output data directory'
 Require-Path -Path (Join-Path $outputDir 'dlls') -Label 'Wintun dll directory'
 Require-Path -Path (Join-Path $outputDir 'diagnose_portable_launch.ps1') -Label 'Portable diagnose script'
 Require-Path -Path (Join-Path $outputDir 'diagnose_portable_launch.bat') -Label 'Portable diagnose bat'
+Require-Path -Path $vntServiceSource -Label 'VNT core service executable'
+Copy-WithRetry -Source $vntServiceSource -Destination (Join-Path $outputDir 'vnt_service.exe')
 
 if (-not (Test-Path -LiteralPath $portableRoot)) {
     New-Item -ItemType Directory -Force -Path $portableRoot | Out-Null
@@ -177,9 +184,12 @@ New-Item -ItemType Directory -Force -Path $scriptsDir | Out-Null
 Copy-WithRetry -Source $vntcRustDeskMsiSource -Destination (Join-Path $remoteAssistArtifactDir 'vntcrustdesk.msi')
 Copy-WithRetry -Source $bootstrapScriptSource -Destination (Join-Path $scriptsDir 'bootstrap_vntcrustdesk.ps1')
 Copy-WithRetry -Source $uninstallScriptSource -Destination (Join-Path $scriptsDir 'uninstall_vntcrustdesk.ps1')
+Copy-WithRetry -Source $installVntServiceScriptSource -Destination (Join-Path $scriptsDir 'install_vnt_service.ps1')
+Copy-WithRetry -Source $uninstallVntServiceScriptSource -Destination (Join-Path $scriptsDir 'uninstall_vnt_service.ps1')
 
 $requiredPaths = @(
     (Join-Path $packageDir 'vnt_app.exe'),
+    (Join-Path $packageDir 'vnt_service.exe'),
     (Join-Path $packageDir 'rust_lib_vnt_app.dll'),
     (Join-Path $packageDir 'flutter_windows.dll'),
     (Join-Path $packageDir 'dartjni.dll'),
@@ -193,7 +203,9 @@ $requiredPaths = @(
     (Join-Path $packageDir 'diagnose_portable_launch.bat'),
     (Join-Path $packageDir 'remote_assist\artifacts\vntcrustdesk.msi'),
     (Join-Path $packageDir 'scripts\bootstrap_vntcrustdesk.ps1'),
-    (Join-Path $packageDir 'scripts\uninstall_vntcrustdesk.ps1')
+    (Join-Path $packageDir 'scripts\uninstall_vntcrustdesk.ps1'),
+    (Join-Path $packageDir 'scripts\install_vnt_service.ps1'),
+    (Join-Path $packageDir 'scripts\uninstall_vnt_service.ps1')
 )
 foreach ($path in $requiredPaths) {
     Require-Path -Path $path -Label 'Required package path'

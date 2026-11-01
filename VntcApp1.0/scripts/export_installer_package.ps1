@@ -31,6 +31,8 @@ $uninstallScriptSource = Join-Path $projectDir 'scripts\uninstall_vntcrustdesk.p
 $vntcRustDeskMsiDest = Join-Path $stageDir 'vntcrustdesk.msi'
 $bootstrapScriptDest = Join-Path $stageDir 'bootstrap_vntcrustdesk.ps1'
 $uninstallScriptDest = Join-Path $stageDir 'uninstall_vntcrustdesk.ps1'
+$installVntServiceScriptSource = Join-Path $projectDir 'scripts\install_vnt_service.ps1'
+$uninstallVntServiceScriptSource = Join-Path $projectDir 'scripts\uninstall_vnt_service.ps1'
 $innoCompiler = $null
 $requireOfficialSigning = $false
 $windowsSignPfxBase64 = ''
@@ -265,6 +267,8 @@ Require-Path -Path $localizedTextSource -Label 'Chinese installer text file'
 Require-Path -Path $vntcRustDeskMsiSource -Label 'vntcrustdesk MSI artifact'
 Require-Path -Path $bootstrapScriptSource -Label 'vntcrustdesk bootstrap script'
 Require-Path -Path $uninstallScriptSource -Label 'vntcrustdesk uninstall script'
+Require-Path -Path $installVntServiceScriptSource -Label 'VNT service install script'
+Require-Path -Path $uninstallVntServiceScriptSource -Label 'VNT service uninstall script'
 $innoCompiler = Ensure-InnoSetup
 Require-Path -Path $innoCompiler -Label 'Inno Setup compiler'
 . $versionUtils
@@ -416,10 +420,12 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install_vnt_service.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\bootstrap_vntcrustdesk.ps1"" -AppDir ""{app}"" -MsiPath ""{app}\remote_assist\artifacts\vntcrustdesk.msi"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "{app}\{#MyAppExeName}"; Description: "$launchAfterInstallDescription"; Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
+Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall_vnt_service.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\uninstall_vntcrustdesk.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 
 [UninstallDelete]

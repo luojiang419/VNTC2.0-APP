@@ -8,6 +8,7 @@ set "VERSION_FILE=%PROJECT_DIR%\scripts\build_version.txt"
 set "RELEASE_DIR=%PROJECT_DIR%\build\windows\x64\runner\Release"
 set "DIST_DIR=%PROJECT_DIR%\dist"
 set "OUTPUT_DIR=%PROJECT_DIR%\output"
+set "VNT_SERVICE_EXE=%PROJECT_DIR%\rust\target\release\vnt_service.exe"
 set "LAUNCHER_EXE=%PROJECT_DIR%\windows_launcher\vnt_app.exe"
 
 if "%FLUTTER_BIN%"=="" if exist "D:\APPdata\flutter\bin\flutter.bat" set "FLUTTER_BIN=D:\APPdata\flutter\bin\flutter.bat"
@@ -82,6 +83,13 @@ if not exist "%RELEASE_DIR%\dlls\amd64\wintun.dll" (
 )
 
 copy /Y "%RELEASE_DIR%\dlls\amd64\wintun.dll" "%RELEASE_DIR%\wintun.dll" >nul
+if errorlevel 1 exit /b 1
+
+if not exist "%VNT_SERVICE_EXE%" (
+  echo [ERROR] VNT core service missing: %VNT_SERVICE_EXE%
+  exit /b 1
+)
+copy /Y "%VNT_SERVICE_EXE%" "%RELEASE_DIR%\vnt_service.exe" >nul
 if errorlevel 1 exit /b 1
 
 copy /Y "%PROJECT_DIR%\scripts\diagnose_portable_launch.ps1" "%RELEASE_DIR%\diagnose_portable_launch.ps1" >nul

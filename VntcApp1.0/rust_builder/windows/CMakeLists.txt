@@ -11,6 +11,7 @@ project(${PROJECT_NAME} LANGUAGES CXX)
 set(RUST_MANIFEST_DIR "${CMAKE_CURRENT_LIST_DIR}/../../../../../../rust")
 set(RUST_RELEASE_DIR "${RUST_MANIFEST_DIR}/target/release")
 set(RUST_OUTPUT_DLL "${CMAKE_CURRENT_BINARY_DIR}/Release/rust_lib_vnt_app.dll")
+set(RUST_SERVICE_EXE "${RUST_RELEASE_DIR}/vnt_service.exe")
 
 file(GLOB_RECURSE RUST_SOURCE_FILES
   "${RUST_MANIFEST_DIR}/src/*.rs"
@@ -21,13 +22,16 @@ file(GLOB_RECURSE RUST_SOURCE_FILES
 )
 
 add_custom_command(
-  OUTPUT "${RUST_OUTPUT_DLL}"
+  OUTPUT "${RUST_OUTPUT_DLL}" "${RUST_SERVICE_EXE}"
   COMMAND "${CMAKE_COMMAND}" -E env
           "CARGO_NET_GIT_FETCH_WITH_CLI=true"
           cargo.exe
           build
           --manifest-path "${RUST_MANIFEST_DIR}/Cargo.toml"
           --release
+          --features windows-service-host
+          --lib
+          --bin vnt_service
   COMMAND "${CMAKE_COMMAND}" -E make_directory "${CMAKE_CURRENT_BINARY_DIR}/Release"
   COMMAND "${CMAKE_COMMAND}" -E copy_if_different
           "${RUST_RELEASE_DIR}/rust_lib_vnt_app.dll"
@@ -37,7 +41,7 @@ add_custom_command(
   VERBATIM
 )
 
-add_custom_target(${PROJECT_NAME}_build ALL DEPENDS "${RUST_OUTPUT_DLL}")
+add_custom_target(${PROJECT_NAME}_build ALL DEPENDS "${RUST_OUTPUT_DLL}" "${RUST_SERVICE_EXE}")
 
 # List of absolute paths to libraries that should be bundled with the plugin.
 # This list could contain prebuilt libraries, or libraries created by an
