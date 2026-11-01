@@ -1,8 +1,12 @@
 /* OpenWrt 使用静态布局：无动画、阴影、模糊、渐变和图表。 */
+:root[data-platform="openwrt"] { --background: #282828; }
+:root[data-platform="openwrt"][data-theme="dark"] { --surface: #333333; --surface-soft: #3b3b3b; --surface-hover: #434343; --nav-background: #282828; --text: #f1f1f1; --text-secondary: #bbbbbb; --border: #4b4b4b; }
+@media (prefers-color-scheme: dark) { :root[data-platform="openwrt"][data-theme="system"] { --surface: #333333; --surface-soft: #3b3b3b; --surface-hover: #434343; --text: #f1f1f1; --text-secondary: #bbbbbb; --border: #4b4b4b; } }
 * { box-sizing: border-box; }
 *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 html { min-width: 320px; }
-body { margin: 0; color: var(--text); background: var(--background); font: 14px/1.55 system-ui, "Microsoft YaHei", sans-serif; }
+body { margin: 0; color: #f1f1f1; background: var(--background); font: 14px/1.55 system-ui, "Microsoft YaHei", sans-serif; }
+.panel,.metric-card,.modal,.auth-card { color: var(--text); }
 [hidden] { display: none !important; }
 button, input, select, textarea { font: inherit; }
 a { color: var(--accent); text-decoration: none; }
@@ -16,14 +20,16 @@ small, .subtle, dt, .panel-header p, .section-header p, .page-kicker, .toggle-co
 .side-navigation { display: flex; flex-wrap: wrap; align-items: center; gap: 24px; padding: 18px 0; border-bottom: 1px solid var(--border); }
 .brand { display: flex; align-items: baseline; gap: 8px; color: var(--text); }
 .brand-copy { display: flex; align-items: baseline; gap: 8px; }.brand-copy strong { font-size: 18px; letter-spacing: .04em; }
+.brand-copy small,.status-uptime { color: #bbbbbb !important; }
 .brand-mark, .nav-icon, .nav-footer, .bottom-navigation { display: none; }
 .nav-list { display: flex; flex-wrap: wrap; gap: 4px; }
-.nav-item { padding: 6px 12px; border-radius: 6px; color: var(--text-secondary); font-size: 13px; }
+.nav-item { padding: 6px 12px; border-radius: 6px; color: #cccccc; font-size: 13px; }
 .nav-item.active { color: var(--accent); background: var(--surface-hover); font-weight: 650; }
-.nav-item:hover { background: var(--surface-soft); }
+.nav-item:hover { background: var(--surface-soft); color: var(--accent); }
 .main-content { padding-top: 20px; }.topbar,.topbar-actions,.actions,.panel-header,.section-header,.total-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
 .topbar { margin-bottom: 24px; }.topbar-actions,.actions { justify-content: flex-end; flex-wrap: wrap; }
 .section-header { margin-bottom: 16px; }.section-header p { margin-top: 5px; }
+.topbar,.section-header,.brand { color: #f1f1f1; }.section-header p { color: #bbbbbb; }
 .panel,.metric-card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; padding: 20px; }
 .panel + .panel { margin-top: 16px; }.panel-header { margin-bottom: 16px; }.panel-header p { margin-top: 4px; }
 .dashboard-hero { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }.dashboard-hero > .panel { margin: 0; }
