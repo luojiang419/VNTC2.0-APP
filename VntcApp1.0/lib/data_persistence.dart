@@ -8,6 +8,7 @@ import 'config_manager.dart';
 import 'package:synchronized/synchronized.dart';
 import 'window_close_behavior.dart';
 import 'vnt/virtual_network_adapter_manager.dart';
+import 'services/vnt_service_client.dart';
 
 class DataPersistence {
   static const String dataKey = 'data-key';
@@ -25,6 +26,7 @@ class DataPersistence {
     'is-close-app',
   };
   static final Lock _dataLock = Lock();
+  static final VntServiceClient _vntServiceClient = VntServiceClient();
 
   ConfigManager? _configManager;
 
@@ -50,6 +52,7 @@ class DataPersistence {
 
   Future<void> saveData(List<NetworkConfig> configs) async {
     await _dataLock.synchronized(() => _saveDataUnlocked(configs));
+    await synchronizeWindowsServiceConfiguration();
   }
 
   Future<void> _saveDataUnlocked(List<NetworkConfig> configs) async {
@@ -354,6 +357,7 @@ class DataPersistence {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setBool('is-auto-connect', autoConnect);
     }
+    await synchronizeWindowsServiceConfiguration();
   }
 
   Future<String?> loadDefaultKey() async {
@@ -374,6 +378,45 @@ class DataPersistence {
       final prefs = await SharedPreferences.getInstance();
       await prefs.setString('default-key', defaultKey);
     }
+    await synchronizeWindowsServiceConfiguration();
+  }
+
+  Future<bool> synchronizeWindowsServiceConfiguration() async {
+    if (!Platform.isWindows) {
+      return false;
+    }
+    try {
+      if (!await _vntServiceClient.isAvailable()) {
+        return false;
+      }
+      final configs = await loadData();
+      final autoConnect = await loadAutoConnect() ?? false;
+      final defaultConfigKey = await loadDefaultKey() ?? '';
+      await _vntServiceClient.replaceConfiguration(
+        configs: configs,
+        autoConnect: autoConnect,
+        defaultConfigKey: defaultConfigKey,
+      );
+      return true;
+    } catch (error) {
+      debugPrint('同步 Windows 系统服务配置失败: $error');
+      return false;
+    }
+  }
+
+  Future<bool> setWindowsServiceConnectionPreference({
+    required String defaultConfigKey,
+    required bool autoConnect,
+  }) async {
+    if (!Platform.isWindows) {
+      return false;
+    }
+    final configManager = await _getConfigManager();
+    await configManager.setValues(<String, dynamic>{
+      'default-key': defaultConfigKey,
+      'is-auto-connect': autoConnect,
+    });
+    return synchronizeWindowsServiceConfiguration();
   }
 
   Future<void> clear() async {

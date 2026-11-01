@@ -5,6 +5,7 @@ import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:uuid/uuid.dart';
+import 'package:vnt_app/network_config.dart';
 
 const String vntServicePipeName = r'\\.\pipe\VntCoreService.v1';
 const int _protocolVersion = 1;
@@ -63,15 +64,22 @@ class VntServiceClient {
   VntServiceClient({Uuid? uuid}) : _uuid = uuid ?? const Uuid();
 
   final Uuid _uuid;
+  DateTime? _unavailableUntil;
 
   Future<bool> isAvailable() async {
     if (!Platform.isWindows) {
       return false;
     }
+    final unavailableUntil = _unavailableUntil;
+    if (unavailableUntil != null && DateTime.now().isBefore(unavailableUntil)) {
+      return false;
+    }
     try {
-      await ping();
+      await _request('ping', waitTimeoutMs: 250);
+      _unavailableUntil = null;
       return true;
     } catch (_) {
+      _unavailableUntil = DateTime.now().add(const Duration(seconds: 10));
       return false;
     }
   }
@@ -89,7 +97,35 @@ class VntServiceClient {
     await _request('reload');
   }
 
-  Future<Map<String, dynamic>> _request(String command) async {
+  Future<void> replaceConfiguration({
+    required List<NetworkConfig> configs,
+    required bool autoConnect,
+    required String defaultConfigKey,
+  }) async {
+    final timestamp = DateTime.now().toUtc().toIso8601String();
+    await _request(
+      'replaceConfiguration',
+      payload: <String, dynamic>{
+        'settings': <String, dynamic>{
+          'schemaVersion': 1,
+          'autoConnect': autoConnect,
+          'defaultConfigKey': defaultConfigKey.trim(),
+          'updatedAt': timestamp,
+        },
+        'networks': <String, dynamic>{
+          'schemaVersion': 1,
+          'updatedAt': timestamp,
+          'configs': configs.map((config) => config.toJson()).toList(),
+        },
+      },
+    );
+  }
+
+  Future<Map<String, dynamic>> _request(
+    String command, {
+    Map<String, dynamic>? payload,
+    int waitTimeoutMs = 3000,
+  }) async {
     if (!Platform.isWindows) {
       throw const VntServiceException('VNT 系统服务仅支持 Windows');
     }
@@ -97,8 +133,11 @@ class VntServiceClient {
       'version': _protocolVersion,
       'id': _uuid.v4(),
       'command': command,
+      if (payload != null) 'payload': payload,
     };
-    final response = await Isolate.run(() => _sendPipeRequestSync(request));
+    final response = await Isolate.run(
+      () => _sendPipeRequestSync(request, waitTimeoutMs),
+    );
     if (response['version'] != _protocolVersion ||
         response['id'] != request['id']) {
       throw const VntServiceException('VNT 系统服务返回了不匹配的 IPC 响应');
@@ -116,7 +155,10 @@ class VntServiceClient {
   }
 }
 
-Map<String, dynamic> _sendPipeRequestSync(Map<String, dynamic> request) {
+Map<String, dynamic> _sendPipeRequestSync(
+  Map<String, dynamic> request,
+  int waitTimeoutMs,
+) {
   final requestBytes = utf8.encode(jsonEncode(request));
   if (requestBytes.length > _maximumFrameSize) {
     throw const VntServiceException('VNT 系统服务 IPC 请求超过 64 KiB');
@@ -125,7 +167,7 @@ Map<String, dynamic> _sendPipeRequestSync(Map<String, dynamic> request) {
   final pipeName = vntServicePipeName.toNativeUtf16();
   Pointer<Void> handle = nullptr;
   try {
-    if (_waitNamedPipe(pipeName, 3000) == 0) {
+    if (_waitNamedPipe(pipeName, waitTimeoutMs) == 0) {
       throw VntServiceException(
         '等待 VNT 系统服务命名管道超时',
         windowsError: _getLastError(),

@@ -9,6 +9,8 @@ import 'package:flutter/services.dart';
 import 'package:vnt_app/network_config.dart';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/utils/ip_utils.dart';
+import 'package:vnt_app/data_persistence.dart';
+import 'package:vnt_app/services/vnt_service_client.dart';
 
 /// macOS 权限管理器
 class MacOSPrivilegeManager {
@@ -349,6 +351,61 @@ class VntManager {
   // 记录主动断开连接的配置key，避免显示"服务已停止"提示
   final Set<String> _manualDisconnecting = {};
   final List<VoidCallback> _connectionListeners = <VoidCallback>[];
+  final VntServiceClient _serviceClient = VntServiceClient();
+  Timer? _servicePollTimer;
+  VntServiceStatus? _serviceStatus;
+  bool _systemServiceModeActive = false;
+
+  bool get systemServiceModeActive => _systemServiceModeActive;
+  VntServiceStatus? get serviceStatus => _serviceStatus;
+
+  Future<bool> initializeSystemServiceMode() async {
+    if (!Platform.isWindows || !await _serviceClient.isAvailable()) {
+      return false;
+    }
+    _systemServiceModeActive = true;
+    await refreshSystemServiceStatus();
+    _servicePollTimer ??= Timer.periodic(
+      const Duration(seconds: 2),
+      (_) => unawaited(refreshSystemServiceStatus()),
+    );
+    return true;
+  }
+
+  Future<void> refreshSystemServiceStatus() async {
+    if (!_systemServiceModeActive) {
+      return;
+    }
+    try {
+      final next = await _serviceClient.getStatus();
+      final previous = _serviceStatus;
+      _serviceStatus = next;
+      if (previous?.connectionState != next.connectionState ||
+          previous?.configKey != next.configKey ||
+          previous?.virtualIp != next.virtualIp ||
+          previous?.lastError != next.lastError) {
+        _notifyConnectionsChanged();
+      }
+    } catch (error) {
+      debugPrint('读取 VNT 系统服务状态失败: $error');
+    }
+  }
+
+  Future<void> connectWithSystemService(NetworkConfig config) async {
+    if (!_systemServiceModeActive) {
+      throw StateError('VNT 系统服务未运行');
+    }
+    final synchronized =
+        await DataPersistence().setWindowsServiceConnectionPreference(
+      defaultConfigKey: config.itemKey,
+      autoConnect: true,
+    );
+    if (!synchronized) {
+      throw StateError('系统服务配置同步失败');
+    }
+    await _serviceClient.reload();
+    await refreshSystemServiceStatus();
+  }
 
   // 判断设备是否在线 - 不区分大小写，去掉空格和换行
   bool _isDeviceOnline(String status) {
@@ -393,6 +450,11 @@ class VntManager {
   }
 
   Future<VntBox> create(NetworkConfig config, SendPort uiCall) {
+    if (_systemServiceModeActive) {
+      return Future<VntBox>.error(
+        StateError('系统服务模式不允许创建第二套本地 VNT 连接'),
+      );
+    }
     var key = config.itemKey;
     final existing = get(key);
     if (existing != null) {
@@ -505,6 +567,15 @@ class VntManager {
   }
 
   Future<void> remove(String key) async {
+    if (_systemServiceModeActive && _serviceStatus?.configKey == key) {
+      await DataPersistence().setWindowsServiceConnectionPreference(
+        defaultConfigKey: key,
+        autoConnect: false,
+      );
+      await _serviceClient.reload();
+      await refreshSystemServiceStatus();
+      return;
+    }
     final hadPendingCreate = _pendingCreates.containsKey(key);
     if (hadPendingCreate) {
       _connectionGate.cancel(key);
@@ -523,6 +594,15 @@ class VntManager {
   }
 
   Future<void> removeAll() async {
+    if (_systemServiceModeActive) {
+      await DataPersistence().setWindowsServiceConnectionPreference(
+        defaultConfigKey: _serviceStatus?.configKey ?? '',
+        autoConnect: false,
+      );
+      await _serviceClient.reload();
+      await refreshSystemServiceStatus();
+      return;
+    }
     for (final key in _pendingCreates.keys.toList()) {
       _connectionGate.cancel(key);
     }
@@ -538,19 +618,34 @@ class VntManager {
   }
 
   bool hasConnectionItem(String key) {
+    if (_systemServiceModeActive) {
+      return _serviceStatus?.isConnected == true &&
+          _serviceStatus?.configKey == key;
+    }
     var vntBox = map[key];
     return vntBox != null && !vntBox.isClosed();
   }
 
   bool isConnecting() {
+    if (_systemServiceModeActive) {
+      return _serviceStatus?.connectionState == 'connecting' ||
+          _serviceStatus?.connectionState == 'retrying' ||
+          _serviceStatus?.connectionState == 'reloading';
+    }
     return connecting;
   }
 
   bool isConnectingItem(String key) {
+    if (_systemServiceModeActive) {
+      return _serviceStatus?.configKey == key && isConnecting();
+    }
     return _connectionGate.isCreatingKey(key);
   }
 
   bool hasConnection() {
+    if (_systemServiceModeActive) {
+      return _serviceStatus?.isConnected == true;
+    }
     if (map.isEmpty) {
       return false;
     }
@@ -559,6 +654,9 @@ class VntManager {
   }
 
   int size() {
+    if (_systemServiceModeActive) {
+      return hasConnection() ? 1 : 0;
+    }
     _removeClosedConnections();
     return map.length;
   }
@@ -577,6 +675,9 @@ class VntManager {
   }
 
   bool supportMultiple() {
+    if (_systemServiceModeActive) {
+      return false;
+    }
     if (Platform.isAndroid) {
       return supportsMultipleForPlatform(TargetPlatform.android);
     }

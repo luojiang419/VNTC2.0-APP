@@ -320,6 +320,10 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
   Future<void> _autoConnect() async {
     final dataPersistence = DataPersistence();
 
+    if (vntManager.systemServiceModeActive) {
+      return;
+    }
+
     // 检查是否从磁贴启动（仅 Android）
     bool isTileStart = false;
     if (Platform.isAndroid) {
@@ -547,6 +551,23 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         config,
         showImmediateResult: showImmediateResult,
       );
+    }
+
+    if (vntManager.systemServiceModeActive) {
+      try {
+        await vntManager.connectWithSystemService(config);
+        final message = '[${config.configName}] 已交由系统服务连接';
+        if (mounted && showImmediateResult) {
+          showTopToast(context, message, isSuccess: true);
+        }
+        return DashboardConfigActionResult.success(message);
+      } catch (error) {
+        final message = '[${config.configName}] 系统服务连接失败：$error';
+        if (mounted && showImmediateResult) {
+          showTopToast(context, message, isSuccess: false);
+        }
+        return DashboardConfigActionResult.failure(message);
+      }
     }
 
     // 其他平台使用Rust直接连接

@@ -712,6 +712,24 @@ class _ConfigListPageState extends State<ConfigListPage> {
       return;
     }
 
+    if (vntManager.systemServiceModeActive) {
+      try {
+        await vntManager.connectWithSystemService(config);
+        if (!mounted) return;
+        setState(() {});
+        widget.onConfigSelected?.call(config);
+        showTopToast(context, '[${config.configName}] 已交由系统服务连接',
+            isSuccess: true);
+        await SystemTrayManager().updateMenu();
+        await SystemTrayManager().updateTooltip();
+      } catch (error) {
+        if (mounted) {
+          showTopToast(context, '系统服务连接失败: $error', isSuccess: false);
+        }
+      }
+      return;
+    }
+
     // 其他平台使用Rust直接连接
     // 检查是否已有连接
     if (vntManager.hasConnection()) {

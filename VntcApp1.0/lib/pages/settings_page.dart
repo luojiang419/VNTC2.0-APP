@@ -645,14 +645,45 @@ class _SettingsPageState extends State<SettingsPage> {
       ),
       child: Column(
         children: [
-          // 开机自启（Windows 和 Android）
+          // 系统服务自动连接（Windows 安装版）
+          if (Platform.isWindows && vntManager.systemServiceModeActive) ...[
+            _buildSettingItem(
+              isDark,
+              icon: Icons.security_outlined,
+              title: '系统启动时保持 VNT 在线',
+              subtitle: '无需用户登录，由 Windows 系统服务连接默认配置',
+              trailing: _buildGlowSwitch(
+                value: _autoConnect,
+                onChanged: (value) async {
+                  if (value && _defaultKey.isEmpty) {
+                    if (mounted) {
+                      showTopToast(context, '请先设置默认配置', isSuccess: false);
+                    }
+                    return;
+                  }
+                  await _dataPersistence.saveAutoConnect(value);
+                  await vntManager.refreshSystemServiceStatus();
+                  if (mounted) {
+                    setState(() => _autoConnect = value);
+                    showTopToast(
+                      context,
+                      value ? '系统启动自动连接已启用' : '系统启动自动连接已关闭',
+                      isSuccess: true,
+                    );
+                  }
+                },
+              ),
+            ),
+            _buildDivider(isDark),
+          ],
+          // 登录会话自启（Windows 和 Linux）/ 开机广播（Android）
           if (Platform.isWindows || Platform.isAndroid || Platform.isLinux) ...[
             _buildSettingItem(
               isDark,
               icon: Icons.play_circle_outline,
-              title: '开机自启',
+              title: Platform.isWindows ? '登录后启动托盘程序' : '开机自启',
               subtitle: Platform.isWindows
-                  ? '系统启动时自动运行应用'
+                  ? '用户登录 Windows 后启动界面和系统托盘'
                   : Platform.isLinux
                       ? '写入 ~/.config/autostart 实现开机自启'
                       : '下次开机时自动启动应用',
@@ -730,7 +761,8 @@ class _SettingsPageState extends State<SettingsPage> {
               _buildDivider(isDark),
             ],
           ],
-          if (widget.isProfessionalMode) ...[
+          if (widget.isProfessionalMode &&
+              !(Platform.isWindows && vntManager.systemServiceModeActive)) ...[
             _buildSettingItem(
               isDark,
               icon: Icons.autorenew,

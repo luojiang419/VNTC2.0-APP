@@ -22,6 +22,7 @@ use windows_sys::Win32::System::Pipes::{
     PIPE_REJECT_REMOTE_CLIENTS, PIPE_TYPE_MESSAGE, PIPE_WAIT,
 };
 
+use super::config::replace_configuration;
 use super::runtime::{ServiceSignals, ServiceStatusStore};
 
 pub const PIPE_NAME: &str = r"\\.\pipe\VntCoreService.v1";
@@ -36,6 +37,8 @@ struct IpcRequest {
     version: u32,
     id: String,
     command: String,
+    #[serde(default)]
+    payload: Option<Value>,
 }
 
 #[derive(Serialize)]
@@ -61,7 +64,7 @@ pub(crate) fn run_test_server(
     signals: ServiceSignals,
     status: ServiceStatusStore,
 ) -> anyhow::Result<()> {
-    run_server_with_limit(root, signals, status, Some(3))
+    run_server_with_limit(root, signals, status, Some(4))
 }
 
 fn run_server_with_limit(
@@ -78,7 +81,7 @@ fn run_server_with_limit(
             ConnectNamedPipe(pipe, null_mut()) != 0 || GetLastError() == ERROR_PIPE_CONNECTED
         };
         if connected {
-            handle_client(pipe, &signals, &status);
+            handle_client(pipe, root, &signals, &status);
             request_count += 1;
             unsafe {
                 FlushFileBuffers(pipe);
@@ -138,7 +141,7 @@ fn create_pipe() -> anyhow::Result<HANDLE> {
     Ok(pipe)
 }
 
-fn handle_client(pipe: HANDLE, signals: &ServiceSignals, status: &ServiceStatusStore) {
+fn handle_client(pipe: HANDLE, root: &Path, signals: &ServiceSignals, status: &ServiceStatusStore) {
     let mut buffer = vec![0_u8; MAX_FRAME_SIZE];
     let mut bytes_read = 0_u32;
     let read_ok = unsafe {
@@ -154,7 +157,7 @@ fn handle_client(pipe: HANDLE, signals: &ServiceSignals, status: &ServiceStatusS
         return;
     }
     buffer.truncate(bytes_read as usize);
-    let response = process_request(&buffer, signals, status);
+    let response = process_request(&buffer, root, signals, status);
     let encoded = serde_json::to_vec(&response).unwrap_or_else(|_| {
         r#"{"version":1,"id":"","ok":false,"error":"响应序列化失败"}"#
             .as_bytes()
@@ -177,6 +180,7 @@ fn handle_client(pipe: HANDLE, signals: &ServiceSignals, status: &ServiceStatusS
 
 fn process_request(
     payload: &[u8],
+    root: &Path,
     signals: &ServiceSignals,
     status: &ServiceStatusStore,
 ) -> IpcResponse {
@@ -202,6 +206,18 @@ fn process_request(
         "reload" => {
             signals.reload_requested.store(true, Ordering::SeqCst);
             success(&request.id, json!({"accepted": true}))
+        }
+        "replaceConfiguration" => {
+            let Some(payload) = request.payload.as_ref() else {
+                return failure(&request.id, "缺少配置 payload".to_string());
+            };
+            match replace_configuration(root, payload) {
+                Ok(revision) => {
+                    signals.reload_requested.store(true, Ordering::SeqCst);
+                    success(&request.id, json!({"accepted": true, "revision": revision}))
+                }
+                Err(error) => failure(&request.id, format!("配置校验失败: {error:#}")),
+            }
         }
         _ => failure(&request.id, "不支持的 IPC 命令".to_string()),
     }
@@ -242,14 +258,17 @@ mod tests {
     fn protocol_rejects_unknown_versions_and_commands() {
         let status = ServiceStatusStore::new(std::env::temp_dir().join("unused-state.json"));
         let signals = ServiceSignals::default();
+        let root = std::env::temp_dir();
         let version = process_request(
             br#"{"version":2,"id":"a","command":"ping"}"#,
+            &root,
             &signals,
             &status,
         );
         assert!(!version.ok);
         let command = process_request(
             br#"{"version":1,"id":"a","command":"execute"}"#,
+            &root,
             &signals,
             &status,
         );
@@ -260,8 +279,10 @@ mod tests {
     fn reload_only_sets_the_bounded_service_signal() {
         let status = ServiceStatusStore::new(std::env::temp_dir().join("unused-state.json"));
         let signals = ServiceSignals::default();
+        let root = std::env::temp_dir();
         let response = process_request(
             br#"{"version":1,"id":"reload-1","command":"reload"}"#,
+            &root,
             &signals,
             &status,
         );

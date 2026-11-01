@@ -481,6 +481,25 @@ class _DashboardPageState extends State<DashboardPage> {
     }
     activeConnectionCount = activeEntries.length;
 
+    final serviceStatus = vntManager.serviceStatus;
+    if (activeEntries.isEmpty && serviceStatus?.isConnected == true) {
+      activeConnectionCount = 1;
+      virtualIp = serviceStatus!.virtualIp;
+      relayServer = serviceStatus.connectTarget;
+      final serviceConfig = _configs
+          .where((config) => config.itemKey == serviceStatus.configKey)
+          .firstOrNull;
+      if (serviceConfig != null) {
+        configName = serviceConfig.configName;
+        deviceName = serviceConfig.deviceName;
+        protocol = serviceConfig.protocol.toUpperCase();
+        isEncrypted = serviceConfig.groupPassword.isNotEmpty;
+        encryptionAlgorithm =
+            isEncrypted ? serviceConfig.encryptionAlgorithm.toUpperCase() : '';
+        _isVirtualIpAutoAssigned = serviceConfig.virtualIPv4.isEmpty;
+      }
+    }
+
     for (final entry in activeEntries) {
       final vntBox = entry.value;
       final devices = vntBox.peerDeviceList();

@@ -211,6 +211,12 @@ Future<void> main(List<String> args) async {
     _writeBootTrace('before ConfigManager.init');
     await ConfigManager().init();
     _writeBootTrace('after ConfigManager.init');
+    _writeBootTrace('before synchronizeWindowsServiceConfiguration');
+    await DataPersistence().synchronizeWindowsServiceConfiguration();
+    _writeBootTrace('after synchronizeWindowsServiceConfiguration');
+    _writeBootTrace('before initializeSystemServiceMode');
+    await vntManager.initializeSystemServiceMode();
+    _writeBootTrace('after initializeSystemServiceMode');
   }
 
   // 初始化日志系统，所有平台统一使用log4rs

@@ -6,7 +6,7 @@ use std::str::FromStr;
 
 use anyhow::{anyhow, bail, Context};
 use serde::Deserialize;
-use serde_json::json;
+use serde_json::{json, Value};
 
 use crate::api::vnt_api::VntConfig;
 
@@ -314,6 +314,62 @@ pub fn load_snapshot(root: &Path) -> anyhow::Result<Option<ServiceConfigurationS
         configs: networks.configs,
         networks_updated_at: networks.updated_at,
     }))
+}
+
+pub fn replace_configuration(root: &Path, payload: &Value) -> anyhow::Result<String> {
+    let settings_value = payload
+        .get("settings")
+        .context("replaceConfiguration 缺少 settings")?;
+    let networks_value = payload
+        .get("networks")
+        .context("replaceConfiguration 缺少 networks")?;
+    let settings: ServiceSettings =
+        serde_json::from_value(settings_value.clone()).context("无效的服务设置")?;
+    let networks: NetworksFile =
+        serde_json::from_value(networks_value.clone()).context("无效的网络配置")?;
+    validate_documents(&settings, &networks)?;
+
+    let config_dir = root.join("config");
+    fs::create_dir_all(&config_dir).context("创建系统服务配置目录失败")?;
+    write_json_atomically(&config_dir.join("networks.json"), networks_value)?;
+    write_json_atomically(&config_dir.join("service.json"), settings_value)?;
+    Ok(format!("{}:{}", settings.updated_at, networks.updated_at))
+}
+
+fn validate_documents(settings: &ServiceSettings, networks: &NetworksFile) -> anyhow::Result<()> {
+    if settings.schema_version != SETTINGS_SCHEMA_VERSION {
+        bail!("不支持的 service.json 版本: {}", settings.schema_version);
+    }
+    if networks.schema_version != NETWORKS_SCHEMA_VERSION {
+        bail!("不支持的 networks.json 版本: {}", networks.schema_version);
+    }
+    let mut keys = std::collections::HashSet::new();
+    for config in &networks.configs {
+        if config.item_key.trim().is_empty() {
+            bail!("VNT 网络配置 itemKey 不能为空");
+        }
+        if !keys.insert(config.item_key.as_str()) {
+            bail!("VNT 网络配置 itemKey 重复: {}", config.item_key);
+        }
+        let _ = config.to_vnt_config()?;
+    }
+    if settings.auto_connect {
+        let key = settings.default_config_key.trim();
+        if key.is_empty() || !keys.contains(key) {
+            bail!("启用系统自动连接前必须设置有效默认配置");
+        }
+    }
+    Ok(())
+}
+
+fn write_json_atomically(path: &Path, value: &Value) -> anyhow::Result<()> {
+    let temporary = path.with_extension("json.tmp");
+    fs::write(&temporary, serde_json::to_vec_pretty(value)?)?;
+    if fs::rename(&temporary, path).is_err() {
+        fs::copy(&temporary, path)?;
+        let _ = fs::remove_file(temporary);
+    }
+    Ok(())
 }
 
 fn first_non_empty<'a>(first: &'a str, second: &'a str) -> &'a str {
