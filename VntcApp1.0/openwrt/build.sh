@@ -17,4 +17,4 @@ fi
 package_args=()
 [[ -z "${4:-}" ]] || package_args=(--package-arch "$4")
 python3 "$project_dir/openwrt/package.py" --binary "$binary" --version "$version" --arch "$arch" \
-    --output "${2:-$project_dir/release/openwrt}" "${package_args[@]}"
+    --revision "${VNTC_PACKAGE_REVISION:-2}" --output "${2:-$project_dir/release/openwrt}" "${package_args[@]}"

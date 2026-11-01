@@ -9,11 +9,13 @@ else
         /etc/init.d/vntc stop
         /etc/init.d/vntc disable
     fi
+    [ ! -x /usr/libexec/vntc-gateway ] || /usr/libexec/vntc-gateway remove
     [ ! -x /usr/libexec/vntc-firewall ] || /usr/libexec/vntc-firewall remove
-    rm -f /usr/bin/vntc-openwrt /etc/init.d/vntc /usr/libexec/vntc-setup /usr/libexec/vntc-firewall /lib/upgrade/keep.d/vntc
+    rm -f /usr/bin/vntc-openwrt /etc/init.d/vntc /usr/libexec/vntc-setup /usr/libexec/vntc-firewall /usr/libexec/vntc-gateway /lib/upgrade/keep.d/vntc
 fi
 if [ "${1:-}" = '--purge' ]; then
     rm -f /etc/vntc/config.json /etc/vntc/profiles.json /etc/vntc/settings.json
+    rm -f /etc/config/vntc_gateway
     rmdir /etc/vntc 2>/dev/null || true
 fi
 echo '卸载完成（默认保留 /etc/vntc 中的配置）。'

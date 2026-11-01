@@ -58,3 +58,17 @@ HTTP 和嵌入资源检查不代表浏览器视觉验收；QEMU 测试不代表�
 `windows_temp.py start|stop|status [--deployment 路径]` 管理隔离的 Windows 临时版，保留配置。启动会重新读取 WSL NAT 地址并重建专用 UDP 转接，默认连接 ARM64 TCP；停止仅操作经路径核对的临时 EXE、命令行核对的转接及精确防火墙组。`udp_relay.py` 只转接本地 WSL NAT 测试所需的 UDP 加密报文，限制来源，不用于公网通用中继。运行这些入口前须保持既有 ARM VM 在线，脚本不会重建 VM。
 
 当前 Windows 控制台：http://127.0.0.1:18083/。本机交付目录有 Start/Stop/Status.cmd、`访问说明.md`、配置和报告，不加入 Git。临时版使用原生 Windows VNT Core + WebUI，与原正式 Flutter 客户端隔离运行。
+
+## 两地 LAN、监控和网关生命周期验收
+
+网关配置与实际安装命令见 `VntcApp1.0/openwrt/README.md`。新构建默认包修订号为 2，正式应用版本不变；可通过 VNTC_PACKAGE_REVISION 覆盖。当前网关产物使用 `dist/openwrt-gateway/`，不覆盖旧验收包。
+
+`verify_gateway.py --arch aarch64|armv7` 在 Windows 宿主复用上述固定端口、VM 目录和 SSH 密钥，需要先在测试 guest 安装同内核的 `ip-full kmod-veth`。这些仅用于验收，不是物理路由器插件的新运行依赖。测试给 A/B 分别创建 192.168.50.0/24、192.168.60.0/24 的独立网络命名空间，命名空间中没有 VNT，使用本地路由器作为默认网关。验证双向本地访问、虚拟 IP 端口、远端 LAN IP、HTTP SHA-256、UDP、RTSP/RTP H.264、规则关闭/冲突、路由冲突及真实客户机重启。成功后保留配置和演示服务。
+
+先用 `python tools/openwrt/prepare_gateway_video.py --ffmpeg /path/to/ffmpeg` 生成规范 Annex B 测试片（已存在时不会覆盖）。在 WSL 用 Zig 将 `gateway_probe.c`、`transfer_http.c` 分别编译为 `dist/openwrt-gateway/{arch}/gateway-probe`、`gateway-http`：`zig cc -target aarch64-linux-musl -static -Os -Wall -Wextra -Werror 源文件 -o 目标文件`；ARMv7 替换为 `arm-linux-musleabihf`。
+
+测试文件源每台约 64KiB/s；文件阶段后分别测试两种双向视频通路，同时持续 UDP 回显与大包。首轮未限速的拥塞/丢包记录保留，不作为通过。`--skip-deploy` 仅重测已部署环境；只有两组数据面已成功且包 SHA-256 未变，才允许 `--finish-only` 续测边界与重启，保留原通过结果。
+
+数据面成功后运行 `verify_gateway_lifecycle.py --arch ...`，验证同名非受管规则不被覆盖、IPK/离线卸载与离线重装、配置保留和路由恢复。最后运行 `verify_gateway_windows.py --ffmpeg 本机FFmpeg路径`，由原生 Windows 临时客户端依次访问两套架构的 TCP/QUIC 端口映射，并对实际 RTSP 流解码的 200 帧逐帧比较 SHA-256。所有凭据、测试视频、报告、辅助二进制仅保存在忽略目录。
+
+最后执行 `python tools/openwrt/collect_gateway.py`，核对当前包与报告 SHA-256、离线内部文件、IPK/离线内容和实际 guest 安装文件；附上未改变的 ARM 服务端包，生成 manifest.json 和各架构 SHA256SUMS。x86_64 的验证范围单独标记，不将编译校验当作本轮网关 VM 验收。

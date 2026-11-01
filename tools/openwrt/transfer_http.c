@@ -24,7 +24,9 @@ static int send_all(int fd, const char *buffer, size_t size) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) return 2;
+    if (argc != 3 && argc != 4) return 2;
+    unsigned int delay = argc == 4 ? (unsigned int)strtoul(argv[3], NULL, 10) : 0;
+    if (delay > 1000000) return 2;
     char *end = NULL;
     long port = strtol(argv[1], &end, 10);
     if (!end || *end || port < 1 || port > 65535) return 2;
@@ -65,8 +67,10 @@ int main(int argc, char **argv) {
                 (long long)info.st_size);
             if (send_all(client, header, (size_t)length) == 0) {
                 ssize_t got;
-                while ((got = read(file, buffer, sizeof(buffer))) > 0)
+                while ((got = read(file, buffer, sizeof(buffer))) > 0) {
                     if (send_all(client, buffer, (size_t)got)) break;
+                    if (delay) usleep(delay);
+                }
             }
         }
         if (file >= 0) close(file);

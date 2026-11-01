@@ -8,6 +8,7 @@ start_service() {
     [ -c /dev/net/tun ] || { logger -t vntc '缺少 /dev/net/tun，请安装 kmod-tun'; return 1; }
     /usr/bin/vntc-openwrt --config /etc/vntc/config.json --check-config >/dev/null || return 1
     /usr/libexec/vntc-firewall install || return 1
+    /usr/libexec/vntc-gateway apply || return 1
     procd_open_instance
     procd_set_param command /usr/bin/vntc-openwrt --config /etc/vntc/config.json
     procd_set_param env RUST_LOG=warn TOKIO_WORKER_THREADS=1

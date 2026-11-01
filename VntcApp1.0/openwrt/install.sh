@@ -34,12 +34,14 @@ mv "$install_dir/vntc-openwrt.new" "$install_dir/vntc-openwrt"
 cp files/vntc.init /etc/init.d/vntc
 cp files/vntc-setup /usr/libexec/vntc-setup
 cp files/vntc-firewall /usr/libexec/vntc-firewall
-chmod 755 /etc/init.d/vntc /usr/libexec/vntc-setup /usr/libexec/vntc-firewall
+cp files/vntc-gateway /usr/libexec/vntc-gateway
+[ -f /etc/config/vntc_gateway ] || cp files/vntc-gateway.conf /etc/config/vntc_gateway
+chmod 755 /etc/init.d/vntc /usr/libexec/vntc-setup /usr/libexec/vntc-firewall /usr/libexec/vntc-gateway
 /usr/libexec/vntc-setup
 /usr/libexec/vntc-firewall install
 # OpenWrt sysupgrade 识别 /lib/upgrade/keep.d。
 mkdir -p /lib/upgrade/keep.d
-echo '/etc/vntc/' > /lib/upgrade/keep.d/vntc
+printf '/etc/vntc/\n/etc/config/vntc_gateway\n' > /lib/upgrade/keep.d/vntc
 /etc/init.d/vntc enable
 /etc/init.d/vntc start
 echo '安装完成；logread -e vntc 可查看运行日志。'
