@@ -96,3 +96,28 @@ ARMv7 采用 hard-float，要求 VFPv3/VFPv4，不支持没有 VFP 的 ZX279128S
 已在 Windows 宿主实际验证六个页面 HTTP 200、VNTs 登录及受保护 API、vntc running 和在线对端。四台 VM、两个 VNTs 和四个 vntc 保持运行，临时 HTTP 测试进程及 guest 测试数据已经清理。保留 WSL keepalive，管理地址依赖本机 WSL/VM 继续运行。
 
 交付目录 `dist/openwrt-arm/live/` 包含两个 live-report.json、summary.json、windows-access-check.json、cleanup-check.json。用户名、密码和管理令牌仅写入该忽略目录下的 `访问说明.md` 和两个 access.json，不进入源码提交。原始命令/串口/载荷记录位于上述 VM 目录的 `live-20261101T143721Z/`。
+
+## Windows 临时版互通验收（2026-11-01）
+
+用户要求在本机部署 Windows 临时版，验证与上述 ARM 服务端和客户端连接、传输。已用同一 VNT Core 构建 Windows x86_64 原生 EXE + WebUI，版本 `4.8.40-win-arm-test`，使用实际 Wintun，不替换已运行的正式 Flutter 客户端，不安装系统服务。隔离目录为 `dist/windows-arm-interop/`，控制台 http://127.0.0.1:18083/；凭据仅存本地 `state/config.json` 和 `访问说明.md`。
+
+Windows 虚拟 IP 为 `10.26.0.10/24`，网卡为 `VNT-App-TUN-VNT-WinARM-Test`。预置 ARM64/ARMv7 各 TCP/QUIC 共四个档案；两组网段相同，依次连接。ARM 各节点保持 relay_only，使用虚拟 IP 的真实 TCP HTTP 数据流传输。
+
+| ARM 架构 | 通道 | 双向有效载荷 | 实际持续时间 | 文件校验 | 大包 ping |
+| --- | --- | ---: | ---: | --- | --- |
+| ARM64 | TCP | 40MiB | 94.344 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARM64 | QUIC | 40MiB | 61.015 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARMv7 | TCP | 40MiB | 60.422 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARMv7 | QUIC | 40MiB | 60.453 秒 | SHA-256 全一致 | 240 包零丢失 |
+
+每组 Windows 分别与两个 ARM 对端进行 10 轮、每轮双向各 1MiB 随机文件传输，总计 160MiB、160 次文件 SHA-256 检查；同时四条方向各 60 个 1300 字节 ICMP 包，总计 960 包。Windows 原生 Rust 25 项测试通过；管理 API 确认 `windows/x86_64`、`Windows 原生进程`，七个本机管理页面 HTTP 200。没有将 HTTP 检查当作浏览器视觉验收。
+
+Windows 无法直接访问 WSL 回环 UDP，实测得到 WinError10054；增加 `tools/openwrt/udp_relay.py`，为两组 QUIC 测试提供独立转接，仅允许 Windows WSL 网关 IP，转发加密报文。TCP 仍直接连接宿主回环 23120/23220。该转接属于本地 NAT 测试环境，未更改 ARM 插件网络核心。
+
+`tools/openwrt/windows_temp.py` 提供启动、停止和状态查询；临时部署目录附 `Start.cmd`、`Stop.cmd`、`Status.cmd`。停止前通过 API 释放测试 TUN，核对 EXE 路径与 PID，仅删除该测试的精确防火墙组；WSL 转接停止前逐项核对 /proc/PID/cmdline。重启动态读取 WSL 地址，重建两组转接并默认连接 ARM64 TCP。已实际停止/重启，再分别切换 ARM64/ARMv7 QUIC，复核两个对端大包 ping 零丢失，最后切回 ARM64 TCP，保持两个对端在线。
+
+原正式客户端 `C:\Program Files\VNT App\vnt_app.exe` 保持运行；原有 `vnt-tun`（192.168.111.33/24）及 `VNT-App-TUN-cfg-10e9a9095ae0ef29`（10.10.10.3/24）未替换。临时测试 HTTP 服务和 guest 文件已在验收器 finally 中清理；运行报告、命令日志、重启复核及当前 PID 仅保存在忽略目录。
+
+交付报告为 `dist/windows-arm-interop/interop-report.json` 和 `restart-check.json`。Windows 原生构建使用 Rust 1.95/MSVC、`cargo build --release --locked --target x86_64-pc-windows-msvc`，独立 CARGO_TARGET_DIR，opt-level=s、thin LTO、单 codegen unit、panic=abort。临时版保留四套档案和配置；ARM VM 依赖 WSL 持续运行。此验收属于短时、受控负载的跨平台中继互通，未覆盖公网 P2P、真实路由器或长期压力测试。
+
+源码提交至独立分支 `codex/openwrt-arm`，当前工作区分支 `codex/windows-system-service` 同时有其他任务修改；通过独立 Git 索引与 compare-and-swap 更新任务分支，不切换工作区、不提交其他任务文件、不推送 GitHub。下一步：用户通过 Windows 管理页面确认界面及档案操作；后续物理路由器部署仍需明确机型、CPU/ABI 和可用资源。

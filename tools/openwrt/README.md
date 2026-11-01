@@ -50,3 +50,11 @@ ARMv7 固定 `virt,virtualization=on / cortex-a15`，本机 TCG 重启后的 SSH
 HTTP 和嵌入资源检查不代表浏览器视觉验收；QEMU 测试不代表具体路由器的 Wi-Fi、Flash 分区、满带宽、硬件加速或长期稳定性。无指定机型时交付通用 CPU/ABI 版本，后续仍需核对设备 `uname -m`、`opkg print-architecture`、剩余存储以及匹配内核的 kmod-tun。
 
 任务结果与产物入口见 `VntcApp1.0/openwrt/ARM适配与验证.md`。
+
+## 本机 Windows 与 ARM 互通
+
+`windows_interop.py` 在 Windows 宿主运行，复用本机已经部署的 `dist/windows-arm-interop/`、四台 ARM VM 与对应 SSH 密钥。它依次连接 ARM64/ARMv7 的 TCP/QUIC 档案，验证真实 Wintun 虚拟 IP 双向文件 SHA-256 和大包 ping。该脚本的 VM 路径和端口对应当前部署，其他机器需要调整；依赖 Python paramiko、管理员权限，不是通用 VM 启动器。
+
+`windows_temp.py start|stop|status [--deployment 路径]` 管理隔离的 Windows 临时版，保留配置。启动会重新读取 WSL NAT 地址并重建专用 UDP 转接，默认连接 ARM64 TCP；停止仅操作经路径核对的临时 EXE、命令行核对的转接及精确防火墙组。`udp_relay.py` 只转接本地 WSL NAT 测试所需的 UDP 加密报文，限制来源，不用于公网通用中继。运行这些入口前须保持既有 ARM VM 在线，脚本不会重建 VM。
+
+当前 Windows 控制台：http://127.0.0.1:18083/。本机交付目录有 Start/Stop/Status.cmd、`访问说明.md`、配置和报告，不加入 Git。临时版使用原生 Windows VNT Core + WebUI，与原正式 Flutter 客户端隔离运行。
