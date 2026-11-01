@@ -1,4 +1,6 @@
+use std::future::Future;
 use std::net::Ipv4Addr;
+use std::pin::Pin;
 use std::str::FromStr;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -125,11 +127,19 @@ pub struct VntApi {
 
 impl VntApi {
     pub fn new(vnt_config: VntConfig, call: VntApiCallback) -> anyhow::Result<VntApi> {
+        Self::new_with_sink(vnt_config, call)
+    }
+
+    #[flutter_rust_bridge::frb(ignore)]
+    pub fn new_with_sink<S>(vnt_config: VntConfig, sink: S) -> anyhow::Result<VntApi>
+    where
+        S: VntEventSink,
+    {
         let (core_config, connect_targets) = convert_to_core_config(&vnt_config)?;
         let runtime = Runtime::new().context("创建 Tokio Runtime 失败")?;
 
         for (index, address) in connect_targets.iter().enumerate() {
-            call.emit_connect(RustConnectInfo {
+            sink.emit_connect(RustConnectInfo {
                 count: index + 1,
                 address: address.clone(),
             });
@@ -157,14 +167,14 @@ impl VntApi {
             if index > 0 {
                 fallback_used = true;
                 if let Some(address) = config.server_addr.first() {
-                    call.emit_connect(RustConnectInfo {
+                    sink.emit_connect(RustConnectInfo {
                         count: connect_targets.len() + index,
                         address: address.to_string(),
                     });
                 }
             }
             match runtime
-                .block_on(async { start_network(config.clone(), task_group, call.clone()).await })
+                .block_on(async { start_network(config.clone(), task_group, sink.clone()).await })
             {
                 Ok((network_manager, network_addr)) => {
                     result = Some((network_manager, network_addr, task_group_guard));
@@ -185,7 +195,7 @@ impl VntApi {
             Some(value) => value,
             None => {
                 let err = last_error.unwrap_or_else(|| anyhow!("启动 VNT 网络失败"));
-                call.emit_error(error_info_from_error(&err));
+                sink.emit_error(error_info_from_error(&err));
                 return Err(err);
             }
         };
@@ -194,12 +204,12 @@ impl VntApi {
             log::warn!("QUIC 连接失败，已回退到 TCP 传输");
         }
 
-        call.emit_handshake(RustHandshakeInfo {
+        sink.emit_handshake(RustHandshakeInfo {
             finger: None,
             version: CORE_VERSION.to_string(),
         });
-        call.emit_register(RustRegisterInfo::from_network_addr(&network_addr));
-        call.emit_success();
+        sink.emit_register(RustRegisterInfo::from_network_addr(&network_addr));
+        sink.emit_success();
 
         let api = network_manager.vnt_api();
         Ok(Self {
@@ -404,11 +414,16 @@ impl VntApi {
     }
 }
 
-async fn start_network(
+async fn start_network<S>(
     core_config: CoreConfig,
     task_group: vnt_core::utils::task_control::TaskGroup,
-    call: VntApiCallback,
-) -> anyhow::Result<(NetworkManager, NetworkAddr)> {
+    sink: S,
+) -> anyhow::Result<(NetworkManager, NetworkAddr)>
+where
+    S: VntEventSink,
+{
+    #[cfg(not(target_os = "android"))]
+    let _ = &sink;
     let mut network_manager =
         NetworkManager::create_network(Box::new(core_config.clone()), task_group)
             .await
@@ -427,7 +442,7 @@ async fn start_network(
         #[cfg(target_os = "android")]
         {
             let tun_config = build_android_tun_config(&network_addr, &core_config)?;
-            let tun_fd = call.request_android_vpn_fd(tun_config).await?;
+            let tun_fd = sink.request_android_vpn_fd(tun_config).await?;
             network_manager
                 .start_tun_fd(Some(tun_fd as i32))
                 .await
@@ -446,6 +461,19 @@ async fn start_network(
         }
     }
     Ok((network_manager, network_addr))
+}
+
+#[flutter_rust_bridge::frb(ignore)]
+pub trait VntEventSink: Clone + Send + Sync + 'static {
+    fn emit_success(&self);
+    fn emit_connect(&self, info: RustConnectInfo);
+    fn emit_handshake(&self, info: RustHandshakeInfo);
+    fn emit_register(&self, info: RustRegisterInfo);
+    fn emit_error(&self, info: RustErrorInfo);
+    fn request_android_vpn_fd(
+        &self,
+        info: RustDeviceConfig,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>>;
 }
 
 fn attempts_supports_tcp_fallback(core_config: &CoreConfig) -> bool {
@@ -652,7 +680,9 @@ fn is_valid_macos_utun_name(value: &str) -> bool {
     value.len() <= MACOS_UTUN_NAME_MAX_LEN
         && value.starts_with("utun")
         && value.len() > 4
-        && value[4..].chars().all(|character| character.is_ascii_digit())
+        && value[4..]
+            .chars()
+            .all(|character| character.is_ascii_digit())
 }
 
 fn normalize_requested_mtu(mtu: Option<u32>, allow_wire_guard: bool) -> Option<u16> {
@@ -1062,6 +1092,35 @@ impl VntApiCallback {
     }
 }
 
+impl VntEventSink for VntApiCallback {
+    fn emit_success(&self) {
+        VntApiCallback::emit_success(self);
+    }
+
+    fn emit_connect(&self, info: RustConnectInfo) {
+        VntApiCallback::emit_connect(self, info);
+    }
+
+    fn emit_handshake(&self, info: RustHandshakeInfo) {
+        VntApiCallback::emit_handshake(self, info);
+    }
+
+    fn emit_register(&self, info: RustRegisterInfo) {
+        VntApiCallback::emit_register(self, info);
+    }
+
+    fn emit_error(&self, info: RustErrorInfo) {
+        VntApiCallback::emit_error(self, info);
+    }
+
+    fn request_android_vpn_fd(
+        &self,
+        info: RustDeviceConfig,
+    ) -> Pin<Box<dyn Future<Output = anyhow::Result<u32>> + Send + '_>> {
+        Box::pin(VntApiCallback::request_android_vpn_fd(self, info))
+    }
+}
+
 fn spawn_dart_future<T, F>(factory: F)
 where
     T: Send + 'static,
@@ -1286,35 +1345,19 @@ mod tests {
             Some("cfg-0123456789abcdef".to_string())
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some(" custom!@#Name "),
-                true,
-                false
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some(" custom!@#Name "), true, false),
             Some("customName".to_string())
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some(&"a".repeat(128)),
-                true,
-                false
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some(&"a".repeat(128)), true, false),
             Some("a".repeat(48))
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some("!!!"),
-                true,
-                false
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some("!!!"), true, false),
             Some("default".to_string())
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some("   "),
-                true,
-                false
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some("   "), true, false),
             None
         );
     }
@@ -1342,19 +1385,11 @@ mod tests {
             None
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some("utun12"),
-                false,
-                true
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some("utun12"), false, true),
             Some("utun12".to_string())
         );
         assert_eq!(
-            normalize_requested_tun_name_with_platform_policy(
-                Some("utun-name"),
-                false,
-                true
-            ),
+            normalize_requested_tun_name_with_platform_policy(Some("utun-name"), false, true),
             None
         );
     }
