@@ -6,6 +6,7 @@ class RuntimeStoragePaths {
   RuntimeStoragePaths._();
 
   static const String windowsAppFolderName = 'VNT App 2.0';
+  static const String windowsMachineFolderName = 'VNTC APP2.0';
   static const String _writeProbeFileName = '.vnt_write_probe.tmp';
 
   static String resolveWindowsWritableRootPath({
@@ -36,6 +37,29 @@ class RuntimeStoragePaths {
       localAppDataPath: Platform.environment['LOCALAPPDATA'],
       fallbackBasePath: Directory.systemTemp.path,
       canWriteToDirectory: canWriteToDirectorySync,
+    );
+  }
+
+  static String resolveWindowsMachineRootPath({
+    required String? programDataPath,
+    required String systemDrivePath,
+  }) {
+    final basePath =
+        programDataPath != null && programDataPath.trim().isNotEmpty
+            ? programDataPath.trim()
+            : path.windows.join(systemDrivePath, 'ProgramData');
+    return path.windows.join(basePath, windowsMachineFolderName);
+  }
+
+  static String resolveWindowsMachineRootPathSync() {
+    if (!Platform.isWindows) {
+      throw UnsupportedError('机器级 VNT 服务目录仅支持 Windows');
+    }
+    final systemDrive = Platform.environment['SystemDrive']?.trim();
+    return resolveWindowsMachineRootPath(
+      programDataPath: Platform.environment['PROGRAMDATA'],
+      systemDrivePath:
+          systemDrive == null || systemDrive.isEmpty ? r'C:\' : systemDrive,
     );
   }
 

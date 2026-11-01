@@ -76,4 +76,26 @@ void main() {
       );
     });
   });
+
+  group('RuntimeStoragePaths.resolveWindowsMachineRootPath', () {
+    test('uses ProgramData when available', () {
+      expect(
+        RuntimeStoragePaths.resolveWindowsMachineRootPath(
+          programDataPath: r'D:\MachineData',
+          systemDrivePath: r'C:\',
+        ),
+        path.windows.join(r'D:\MachineData', 'VNTC APP2.0'),
+      );
+    });
+
+    test('falls back to system drive ProgramData', () {
+      expect(
+        RuntimeStoragePaths.resolveWindowsMachineRootPath(
+          programDataPath: null,
+          systemDrivePath: r'E:\',
+        ),
+        path.windows.join(r'E:\', 'ProgramData', 'VNTC APP2.0'),
+      );
+    });
+  });
 }
