@@ -1,12 +1,14 @@
 #!/usr/bin/env python3
-"""复用本机 ARM VM，验证无 VNT 的 LAN 终端、子网转发及监控服务。"""
+"""复用本机 OpenWrt VM，验证无 VNT 的 LAN 终端、子网转发及监控服务。"""
 import argparse
 from concurrent.futures import ThreadPoolExecutor
 import hashlib
 import json
+import logging
 from pathlib import Path
 import secrets
 import shlex
+import threading
 import time
 import urllib.error
 import urllib.request
@@ -16,7 +18,9 @@ import paramiko
 ROOT = Path(__file__).resolve().parents[2]
 DEPLOY = ROOT / "dist/openwrt-gateway"
 UNC = Path(r"\\wsl.localhost\Ubuntu\home\luo\.cache\vnt-openwrt\arm-vm")
-FOLDERS = {"aarch64": "20261101T133738Z-aarch64", "armv7": "20261101T134003Z-armv7"}
+FOLDERS = {"aarch64": "20261101T133738Z-aarch64", "armv7": "20261101T134003Z-armv7", "x86_64": None}
+PORT_BASE = {"aarch64": 23100, "armv7": 23200, "x86_64": 23500}
+logging.getLogger("paramiko.transport").setLevel(logging.CRITICAL)
 FIXTURE = "/opt/vntc-gateway-test"
 HTTP = FIXTURE + "/http"
 PROBE = FIXTURE + "/probe"
@@ -40,24 +44,33 @@ def wait(label, function, seconds=180):
 class Node:
     def __init__(self, arch, index, log):
         self.arch, self.index, self.log = arch, index, log
-        self.port = (23100 if arch == "aarch64" else 23200) + index
+        self.port = PORT_BASE[arch] + index
         self.local = "192.168.50" if index == 0 else "192.168.60"
         self.remote = "192.168.60" if index == 0 else "192.168.50"
         self.virtual = f"10.26.0.{index + 2}"
         self.peer = f"10.26.0.{3 - index}"
-        access = json.loads((ROOT / "dist/openwrt-arm/live" / (arch + "-access.json")).read_text(encoding="utf-8"))
+        if arch == "x86_64":
+            self.folder = json.loads((DEPLOY / "live/x86_64-runtime.json").read_text(encoding="utf-8"))["folder"]
+            access_path = DEPLOY / "live/x86_64-access.json"
+        else:
+            self.folder = FOLDERS[arch]
+            access_path = ROOT / "dist/openwrt-arm/live" / (arch + "-access.json")
+        access = json.loads(access_path.read_text(encoding="utf-8"))
         self.access = access["vntc"][index]
         self.connect()
 
     def connect(self):
+        if getattr(self, "ssh", None):
+            self.ssh.close()
         self.ssh = paramiko.SSHClient()
         self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         self.ssh.connect("127.0.0.1", port=self.port, username="root",
-            key_filename=str(UNC / FOLDERS[self.arch] / "id_ed25519"),
+            key_filename=str(UNC / self.folder / "id_ed25519"),
             look_for_keys=False, allow_agent=False, timeout=8)
 
     def cmd(self, command, timeout=120, ok=True):
-        _, out, err = self.ssh.exec_command(command, timeout=timeout)
+        channel = self.session(command, timeout)
+        out, err = channel.makefile("rb"), channel.makefile_stderr("rb")
         value = out.read().decode(errors="replace") + err.read().decode(errors="replace")
         code = out.channel.recv_exit_status()
         with self.log.open("a", encoding="utf-8") as f:
@@ -66,10 +79,28 @@ class Node:
             assert code == 0, f"{self.arch}/{self.index}: {command}: {value}"
         return value if ok else (code, value)
 
+    def session(self, command, timeout):
+        channel = self.ssh.get_transport().open_session(timeout=timeout)
+        channel.settimeout(timeout)
+        errors = []
+        def request():
+            try:
+                channel.exec_command(command)
+            except Exception as error:
+                errors.append(error)
+        worker = threading.Thread(target=request, daemon=True)
+        worker.start()
+        worker.join(min(timeout, 30))
+        if worker.is_alive():
+            channel.close()
+            raise TimeoutError("SSH exec request was not acknowledged: " + command)
+        if errors:
+            channel.close()
+            raise errors[0]
+        return channel
+
     def upload(self, content, dest):
-        channel = self.ssh.get_transport().open_session(timeout=15)
-        channel.settimeout(120)
-        channel.exec_command("cat > " + shlex.quote(dest))
+        channel = self.session("cat > " + shlex.quote(dest), 120)
         channel.sendall(content)
         channel.shutdown_write()
         code = channel.recv_exit_status()
@@ -185,6 +216,7 @@ def main():
         report = json.loads(report_path.read_text(encoding="utf-8"))
         assert len(report["cases"]) == 2 and all(c["success"] for c in report["cases"])
         report.pop("error", None)
+        report["success"] = False
     def save():
         report_path.write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding="utf-8")
     def passed(name, **evidence):
@@ -206,6 +238,8 @@ def main():
                 node.install(package, video)
             else:
                 node.payload_hash = node.cmd("sha256sum " + FIXTURE + "/payload.bin").split()[0]
+                wait("resumed WebUI", lambda n=node: n.api("/health"))
+                wait("resumed VNT", node.running)
         passed("部署网关版、两个独立 LAN 网络命名空间及无 VNT 的服务终端")
         for node in nodes:
             devices = node.ns("ip -o link; ip route")
@@ -220,7 +254,7 @@ def main():
                 node.api("/stop", "POST")
                 assert "186" not in node.cmd("ip route show proto 186")
                 config = node.api("/config")
-                config["server_addresses"] = [f"{protocol}://10.0.2.2:{23120 if args.arch == 'aarch64' else 23220}"]
+                config["server_addresses"] = [f"{protocol}://10.0.2.2:{PORT_BASE[args.arch] + 20}"]
                 node.api("/config", "PUT", config)
                 node.api("/start", "POST")
                 wait("registered", node.running)
@@ -251,7 +285,8 @@ def main():
             def udp(node, mapped):
                 peer = nodes[1 - node.index]
                 ip, port = (peer.virtual, 18082) if mapped else (peer.local + ".100", 18092)
-                return node.ns(f"{PROBE} udp-client {ip} {port} 60", timeout=90)
+                # 每包仍由探针独立校验并限制接收等待；总时限需容纳 TCG 调度延迟。
+                return node.ns(f"{PROBE} udp-client {ip} {port} 60", timeout=180)
             with ThreadPoolExecutor(max_workers=12) as pool:
                 transfers = [pool.submit(transfer, n) for n in nodes]
                 datagrams = [pool.submit(udp, n, mapped) for n in nodes for mapped in (False, True)]
@@ -298,22 +333,29 @@ def main():
         for n in nodes:
             n.cmd("/etc/init.d/firewall reload")
         before_boot = b.cmd("cat /proc/sys/kernel/random/boot_id").strip()
+        qemu_pidfile = UNC / b.folder / f"{args.arch}-1.pid"
+        before_qemu = qemu_pidfile.read_text().strip()
         b.cmd("sync; (sleep 1; reboot) >/dev/null 2>&1 &")
         b.ssh.close()
         time.sleep(12)
-        wait("guest reboot SSH", lambda: (b.connect() or True), 420)
-        assert b.cmd("cat /proc/sys/kernel/random/boot_id").strip() != before_boot
+        def reboot_ready():
+            b.connect()
+            return b.cmd("cat /proc/sys/kernel/random/boot_id").strip() != before_boot
+        wait("guest reboot SSH and new boot_id", reboot_ready, 420)
+        assert qemu_pidfile.read_text().strip() == before_qemu
         wait("guest reboot VNT", b.running, 240)
         result = wait("guest reboot forwarding", lambda: b.ns(f"wget -qO /tmp/vntcg-after-boot -T 15 http://{a.virtual}:18081/payload.bin && sha256sum /tmp/vntcg-after-boot"), 180)
         assert result.split()[0] == a.payload_hash
         assert b.remote + ".0/24" in b.cmd("ip route show proto 186")
-        passed("真实 OpenWrt 热重启后 LAN、网关规则、输入路由及远端服务自动恢复")
+        report["reboot_method"] = "reboot"
+        passed("真实 OpenWrt 热重启后 LAN、网关规则、输入路由及远端服务自动恢复", qemu_pid_unchanged=True, reboot_method="reboot")
         report["native_routes"] = {str(n.index): n.cmd("ip route; uci show firewall | grep vntcg_") for n in nodes}
         report.update(success=True, video_sha256=video_hash,
             total_file_bytes=sum(d["file_bytes"] for c in report["cases"] for d in c["directions"]))
         save()
         print("ALL_GATEWAY_TESTS_PASSED " + args.arch, flush=True)
     except Exception as error:
+        report["success"] = False
         report["error"] = str(error)
         save()
         raise

@@ -9,15 +9,17 @@ import subprocess
 import time
 import urllib.request
 
-from verify_gateway import DEPLOY, Node, ROOT, wait
+from verify_gateway import DEPLOY, FOLDERS, Node, ROOT, wait
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--ffmpeg", default=shutil.which("ffmpeg"))
+    parser.add_argument("--arch", choices=FOLDERS, action="append", help="只补测指定架构，保留旧报告")
+    parser.add_argument("--leave-connected", action="store_true", help="保留本次测试架构的 TCP 连接")
     args = parser.parse_args()
     assert args.ffmpeg, "需要本机 FFmpeg"
-    folder = DEPLOY / "validation/windows"
+    folder = DEPLOY / "validation" / ("windows-" + "-".join(args.arch) if args.arch else "windows")
     folder.mkdir(parents=True, exist_ok=True)
     config = json.loads((ROOT / "dist/windows-arm-interop/state/config.json").read_text(encoding="utf-8"))
     opener = urllib.request.build_opener(urllib.request.ProxyHandler({}))
@@ -48,7 +50,7 @@ def main():
     try:
         reference = decode(str(ROOT / "tmp/gateway-video.h264"), folder / "reference.framehash")
         assert api("/about")["platform"] == "windows/x86_64"
-        for arch in ("aarch64", "armv7"):
+        for arch in (args.arch or ("aarch64", "armv7")):
             assert json.loads((DEPLOY / "validation" / arch / "report.json").read_text(encoding="utf-8"))["success"]
             expected = {}
             for i in range(2):
@@ -56,7 +58,9 @@ def main():
                 expected[i] = node.cmd("sha256sum /opt/vntc-gateway-test/payload.bin").split()[0]
                 node.ssh.close()
             for protocol in ("tcp", "quic"):
-                api(f"/profiles/win-{arch}-{protocol}/connect", "POST")
+                profile = (json.loads((DEPLOY / "live/x86_64-runtime.json").read_text(encoding="utf-8"))["windows_profiles"][protocol]
+                           if arch == "x86_64" else f"win-{arch}-{protocol}")
+                api(f"/profiles/{profile}/connect", "POST")
                 wait("Windows registration", lambda: api("/status")["online_peer_count"] >= 2)
                 status = api("/status")
                 assert status["connected_server"].startswith(protocol + "://"), status
@@ -86,7 +90,12 @@ def main():
                         "all_decoded_frame_sha256_match": True})
                     save()
                     print(f"PASS Windows FFmpeg -> {arch}: 200 video frames verified", flush=True)
-        api("/profiles/win-aarch64-tcp/connect", "POST")
+        final_profile = "win-aarch64-tcp"
+        if args.leave_connected:
+            final_arch = (args.arch or ["aarch64", "armv7"])[-1]
+            final_profile = (json.loads((DEPLOY / "live/x86_64-runtime.json").read_text(encoding="utf-8"))["windows_profiles"]["tcp"]
+                             if final_arch == "x86_64" else f"win-{final_arch}-tcp")
+        api(f"/profiles/{final_profile}/connect", "POST")
         wait("final Windows connection", lambda: api("/status")["online_peer_count"] >= 2)
         report.update(success=True, final_status=api("/status"))
         save()

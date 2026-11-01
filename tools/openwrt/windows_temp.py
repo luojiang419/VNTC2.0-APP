@@ -119,7 +119,13 @@ def main():
     program = wsl_python("import subprocess,sys; "
         "print(subprocess.check_output(['wslpath','-u',sys.argv[1]]).decode().strip())",
         Path(__file__).with_name("udp_relay.py").as_posix())
-    for arch, port, target in (("aarch64", 23320, 23120), ("armv7", 23420, 23220)):
+    targets = [("aarch64", 23320, 23120, "win-aarch64-quic"), ("armv7", 23420, 23220, "win-armv7-quic")]
+    x86_runtime = folder.parent / "openwrt-gateway/live/x86_64-runtime.json"
+    if x86_runtime.exists():
+        runtime = json.loads(x86_runtime.read_text(encoding="utf-8"))
+        if runtime.get("windows_profiles"):
+            targets.append(("x86_64", 23620, 23520, runtime["windows_profiles"]["quic"]))
+    for arch, port, target, profile_id in targets:
         log_path = folder / (arch + "-relay-start.json")
         with log_path.open("w") as output, (folder / (arch + "-udp-relay.log")).open("ab") as error:
             relay_process = subprocess.Popen(["wsl.exe", "-d", "Ubuntu", "--", "python3", program,
@@ -138,7 +144,7 @@ def main():
         relay.update(architecture=arch, host_process_id=relay_process.pid, program=program)
         meta["udp_relays"].append(relay)
         save()
-        profile = api("/profiles/win-" + arch + "-quic")
+        profile = api("/profiles/" + profile_id)
         profile["vnt"]["server_addresses"] = [f"quic://{address}:{port}"]
         api("/profiles/" + profile["id"], "PUT", {"name": profile["name"], "vnt": profile["vnt"]})
     api("/profiles/win-aarch64-tcp/connect", "POST")

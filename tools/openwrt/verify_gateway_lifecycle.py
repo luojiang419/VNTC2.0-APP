@@ -5,12 +5,12 @@ import hashlib
 import json
 from pathlib import Path
 
-from verify_gateway import DEPLOY, Node, wait
+from verify_gateway import DEPLOY, FOLDERS, Node, wait
 
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--arch", choices=("aarch64", "armv7"), required=True)
+    parser.add_argument("--arch", choices=FOLDERS, required=True)
     args = parser.parse_args()
     folder = DEPLOY / "validation" / args.arch
     assert json.loads((folder / "report.json").read_text(encoding="utf-8"))["success"]

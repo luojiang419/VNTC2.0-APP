@@ -43,6 +43,8 @@ def inspect(package, portable, arch, program, prefix):
 def main():
     windows = json.loads((DEPLOY / "validation/windows/report.json").read_text(encoding="utf-8"))
     assert windows["success"] and len(windows["cases"]) == 4 and len(windows["video"]) == 2
+    x86_windows = json.loads((DEPLOY / "validation/windows-x86_64/report.json").read_text(encoding="utf-8"))
+    assert x86_windows["success"] and len(x86_windows["cases"]) == 2 and len(x86_windows["video"]) == 1
     manifest = {"client_version": "4.8.40-2", "server_version": "2.0.0-1", "products": [], "verification": []}
     for arch in ("aarch64", "armv7", "x86_64"):
         out = DEPLOY / arch
@@ -50,18 +52,19 @@ def main():
         portable = next(out.glob("VNTC_OpenWrt_*.tar.gz"))
         payload = inspect(ipk, portable, arch, "vntc-openwrt", "VNTC")
         products = [ipk, portable]
-        if arch != "x86_64":
+        if arch in ("aarch64", "armv7", "x86_64"):
             report = json.loads((DEPLOY / "validation" / arch / "report.json").read_text(encoding="utf-8"))
             lifecycle = json.loads((DEPLOY / "validation" / arch / "lifecycle.json").read_text(encoding="utf-8"))
             assert report["success"] and lifecycle["success"]
             assert report["package_sha256"] == sha(ipk.read_bytes())
             assert lifecycle["portable_sha256"] == sha(portable.read_bytes())
-            server = ROOT / "dist/openwrt-arm" / arch
+            server = ROOT / "dist/openwrt-arm" / arch if arch != "x86_64" else out
             source_ipk = next(server.glob("vnts2-openwrt_*.ipk"))
             source_portable = next(server.glob("VNTS_OpenWrt_*.tar.gz"))
             for source in (source_ipk, source_portable):
                 dest = out / source.name
-                shutil.copy2(source, dest)
+                if source.resolve() != dest.resolve():
+                    shutil.copy2(source, dest)
                 assert sha(dest.read_bytes()) == sha(source.read_bytes())
                 products.append(dest)
             server_payload = inspect(out / source_ipk.name, out / source_portable.name, arch, "vnts2-openwrt", "VNTS")
@@ -83,13 +86,10 @@ def main():
             manifest["verification"].append({"architecture": arch, "gateway_vm_success": True,
                 "gateway_checks": len(report["checks"]), "lifecycle_checks": len(lifecycle["checks"]),
                 "file_bytes": report["total_file_bytes"], "snapshot": snapshot})
-        else:
-            manifest["verification"].append({"architecture": arch, "gateway_vm_success": None,
-                "scope": "29 musl tests and release/ELF/package checks; no new x86 gateway VM run"})
         for p in products:
             manifest["products"].append({"file": p.relative_to(DEPLOY).as_posix(), "bytes": p.stat().st_size, "sha256": sha(p.read_bytes())})
         (out / "SHA256SUMS").write_text("".join(sha(p.read_bytes()) + "  " + p.name + "\n" for p in products))
-    manifest["windows"] = {"success": True, "mapping_cases": 4, "decoded_video_frames": 400}
+    manifest["windows"] = {"success": True, "mapping_cases": 6, "decoded_video_frames": 600}
     (DEPLOY / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8")
     print("GATEWAY_COLLECTION_VERIFIED: all deployed files match packages; no credentials exported")
 

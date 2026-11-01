@@ -1,4 +1,4 @@
-# OpenWrt ARM 构建与验证工具
+# OpenWrt 构建与验证工具
 
 服务端和客户端共用静态 ELF/ABI 校验与交叉构建入口。ARM64 使用 `aarch64-unknown-linux-musl`；ARMv7 使用 `armv7-unknown-linux-musleabihf`（ARMv7 + VFPv3，hard-float）。不涵盖 ARMv6、MIPS、无 VFP 的 ZX279128S 或其他 soft-float 平台。
 
@@ -72,3 +72,13 @@ HTTP 和嵌入资源检查不代表浏览器视觉验收；QEMU 测试不代表�
 数据面成功后运行 `verify_gateway_lifecycle.py --arch ...`，验证同名非受管规则不被覆盖、IPK/离线卸载与离线重装、配置保留和路由恢复。最后运行 `verify_gateway_windows.py --ffmpeg 本机FFmpeg路径`，由原生 Windows 临时客户端依次访问两套架构的 TCP/QUIC 端口映射，并对实际 RTSP 流解码的 200 帧逐帧比较 SHA-256。所有凭据、测试视频、报告、辅助二进制仅保存在忽略目录。
 
 最后执行 `python tools/openwrt/collect_gateway.py`，核对当前包与报告 SHA-256、离线内部文件、IPK/离线内容和实际 guest 安装文件；附上未改变的 ARM 服务端包，生成 manifest.json 和各架构 SHA256SUMS。x86_64 的验证范围单独标记，不将编译校验当作本轮网关 VM 验收。
+
+## x86_64 完整网关环境
+
+WSL 内运行 `python3 tools/openwrt/provision_x86_gateway.py`，新建独立 x86 VM、核对官方镜像、安装两客户端和一个服务端，记录 dist/openwrt-gateway/live/x86_64-runtime.json。已有记录时拒绝覆盖。端口为 23500/23501、23510/23511、23520、23521；不复用旧 x86/ARM 演示。构建包放在 dist/openwrt-gateway/x86_64/；辅助工具目标使用 x86_64-linux-musl。
+
+当前 WSL 嵌套 TCG 采用官方内核解压后的原始 ELF/PVH 入口和受限翻译缓存，具体参数在 provision_x86_gateway.py；属于测试硬件配置，不是实际路由器内核要求。测试先前在 256MiB 完成数据面，最终 B 的稳定复位配置为 512MiB。
+
+Windows 宿主依次运行 `verify_gateway.py --arch x86_64`、`verify_gateway_lifecycle.py --arch x86_64`。若保留已通过的数据面接力，--finish-only 强制核对包哈希不变。重启就绪以新 boot_id、同一 QEMU PID、VNT 和数据面恢复为准；SSH exec 请求 ACK 有独立截止时间。
+
+connect_windows_x86_gateway.py 为既有隔离 Windows 临时版新增两个 x86 档案及专用 UDP 转接（23620→23520），保留旧档案。随后运行 `verify_gateway_windows.py --arch x86_64 --leave-connected --ffmpeg 本机路径`，输出独立 windows-x86_64/report.json，保留 ARM 报告。最后运行 collect_gateway.py，三架构均须完成主验证、生命周期、Windows 文件及视频校验后才能汇总。
