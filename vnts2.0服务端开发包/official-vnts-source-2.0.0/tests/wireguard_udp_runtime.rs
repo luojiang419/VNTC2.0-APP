@@ -14,6 +14,8 @@ use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+mod support;
+
 const CREATE_NO_WINDOW: u32 = 0x08000000;
 
 #[derive(Clone, PartialEq, Message)]
@@ -286,6 +288,7 @@ fn server_command(binary: &Path, config: &Path) -> Command {
         .arg(config)
         .stdout(Stdio::null())
         .stderr(Stdio::null());
+    support::capture_openwrt_logs(&mut command, config);
     command
 }
 

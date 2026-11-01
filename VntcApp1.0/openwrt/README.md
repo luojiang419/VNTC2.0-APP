@@ -1,10 +1,10 @@
 # VNTC OpenWrt 客户端
 
-基于项目现有 Rust VNT 2.0 核心与 Linux WebUI，提供静态 musl x86_64 程序、opkg 安装包和 procd 服务。无需 systemd、Docker、Python 或 Node.js 运行时。浏览器页面内嵌在二进制中。
+基于项目现有 Rust VNT 2.0 核心与 Linux WebUI，提供静态 musl x86_64、ARM64（aarch64）和 ARMv7 程序、opkg 安装包和 procd 服务。无需 systemd、Docker、Python 或 Node.js 运行时。浏览器页面内嵌在二进制中。
 
 ## 安装与使用
 
-首版面向 OpenWrt 24.10、x86_64 软路由；其他架构需要另外交叉编译，不能混用。建议至少 256MB 内存、64MB 剩余存储空间。
+面向 OpenWrt 24.10；按 CPU/ABI 和包架构选择产物，不能混用。建议至少 256MB 内存、64MB 剩余存储空间。ARMv7 包要求 VFPv3/VFPv4 和 hard-float EABI，不能用于无 VFP 的 ZX279128S。ARM64 和 ARMv7 的默认 IPK 架构分别为 `aarch64_generic` 与 `arm_cortex-a15_neon-vfpv4`，对应官方 armsr 虚拟机；真实路由器先运行 `opkg print-architecture`，不匹配时重新指定包架构打包，或使用匹配 CPU/ABI 的离线包，不要强制安装。
 
 上传 IPK 后运行：
 
@@ -40,6 +40,17 @@ bash VntcApp1.0/openwrt/build.sh
 
 版本默认读取客户端 `pubspec.yaml`，不递增正式版本。构建使用锁定依赖，执行格式检查、musl 单元/集成测试和 release 编译，并检查 ELF 不依赖动态加载器。产物输出至 `VntcApp1.0/release/openwrt/`，包含 SHA-256。
 
+ARM 交叉构建额外安装 Zig、cargo-zigbuild、qemu-user-static。第三参数选择架构，第四参数可指定路由器实际 OpenWrt 包架构：
+
+```sh
+bash VntcApp1.0/openwrt/build.sh 4.8.40 VntcApp1.0/release/openwrt-arm/aarch64 aarch64
+bash VntcApp1.0/openwrt/build.sh 4.8.40 VntcApp1.0/release/openwrt-arm/armv7 armv7
+# 例如将同一个 ARM64 静态程序打包为 aarch64_cortex-a53：
+bash VntcApp1.0/openwrt/build.sh 4.8.40 /path/to/output aarch64 aarch64_cortex-a53
+```
+
+ARM 构建执行 QEMU user 的 `--help` 检查，打包检查 ELF 架构、静态链接和 ARM ABI；完整 ARM 系统验证使用仓库 `tools/openwrt/verify_arm.py`，记录见 [ARM适配与验证](ARM适配与验证.md)。包架构参数只改 opkg 元数据，不能把 ARMv7 变为 ARMv6 或把 hard-float 变为 soft-float。
+
 ## 自动虚拟机验证
 
 `verify_vm.py` 在 Linux / WSL 使用 QEMU 启动两个独立的真实 OpenWrt 24.10.5 x86_64 系统。依赖 `qemu-system-x86 qemu-utils e2fsprogs python3-paramiko`。官方镜像下载后校验官方 SHA-256；测试仅修改专用工作目录中的镜像，所有转发端口仅监听宿主回环地址。
@@ -53,4 +64,4 @@ python3 VntcApp1.0/openwrt/verify_vm.py \
 
 验证安装、鉴权、真实 TUN、双节点虚拟 IP 双向 ping、大包通信、流量计数、停止释放 TUN、重连、进程崩溃恢复、服务端重启恢复、虚拟机重启自启、重新安装/卸载保留配置，以及便携安装。任何断言失败均返回非零并保留串口日志、命令记录及 JSON 报告。默认结束时关闭本次启动的虚拟机和测试服务端；加 `--keep-running` 保留供人工检查。
 
-目前验证边界为 x86_64 虚拟机；ARM/MIPS、真实硬件、特定 LAN 防火墙拓扑需针对目标设备另行验收。
+既有 `verify_vm.py` 用于 x86_64；ARM64/ARMv7 使用独立验证器。MIPS、真实硬件、特定 LAN 防火墙拓扑需针对目标设备另行验收。

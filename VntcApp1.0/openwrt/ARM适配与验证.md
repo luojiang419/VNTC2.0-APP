@@ -1,0 +1,76 @@
+# VNTs / vntc OpenWrt ARM 适配与验证
+
+[CODEX_LONG_TASK_CONTINUE_V3]
+
+## 目标与边界
+
+2026-11-01，用户确认同时开发 ARM64（aarch64）与 ARMv7 的 VNTs 服务端、vntc 客户端插件，提供 OpenWrt 安装包和离线包。保留已有 x86_64 版本、精简静态界面、业务配置与网络协议；不刷写真实路由器，不推送 GitHub。
+
+## 进度
+
+- 工作分支：`codex/openwrt-arm`，基于已验证的 `codex/openwrt-client`。
+- 客户端复用 `linux_webui` 和 `openwrt/`；服务端复用 `vnts2.0服务端开发包/official-vnts-source-2.0.0`，新增 OpenWrt/procd 集成。
+- 已完成四个静态 musl release 构建、QEMU user 启动、架构/ABI 校验及 IPK/离线包生成。
+- 客户端 28 项 musl 回归通过；服务端 90 项单元、6 项加密门禁与 10 项集成测试通过，共 106 项；默认非 OpenWrt feature 的 cargo check 通过。
+- ARM64/ARMv7 官方 OpenWrt 双 VM 均已通过安装、鉴权、错误架构拒装、QUIC 与 TLS/TCP 加密中继、双向大包/HTTP、重装保留配置/SQLite 和 procd 崩溃恢复。
+- ARM64 共 12 组、ARMv7 共 13 组完整 VM 检查通过（ARMv7 包含接力冷启动）；两种架构均通过真实热重启、自动组网、离线安装/卸载/重装和稳定后双向 20 个 1300 字节包零丢失。
+- 产物汇总与哈希、ELF、包元数据、内层校验、IPK/离线包机器码一致性检查通过。全部实现和验收完成，仅作本地提交，不推送 GitHub。
+- 现有工作区的重打包器修改、KEY/KEY2 和测试文档不属于本任务，保持原状。
+
+## 已有验证入口
+
+既有 x86_64 VM 和 `release/openwrt-lite` 保留；历史结果见 `开发与验证记录.md`、`精简与低内存优化.md`。ARM 必须单独运行，不将交叉编译或 ELF 检查当作真机/虚拟机组网通过。
+
+## 实现
+
+- `tools/openwrt/targets.py`：共享 CPU、ELF 位数、little-endian、静态链接、ARM hard-float 与包架构校验。
+- `tools/openwrt/build-common.sh`：Rust + musl/cargo-zigbuild，rustup 使用 flock，ARM 通过 QEMU user 执行 `--help`。
+- 客户端 `openwrt/build.sh/package.py/install.sh`：保持原 x86_64 调用方式，增加 aarch64/armv7 以及包架构参数。
+- 服务端 `vnts2.0服务端开发包/openwrt/`：随机管理密码、procd、IPK/离线安装、卸载保留配置/SQLite/密钥及 sysupgrade keep.d。
+- 服务端 Rust `openwrt` feature：单工作线程、512KiB 工作线程栈、最多 4 个阻塞线程，控制台日志默认 warn，支持 Unix SIGTERM 优雅退出；默认 Linux/Windows 行为保持原有实现。
+- `tools/openwrt/verify_arm.py`：官方 OpenWrt 24.10.5 armsr/armv8 和 armsr/armv7 镜像、同内核 TUN、两台 256MiB 无 swap VM，服务端和客户端均在 guest 中原生运行。
+- `tools/openwrt/collect.py`：将经过 VM 验收且 SHA-256 一致的 IPK、离线包与报告汇总，检查 portable 内容与 IPK 机器码一致。
+
+## 安装范围
+
+ARM64 默认 IPK 为 `aarch64_generic`，ARMv7 为 `arm_cortex-a15_neon-vfpv4`，用于官方 armsr 测试环境。真实设备的包架构标签可能不同，可按 `opkg print-architecture` 重打包，或使用匹配 CPU/ABI 的静态离线包；不应强制忽略架构检查。
+
+ARMv7 采用 hard-float，要求 VFPv3/VFPv4，不支持没有 VFP 的 ZX279128S；本任务不再操作用户中兴原厂系统。MIPS、ARMv6、soft-float 不在本次范围内。QEMU 的基础通信结果不代表实际路由器满带宽、P2P 直连、特定 LAN 转发或长期稳定性。
+
+## 构建与验证入口
+
+共享命令见 `tools/openwrt/README.md`。实际 WSL 工具链：Rust 1.97.0、Zig 0.13.0、cargo-zigbuild 0.23.0、QEMU 8.2.2；锁定现有 Cargo.lock，客户端 4.8.40、服务端 2.0.0，不递增正式版本。
+
+缓存目录：客户端 `/home/luo/.cache/vntc-openwrt/target`；服务端 `/home/luo/.cache/vnts-openwrt/target`；官方 ARM 镜像 `/home/luo/.cache/vnt-openwrt/downloads`；VM `/home/luo/.cache/vnt-openwrt/arm-vm`。下载遇到超时后仅在本轮进程使用本机现有代理，未写入项目通用脚本或修改依赖锁。
+
+构建原始产物位于 `VntcApp1.0/release/openwrt-arm/{aarch64,armv7}` 和 `vnts2.0服务端开发包/dist/openwrt/{aarch64,armv7}`。历史 x86 产物不覆盖。
+
+## 最终交付
+
+汇总目录：`D:\Myproject\vnt2.0\dist\openwrt-arm\`。
+
+- `aarch64/`：VNTs 与 vntc 各一份 IPK 和离线 tar.gz，SHA256SUMS、verification.json。
+- `armv7/`：同上，ARMv7 hard-float。
+- `使用说明.md`、`manifest.json`、`native-verification.json`：安装入口、每件产物的校验值和验证分类。
+
+所有交付压缩包与实际 VM 验收时的 SHA-256 一致；汇总器同时核对包内 ELF、架构元数据和离线包中每个文件的校验和。x86_64 旧三参数打包入口另作兼容性检查，通过。
+
+## 完整 VM 结果与资源
+
+官方 OpenWrt 24.10.5，QEMU virt，单 vCPU，256MiB，无 swap；节点 A 同时运行服务端与客户端，节点 B 运行客户端。首轮硬件使用默认 virt；ARMv7 接力固定 virtualization=on，保留已通过阶段及其原报告；真实热重启要求 QEMU PID 不变、Linux boot_id 改变，并在重启后恢复双向数据面。
+
+| 架构 | vntc RSS（节点 A） | VNTs RSS | 节点 A MemAvailable |
+| --- | ---: | ---: | ---: |
+| ARM64 | 6788KiB / 6.63MiB | 6332KiB / 6.18MiB | 170.46MiB |
+| ARMv7 | 6828KiB / 6.67MiB | 6264KiB / 6.12MiB | 188.67MiB |
+
+这是低流量、短时快照。程序 RSS 不等于系统总占用或浏览器内存，不能用来承诺满带宽、最大节点数或其他机型的内存。节点 B 客户端 RSS 分别为 6880KiB、6712KiB。
+
+- ARM64 原始记录：`/home/luo/.cache/vnt-openwrt/arm-vm/20261101T133738Z-aarch64`。
+- ARMv7 原始记录：`/home/luo/.cache/vnt-openwrt/arm-vm/20261101T134003Z-armv7`。
+- 两种架构均实际验证随机鉴权、原生 IPK/TUN、错误架构拒装、QUIC/TLS-TCP 中继、双向大包和 HTTP、SQLite/配置保留、procd 崩溃恢复、客户机热重启、离线安装/卸载/重装，以及稳定后双向 20 包零丢失。
+- ARMv7 早期 180 秒 SSH 等待不足，固定 virt virtualization=on 并单独提高 TCG 等待上限，独立和接力热重启均通过。
+- ARM64 稳定性补测发现直接 SIGTERM QEMU 会丢失新复制程序未刷盘的尾部；测试器已加入 sync，使用相同离线包恢复后核对完整长度/哈希、业务配置不变、冷启动注册和双向零丢失通过。恢复证据附在最终 ARM64 report 的 `test_environment_recovery` 字段中。
+- 本轮 ARM VM 均已停止，磁盘和日志可恢复；此前 x86 演示机未停止。
+
+本次不涉及刷写物理路由器；ARM WireGuard 专项流量、满载/P2P/具体 LAN 拓扑和浏览器视觉验收不在当前通过范围内。无需将构建/VM 缓存、私钥或临时凭据加入源码提交。

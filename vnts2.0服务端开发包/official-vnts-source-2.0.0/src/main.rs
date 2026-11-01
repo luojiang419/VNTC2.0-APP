@@ -86,7 +86,13 @@ fn run(args: Args) -> anyhow::Result<()> {
         return windows_service::run_service_mode(service_name, conf_path);
     }
 
-    let runtime = tokio::runtime::Builder::new_multi_thread()
+    let mut builder = tokio::runtime::Builder::new_multi_thread();
+    #[cfg(feature = "openwrt")]
+    builder
+        .worker_threads(1)
+        .thread_stack_size(512 * 1024)
+        .max_blocking_threads(4);
+    let runtime = builder
         .enable_all()
         .build()
         .context("创建 Tokio 运行时失败")?;
@@ -476,7 +482,20 @@ async fn wait_for_shutdown(shutdown_rx: Option<oneshot::Receiver<()>>) -> anyhow
             let _ = receiver.await;
             Ok(())
         }
-        None => tokio::signal::ctrl_c().await.context("监听 Ctrl+C 失败"),
+        None => {
+            #[cfg(all(unix, feature = "openwrt"))]
+            {
+                let mut terminate =
+                    tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())
+                        .context("监听 SIGTERM 失败")?;
+                tokio::select! {
+                    result = tokio::signal::ctrl_c() => result.context("监听 Ctrl+C 失败"),
+                    _ = terminate.recv() => Ok(()),
+                }
+            }
+            #[cfg(not(all(unix, feature = "openwrt")))]
+            tokio::signal::ctrl_c().await.context("监听 Ctrl+C 失败")
+        }
     }
 }
 

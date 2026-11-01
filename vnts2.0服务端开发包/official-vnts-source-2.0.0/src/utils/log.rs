@@ -1,6 +1,7 @@
-use std::io::Write;
-use std::path::PathBuf;
+#[cfg(not(feature = "openwrt"))]
+use std::{io::Write, path::PathBuf};
 
+#[cfg(not(feature = "openwrt"))]
 pub fn log_init(log_name: &str) {
     let path = PathBuf::from("logs");
     if !path.exists() {
@@ -51,4 +52,25 @@ root:
     }
 
     let _ = log4rs::init_file(log_config, Default::default());
+}
+
+// OpenWrt 由 procd 收集 stderr/stdout，避免日志写满路由器闪存。
+#[cfg(feature = "openwrt")]
+pub fn log_init(_log_name: &str) {
+    use log4rs::{
+        append::console::ConsoleAppender,
+        config::{Appender, Config, Root},
+    };
+    let level = std::env::var("RUST_LOG")
+        .ok()
+        .and_then(|value| value.parse::<log::LevelFilter>().ok())
+        .unwrap_or(log::LevelFilter::Warn);
+    if let Ok(config) = Config::builder()
+        .appender(
+            Appender::builder().build("console", Box::new(ConsoleAppender::builder().build())),
+        )
+        .build(Root::builder().appender("console").build(level))
+    {
+        let _ = log4rs::init_config(config);
+    }
 }

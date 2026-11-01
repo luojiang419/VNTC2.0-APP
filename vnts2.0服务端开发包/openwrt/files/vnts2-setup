@@ -1,0 +1,31 @@
+#!/bin/sh
+set -eu
+umask 077
+mkdir -p /etc/vnts2
+chmod 700 /etc/vnts2
+if [ ! -s /etc/vnts2/config.toml ]; then
+    password="$(cat /proc/sys/kernel/random/uuid /proc/sys/kernel/random/uuid | tr -d '\n-')"
+    [ "${#password}" -eq 64 ] || { echo '生成管理密码失败'; exit 1; }
+    cat > /etc/vnts2/config.toml.new <<EOF
+tcp_bind = "0.0.0.0:29872"
+quic_bind = "0.0.0.0:29872"
+ws_bind = "0.0.0.0:29872"
+web_bind = "0.0.0.0:29871"
+username = "admin"
+password = "$password"
+network = "10.26.0.0/24"
+white_list = []
+lease_duration = 86400
+persistence = true
+wireguard_max_active_peers = 256
+
+# 需要 WireGuard 时再添加 wireguard_bind 和独立的 32 字节主密钥文件。
+# wireguard_bind = "0.0.0.0:51820"
+# wireguard_master_key_file = "/etc/vnts2/wireguard-master.key"
+[custom_nets]
+EOF
+    mv /etc/vnts2/config.toml.new /etc/vnts2/config.toml
+fi
+chmod 600 /etc/vnts2/config.toml
+echo 'VNTS 管理：http://路由器LAN地址:29871/；账号和随机密码在 /etc/vnts2/config.toml。'
+echo '服务端默认不开放 WAN 防火墙端口；需要公网接入时按实际需求配置。'

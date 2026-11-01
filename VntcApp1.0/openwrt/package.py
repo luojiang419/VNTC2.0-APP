@@ -6,7 +6,11 @@ import io
 from pathlib import Path
 import re
 import shutil
+import sys
 import tarfile
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "tools/openwrt"))
+from targets import TARGETS, check_binary, package_architecture
 
 
 def tar_bytes(entries):
@@ -19,18 +23,21 @@ def tar_bytes(entries):
     return output.getvalue()
 
 
-def package(binary, version, output):
+def package(binary, version, output, arch="x86_64", package_arch=None):
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+(?:[.-][a-zA-Z0-9.-]+)?", version):
         raise ValueError("版本格式必须为 x.y.z")
     source = Path(__file__).resolve().parent
+    check_binary(binary, arch)
+    package_arch = package_architecture(arch, package_arch)
     output.mkdir(parents=True, exist_ok=True)
-    name = f"VNTC_OpenWrt_{version}_x86_64"
+    name = f"VNTC_OpenWrt_{version}_{arch}"
     stage = output / name
     stage.mkdir(exist_ok=True)
     (stage / "files").mkdir(exist_ok=True)
     shutil.copy2(binary, stage / "vntc-openwrt")
     (stage / "vntc-openwrt").chmod(0o755)
-    (stage / "ARCH").write_text("x86_64\n")
+    (stage / "ARCH").write_text(arch + "\n")
+    (stage / "PACKAGE_ARCH").write_text(package_arch + "\n")
     (stage / "VERSION").write_text(version + "\n")
     for relative in ("install.sh", "uninstall.sh", "files/vntc.init", "files/vntc-setup", "files/vntc-firewall", "README.md"):
         content = (source / relative).read_bytes().replace(b"\r\n", b"\n")
@@ -47,7 +54,7 @@ def package(binary, version, output):
         "lib/upgrade/keep.d/vntc": (b"/etc/vntc/\n", 0o644),
     }
     control = (
-        f"Package: vntc-openwrt\nVersion: {version}-1\nArchitecture: x86_64\n"
+        f"Package: vntc-openwrt\nVersion: {version}-1\nArchitecture: {package_arch}\n"
         "Maintainer: VNTC developers\nSection: net\nPriority: optional\n"
         f"Installed-Size: {sum(len(v[0]) for v in payload.values())}\n"
         "Depends: kmod-tun\nDescription: VNTC headless client with embedded WebUI and procd service\n"
@@ -67,7 +74,7 @@ set -e
 [ "${1:-remove}" != remove ] || /usr/libexec/vntc-firewall remove
 exit 0
 '''
-    ipk = output / f"vntc-openwrt_{version}-1_x86_64.ipk"
+    ipk = output / f"vntc-openwrt_{version}-1_{package_arch}.ipk"
     ipk.write_bytes(tar_bytes({
         "debian-binary": (b"2.0\n", 0o644),
         "control.tar.gz": (tar_bytes({"control": (control.encode(), 0o644),
@@ -87,6 +94,8 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--binary", type=Path, required=True)
     parser.add_argument("--version", required=True)
+    parser.add_argument("--arch", choices=TARGETS, default="x86_64")
+    parser.add_argument("--package-arch", help="必须匹配路由器 opkg print-architecture；不指定时用于 armsr 通用虚拟机")
     parser.add_argument("--output", type=Path, default=Path(__file__).resolve().parents[1] / "release/openwrt")
     args = parser.parse_args()
-    package(args.binary.resolve(), args.version, args.output.resolve())
+    package(args.binary.resolve(), args.version, args.output.resolve(), args.arch, args.package_arch)

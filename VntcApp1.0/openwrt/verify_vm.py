@@ -154,7 +154,7 @@ class VM:
              "-device", "e1000,netdev=net0"])
         self.connect()
 
-    def connect(self):
+    def connect(self, timeout=180):
         def connect_once():
             client = paramiko.SSHClient()
             client.set_missing_host_key_policy(paramiko.AutoAddPolicy())
@@ -170,7 +170,7 @@ class VM:
             except Exception:
                 client.close()
                 raise
-        wait_for(f"{self.name} SSH 启动", connect_once, 180)
+        wait_for(f"{self.name} SSH 启动", connect_once, timeout)
 
     def cmd(self, command, check=True, record=True, timeout=90):
         stdin, stdout, stderr = self.ssh.exec_command(command, timeout=timeout)
