@@ -22,7 +22,7 @@ const IDLE_POLL_INTERVAL: Duration = Duration::from_secs(5);
 const MAX_RETRY_DELAY: Duration = Duration::from_secs(60);
 
 #[derive(Clone)]
-struct ServiceEventSink {
+pub(crate) struct ServiceStatusStore {
     state: Arc<Mutex<ServiceRuntimeState>>,
     state_path: PathBuf,
 }
@@ -57,8 +57,8 @@ impl ServiceRuntimeState {
     }
 }
 
-impl ServiceEventSink {
-    fn new(state_path: PathBuf) -> Self {
+impl ServiceStatusStore {
+    pub(crate) fn new(state_path: PathBuf) -> Self {
         Self {
             state: Arc::new(Mutex::new(ServiceRuntimeState::initial())),
             state_path,
@@ -72,6 +72,35 @@ impl ServiceEventSink {
             let _ = write_json_atomically(&self.state_path, &*state);
         }
     }
+
+    pub(crate) fn snapshot_json(&self) -> serde_json::Value {
+        self.state
+            .lock()
+            .ok()
+            .and_then(|state| serde_json::to_value(&*state).ok())
+            .unwrap_or_else(|| serde_json::json!({"serviceState": "unavailable"}))
+    }
+}
+
+#[derive(Clone)]
+struct ServiceEventSink {
+    status: ServiceStatusStore,
+}
+
+impl ServiceEventSink {
+    fn new(status: ServiceStatusStore) -> Self {
+        Self { status }
+    }
+
+    fn update(&self, mutate: impl FnOnce(&mut ServiceRuntimeState)) {
+        self.status.update(mutate);
+    }
+}
+
+#[derive(Clone, Default)]
+pub(crate) struct ServiceSignals {
+    pub(crate) stopping: Arc<AtomicBool>,
+    pub(crate) reload_requested: Arc<AtomicBool>,
 }
 
 impl VntEventSink for ServiceEventSink {
@@ -110,7 +139,11 @@ impl VntEventSink for ServiceEventSink {
     }
 }
 
-pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> {
+pub fn run_worker(
+    root: &Path,
+    signals: ServiceSignals,
+    status: ServiceStatusStore,
+) -> anyhow::Result<()> {
     let config_dir = root.join("config");
     let data_dir = root.join("data");
     let logs_dir = root.join("logs");
@@ -125,11 +158,12 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
             .to_string(),
     )?;
 
-    let sink = ServiceEventSink::new(data_dir.join("service-state.json"));
+    let sink = ServiceEventSink::new(status);
     sink.update(|state| state.service_state = "running".to_string());
     let mut retry_delay = Duration::from_secs(2);
 
-    while !stopping.load(Ordering::SeqCst) {
+    while !signals.stopping.load(Ordering::SeqCst) {
+        signals.reload_requested.store(false, Ordering::SeqCst);
         let snapshot = match load_snapshot(root) {
             Ok(Some(snapshot)) => snapshot,
             Ok(None) => {
@@ -137,7 +171,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                     state.connection_state = "unconfigured".to_string();
                     state.last_error.clear();
                 });
-                wait_or_stop(&stopping, IDLE_POLL_INTERVAL);
+                wait_or_signal(&signals, IDLE_POLL_INTERVAL);
                 continue;
             }
             Err(error) => {
@@ -145,7 +179,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                     state.connection_state = "configurationError".to_string();
                     state.last_error = format!("{error:#}");
                 });
-                wait_or_stop(&stopping, IDLE_POLL_INTERVAL);
+                wait_or_signal(&signals, IDLE_POLL_INTERVAL);
                 continue;
             }
         };
@@ -157,7 +191,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                 state.revision = snapshot.revision();
                 state.last_error.clear();
             });
-            wait_or_stop(&stopping, IDLE_POLL_INTERVAL);
+            wait_or_signal(&signals, IDLE_POLL_INTERVAL);
             continue;
         }
 
@@ -169,7 +203,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                     state.connection_state = "configurationError".to_string();
                     state.last_error = format!("{error:#}");
                 });
-                wait_or_stop(&stopping, IDLE_POLL_INTERVAL);
+                wait_or_signal(&signals, IDLE_POLL_INTERVAL);
                 continue;
             }
         };
@@ -181,7 +215,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                     state.connection_state = "configurationError".to_string();
                     state.last_error = format!("{error:#}");
                 });
-                wait_or_stop(&stopping, IDLE_POLL_INTERVAL);
+                wait_or_signal(&signals, IDLE_POLL_INTERVAL);
                 continue;
             }
         };
@@ -196,15 +230,18 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
         match VntApi::new_with_sink(vnt_config, sink.clone()) {
             Ok(api) => {
                 retry_delay = Duration::from_secs(2);
-                while !stopping.load(Ordering::SeqCst) {
+                while !signals.stopping.load(Ordering::SeqCst) {
                     thread::sleep(CONFIG_POLL_INTERVAL);
+                    if signals.reload_requested.swap(false, Ordering::SeqCst) {
+                        break;
+                    }
                     if configuration_revision(root).as_deref() != Some(revision.as_str()) {
                         break;
                     }
                 }
                 api.stop();
                 sink.update(|state| {
-                    state.connection_state = if stopping.load(Ordering::SeqCst) {
+                    state.connection_state = if signals.stopping.load(Ordering::SeqCst) {
                         "stopping"
                     } else {
                         "reloading"
@@ -217,7 +254,7 @@ pub fn run_worker(root: &Path, stopping: Arc<AtomicBool>) -> anyhow::Result<()> 
                     state.connection_state = "retrying".to_string();
                     state.last_error = format!("{error:#}");
                 });
-                wait_or_stop(&stopping, retry_delay);
+                wait_or_signal(&signals, retry_delay);
                 retry_delay = (retry_delay * 2).min(MAX_RETRY_DELAY);
             }
         }
@@ -237,9 +274,12 @@ fn configuration_revision(root: &Path) -> Option<String> {
         .map(|snapshot: ServiceConfigurationSnapshot| snapshot.revision())
 }
 
-fn wait_or_stop(stopping: &AtomicBool, duration: Duration) {
+fn wait_or_signal(signals: &ServiceSignals, duration: Duration) {
     let deadline = SystemTime::now() + duration;
-    while !stopping.load(Ordering::SeqCst) && SystemTime::now() < deadline {
+    while !signals.stopping.load(Ordering::SeqCst)
+        && !signals.reload_requested.load(Ordering::SeqCst)
+        && SystemTime::now() < deadline
+    {
         thread::sleep(Duration::from_millis(200));
     }
 }

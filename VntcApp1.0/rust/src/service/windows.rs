@@ -1,6 +1,5 @@
 use std::ffi::OsString;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
+use std::sync::atomic::Ordering;
 use std::time::Duration;
 
 use windows_service::define_windows_service;
@@ -11,7 +10,8 @@ use windows_service::service_control_handler::{self, ServiceControlHandlerResult
 use windows_service::{service_dispatcher, Result};
 
 use super::config::machine_root_from_environment;
-use super::runtime::run_worker;
+use super::ipc::run_server;
+use super::runtime::{run_worker, ServiceSignals, ServiceStatusStore};
 use super::SERVICE_NAME;
 
 const SERVICE_TYPE: ServiceType = ServiceType::OWN_PROCESS;
@@ -27,8 +27,8 @@ fn service_main(_arguments: Vec<OsString>) {
 }
 
 fn run_service() -> Result<()> {
-    let stopping = Arc::new(AtomicBool::new(false));
-    let stopping_for_handler = stopping.clone();
+    let signals = ServiceSignals::default();
+    let stopping_for_handler = signals.stopping.clone();
     let event_handler = move |control_event| -> ServiceControlHandlerResult {
         match control_event {
             ServiceControl::Stop | ServiceControl::Shutdown => {
@@ -50,7 +50,15 @@ fn run_service() -> Result<()> {
         process_id: None,
     })?;
 
-    let exit_code = match run_worker(&machine_root_from_environment(), stopping) {
+    let root = machine_root_from_environment();
+    let status = ServiceStatusStore::new(root.join("data").join("service-state.json"));
+    let ipc_root = root.clone();
+    let ipc_signals = signals.clone();
+    let ipc_status = status.clone();
+    std::thread::spawn(move || {
+        let _ = run_server(&ipc_root, ipc_signals, ipc_status);
+    });
+    let exit_code = match run_worker(&root, signals, status) {
         Ok(()) => ServiceExitCode::Win32(0),
         Err(_) => ServiceExitCode::ServiceSpecific(1),
     };

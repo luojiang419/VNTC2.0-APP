@@ -2392,6 +2392,7 @@ dependencies = [
  "tokio",
  "vnt-core",
  "windows-service",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

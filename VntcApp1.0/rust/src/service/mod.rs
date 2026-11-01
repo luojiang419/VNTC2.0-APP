@@ -1,4 +1,5 @@
 mod config;
+mod ipc;
 mod runtime;
 mod windows;
 
@@ -10,6 +11,15 @@ pub const SERVICE_NAME: &str = "VntCoreService";
 
 pub fn run() -> anyhow::Result<()> {
     let arguments: Vec<String> = env::args().skip(1).collect();
+    if arguments
+        .iter()
+        .any(|argument| argument == "--ipc-test-server")
+    {
+        let root = env::temp_dir().join("VntCoreServiceIpcTest");
+        let signals = runtime::ServiceSignals::default();
+        let status = runtime::ServiceStatusStore::new(root.join("data").join("service-state.json"));
+        return ipc::run_test_server(&root, signals, status);
+    }
     if arguments
         .iter()
         .any(|argument| argument == "--validate-config")
