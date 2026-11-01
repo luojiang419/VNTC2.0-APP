@@ -474,12 +474,24 @@ begin
 end;
 
 procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ServiceStopResult: Integer;
 begin
   // [Run] entries execute before ssPostInstall. Extract the payload during
   // ssInstall so the bundled vntcrustdesk bootstrap script and MSI exist
   // before the bootstrap command is invoked on a clean machine.
   if CurStep = ssInstall then
   begin
+    // An existing auto-start service may lock vnt_service.exe during an
+    // in-place upgrade. Stop it before extracting the replacement payload.
+    Exec(
+      ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+      '-NoProfile -NonInteractive -ExecutionPolicy Bypass -Command "Stop-Service -Name ''VntCoreService'' -Force -ErrorAction SilentlyContinue"',
+      '',
+      SW_HIDE,
+      ewWaitUntilTerminated,
+      ServiceStopResult
+    );
     ForceDirectories(ExpandConstant('{app}'));
     ExtractTemporaryFile('brand_payload.zip');
     ExtractArchive(

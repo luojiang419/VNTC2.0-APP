@@ -25,6 +25,11 @@ void main() {
     expect(portable, contains("scripts\\install_vnt_service.ps1"));
     expect(installer, contains('install_vnt_service.ps1'));
     expect(installer, contains('uninstall_vnt_service.ps1'));
+    expect(installer, contains("Stop-Service -Name ''VntCoreService''"));
+    expect(
+      installer.indexOf("Stop-Service -Name ''VntCoreService''"),
+      lessThan(installer.indexOf('ExtractArchive(')),
+    );
     expect(installScript, contains("\$serviceName = 'VntCoreService'"));
     expect(installScript, contains('-StartupType Automatic'));
     expect(installScript, contains('sc.exe failure'));
