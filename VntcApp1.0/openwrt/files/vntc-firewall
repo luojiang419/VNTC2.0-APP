@@ -16,7 +16,8 @@ case "${1:-install}" in
         tun="${tun:-vnt0}"
         case "$tun" in *[!a-zA-Z0-9_.-]*|'') echo '无效的 TUN 接口名'; exit 1 ;; esac
         [ "${#tun}" -le 15 ] || { echo 'TUN 接口名不能超过 15 字节'; exit 1; }
-        if [ "$(uci -q get "$section.device" || true)" = "$tun" ]; then
+        if [ "$(uci -q get "$section.device" || true)" = "$tun" ] &&
+           [ "$(uci -q get "$section.mtu_fix" || true)" = 1 ]; then
             exit 0
         fi
         if ! uci -q get "$section" >/dev/null; then
@@ -26,6 +27,7 @@ case "${1:-install}" in
             uci set "$section.output=ACCEPT"
             uci set "$section.forward=REJECT"
         fi
+        uci set "$section.mtu_fix=1"
         uci -q delete "$section.device" || true
         uci add_list "$section.device=$tun"
         : > "$marker"

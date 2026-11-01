@@ -71,6 +71,121 @@ ARMv7 采用 hard-float，要求 VFPv3/VFPv4，不支持没有 VFP 的 ZX279128S
 - 两种架构均实际验证随机鉴权、原生 IPK/TUN、错误架构拒装、QUIC/TLS-TCP 中继、双向大包和 HTTP、SQLite/配置保留、procd 崩溃恢复、客户机热重启、离线安装/卸载/重装，以及稳定后双向 20 包零丢失。
 - ARMv7 早期 180 秒 SSH 等待不足，固定 virt virtualization=on 并单独提高 TCG 等待上限，独立和接力热重启均通过。
 - ARM64 稳定性补测发现直接 SIGTERM QEMU 会丢失新复制程序未刷盘的尾部；测试器已加入 sync，使用相同离线包恢复后核对完整长度/哈希、业务配置不变、冷启动注册和双向零丢失通过。恢复证据附在最终 ARM64 report 的 `test_environment_recovery` 字段中。
-- 本轮 ARM VM 均已停止，磁盘和日志可恢复；此前 x86 演示机未停止。
+- 开发验收阶段结束后 ARM VM 曾停止；随后按用户要求重新部署并保留在线，当前状态见下节。
 
 本次不涉及刷写物理路由器；ARM WireGuard 专项流量、满载/P2P/具体 LAN 拓扑和浏览器视觉验收不在当前通过范围内。无需将构建/VM 缓存、私钥或临时凭据加入源码提交。
+
+## 持续数据传输与在线部署（2026-11-01）
+
+用户要求生成后部署、实际验证数据传输稳定性并提供 VNTs/vntc 访问地址。已从交付目录重新安装相同 SHA-256 的 IPK，逐台核对安装后的程序哈希，保留既有业务配置和随机凭据。每种架构运行两台 256MiB 完整 OpenWrt VM，节点 A 同时运行服务端，两个客户端均使用 relay_only，依次验证 TCP 与 QUIC。
+
+| 架构 | TCP 实际持续时间 | QUIC 实际持续时间 | 双向有效载荷 | 文件完整性 | 大包丢失 | 意外进程重启 |
+| --- | ---: | ---: | ---: | --- | --- | --- |
+| ARM64 | 179.731 秒 | 150.439 秒 | 120MiB | 120 次 SHA-256 全一致 | 0% | 无 |
+| ARMv7 | 150.146 秒 | 150.122 秒 | 120MiB | 120 次 SHA-256 全一致 | 0% | 无 |
+
+每协议、每方向 30 次 1MiB 随机文件传输，同时每方向发送 150 个 1300 字节 ICMP 包，每架构共 600 包。传输通过虚拟 IP 的原生 TCP HTTP 流，实际穿过 TUN、VNT 加密通道和 ARM 服务端中继。最后保持 QUIC 连接。该结果属于短时、受控负载稳定性验收，不代表最大吞吐或长期运行验收。
+
+当前本机访问地址：
+
+| 架构 | vntc 节点 A | vntc 节点 B | VNTs |
+| --- | --- | --- | --- |
+| ARM64 | http://127.0.0.1:23110/ | http://127.0.0.1:23111/ | http://127.0.0.1:23121/ |
+| ARMv7 | http://127.0.0.1:23210/ | http://127.0.0.1:23211/ | http://127.0.0.1:23221/ |
+
+已在 Windows 宿主实际验证六个页面 HTTP 200、VNTs 登录及受保护 API、vntc running 和在线对端。四台 VM、两个 VNTs 和四个 vntc 保持运行，临时 HTTP 测试进程及 guest 测试数据已经清理。保留 WSL keepalive，管理地址依赖本机 WSL/VM 继续运行。
+
+交付目录 `dist/openwrt-arm/live/` 包含两个 live-report.json、summary.json、windows-access-check.json、cleanup-check.json。用户名、密码和管理令牌仅写入该忽略目录下的 `访问说明.md` 和两个 access.json，不进入源码提交。原始命令/串口/载荷记录位于上述 VM 目录的 `live-20261101T143721Z/`。
+
+## Windows 临时版互通验收（2026-11-01）
+
+用户要求在本机部署 Windows 临时版，验证与上述 ARM 服务端和客户端连接、传输。已用同一 VNT Core 构建 Windows x86_64 原生 EXE + WebUI，版本 `4.8.40-win-arm-test`，使用实际 Wintun，不替换已运行的正式 Flutter 客户端，不安装系统服务。隔离目录为 `dist/windows-arm-interop/`，控制台 http://127.0.0.1:18083/；凭据仅存本地 `state/config.json` 和 `访问说明.md`。
+
+Windows 虚拟 IP 为 `10.26.0.10/24`，网卡为 `VNT-App-TUN-VNT-WinARM-Test`。预置 ARM64/ARMv7 各 TCP/QUIC 共四个档案；两组网段相同，依次连接。ARM 各节点保持 relay_only，使用虚拟 IP 的真实 TCP HTTP 数据流传输。
+
+| ARM 架构 | 通道 | 双向有效载荷 | 实际持续时间 | 文件校验 | 大包 ping |
+| --- | --- | ---: | ---: | --- | --- |
+| ARM64 | TCP | 40MiB | 94.344 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARM64 | QUIC | 40MiB | 61.015 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARMv7 | TCP | 40MiB | 60.422 秒 | SHA-256 全一致 | 240 包零丢失 |
+| ARMv7 | QUIC | 40MiB | 60.453 秒 | SHA-256 全一致 | 240 包零丢失 |
+
+每组 Windows 分别与两个 ARM 对端进行 10 轮、每轮双向各 1MiB 随机文件传输，总计 160MiB、160 次文件 SHA-256 检查；同时四条方向各 60 个 1300 字节 ICMP 包，总计 960 包。Windows 原生 Rust 25 项测试通过；管理 API 确认 `windows/x86_64`、`Windows 原生进程`，七个本机管理页面 HTTP 200。没有将 HTTP 检查当作浏览器视觉验收。
+
+Windows 无法直接访问 WSL 回环 UDP，实测得到 WinError10054；增加 `tools/openwrt/udp_relay.py`，为两组 QUIC 测试提供独立转接，仅允许 Windows WSL 网关 IP，转发加密报文。TCP 仍直接连接宿主回环 23120/23220。该转接属于本地 NAT 测试环境，未更改 ARM 插件网络核心。
+
+`tools/openwrt/windows_temp.py` 提供启动、停止和状态查询；临时部署目录附 `Start.cmd`、`Stop.cmd`、`Status.cmd`。停止前通过 API 释放测试 TUN，核对 EXE 路径与 PID，仅删除该测试的精确防火墙组；WSL 转接停止前逐项核对 /proc/PID/cmdline。重启动态读取 WSL 地址，重建两组转接并默认连接 ARM64 TCP。已实际停止/重启，再分别切换 ARM64/ARMv7 QUIC，复核两个对端大包 ping 零丢失，最后切回 ARM64 TCP，保持两个对端在线。
+
+原正式客户端 `C:\Program Files\VNT App\vnt_app.exe` 保持运行；原有 `vnt-tun`（192.168.111.33/24）及 `VNT-App-TUN-cfg-10e9a9095ae0ef29`（10.10.10.3/24）未替换。临时测试 HTTP 服务和 guest 文件已在验收器 finally 中清理；运行报告、命令日志、重启复核及当前 PID 仅保存在忽略目录。
+
+交付报告为 `dist/windows-arm-interop/interop-report.json` 和 `restart-check.json`。Windows 原生构建使用 Rust 1.95/MSVC、`cargo build --release --locked --target x86_64-pc-windows-msvc`，独立 CARGO_TARGET_DIR，opt-level=s、thin LTO、单 codegen unit、panic=abort。临时版保留四套档案和配置；ARM VM 依赖 WSL 持续运行。此验收属于短时、受控负载的跨平台中继互通，未覆盖公网 P2P、真实路由器或长期压力测试。
+
+源码提交至独立分支 `codex/openwrt-arm`，当前工作区分支 `codex/windows-system-service` 同时有其他任务修改；通过独立 Git 索引与 compare-and-swap 更新任务分支，不切换工作区、不提交其他任务文件、不推送 GitHub。下一步：用户通过 Windows 管理页面确认界面及档案操作；后续物理路由器部署仍需明确机型、CPU/ABI 和可用资源。
+
+## LAN 网关与监控服务（2026-11-02，已完成）
+
+用户进一步授权实现并验证：B 的普通 LAN 设备免装 VNT，访问 B 本地路由器、A 虚拟 IP 的服务及映射端口，以及 A 的 LAN 设备；反向同理。不得改动现有物理路由器和 Windows 业务网络。
+
+已实现 `linux_webui/src/openwrt_routes.rs`：连接后添加输入网段的系统路由，断开时只清理本连接新增路由；拒绝默认/虚拟网段覆盖、重复网段和已有同前缀路由冲突。`openwrt/files/vntc-gateway` 按 UCI 配置生成限定网段的 LAN/TUN 转发、源地址转换和 TCP/UDP DNAT，默认关闭、无常驻进程；安装、卸载、配置保留和 sysupgrade 集成已补齐。专用 VNT 分区启用 TCP MSS 调整。
+
+29 项 OpenWrt musl 测试通过；ARM64/ARMv7 新客户端已编译，候选修订号 `4.8.40-2`，原 `dist/openwrt-arm/` 保留不覆盖。新产物和验证记录在 `dist/openwrt-gateway/`。`tools/openwrt/verify_gateway.py` 复用现有 VM，利用 ip-full/kmod-veth 在每台 guest 创建独立的 `vntc_lan` 命名空间；LAN 终端无 VNT 网卡，仅通过路由器默认网关通信。测试专用服务位于 `/opt/vntc-gateway-test/`，由独立 procd 测试服务管理，不装入正式插件；原业务配置已备份到 guest `/root/vntc-gateway-backup/`。
+
+首轮无节制叠加大文件、四路视频及高频 UDP，观察到单 vCPU TCG guest CPU 满载、40 包中 4 包未及时收到、最长约 14 秒 RTT；属于失败记录，不计为稳定性通过。已修正 fw4 NAT 不能使用目标列表却返回检查成功的问题，并加入 MSS 调整。随后用明确负载边界重新验证：文件源每台约 64KiB/s、分组双向 RTSP/H.264、持续 UDP 和大包，全部通过；保留首轮报告及原始日志。该结果不代表满带宽通过。
+
+UCI 候选配置必须同时用 `-c` 和 `-t` 隔离正式文件与暂存目录；实测无效映射、名称冲突之后，正式防火墙和全局暂存区均保持原样。只操作有所有权记录的规则，保留其他同前缀规则。已有路由冲突测试以协议号过滤确认原路由未被覆盖（ip-full 会把协议 187 显示为 isis）。
+
+最终每种架构通过 8 组网关数据面/边界/重启检查和 3 组所有权/卸载/重装检查：
+
+| 架构 | TCP 阶段 | QUIC 阶段 | 文件校验 | RTSP 完整性 | UDP 回显 | 1300 字节 ping |
+| --- | ---: | ---: | --- | --- | --- | --- |
+| ARM64 | 82.390 秒 | 82.594 秒 | 6MiB、24 次 SHA-256 一致 | 8 次视频流 SHA-256 一致 | 480 次零丢失/损坏 | 320 包零丢失 |
+| ARMv7 | 82.000 秒 | 82.062 秒 | 6MiB、24 次 SHA-256 一致 | 8 次视频流 SHA-256 一致 | 480 次零丢失/损坏 | 320 包零丢失 |
+
+每个协议阶段：两方向各 3 轮，每轮分别用远端 LAN IP 与虚拟 IP 映射端口下载 256KiB 文件；随后两方向分别验证直接 LAN RTSP 和映射端口 RTSP，每次传输 20 秒、200 帧 H.264 测试片。全程并发 4 条 60 次、1300 字节 UDP 回显，以及两方向各 80 个大包 ping。逐次验证文件/压缩视频 SHA-256、RTP 包序号、回显数据和进程 PID，两个服务端和客户端无意外重启。
+
+两种架构均实际执行客户机 reboot，boot_id 改变后自动恢复测试 LAN、服务、网关规则、输入路由和远端文件访问；正常退出前 sync。IPK 卸载后受管规则清理，配置保留；离线安装、离线卸载与重装均恢复远端服务，并保留专门构造的同前缀非受管规则及原有防火墙配置。B 节点最终为离线安装，仍由 procd 管理。
+
+Windows 原生临时客户端又完成两架构、两协议的映射端口访问，8 个 256KiB 文件 SHA-256 一致；FFmpeg 从两架构 A 节点的 `rtsp://10.26.0.2:18554/live` 实际解码，各 200 帧逐帧 SHA-256 与本机原始视频全一致。注册完成后首个服务探测需一次重试，四次切档案均约 20 秒完成两端探测和下载（包含文件传输时间）；就绪后传输正常。最终 Windows 回到 ARM64 TCP，两个对端在线。
+
+交付目录 `dist/openwrt-gateway/` 包含三种架构的新客户端 IPK/离线包（4.8.40-2），ARM64/ARMv7 同时附原 SHA-256 不变的 VNTs 2.0.0-1 包。x86_64 通过 29 项 musl 测试、默认非 OpenWrt feature 的 cargo check、release 构建和包/ELF 校验，本轮未另跑 x86 网关 VM。`collect_gateway.py` 已核对所有离线包内部校验、IPK/离线机器码与脚本一致，以及四台 guest 实装客户端/网关脚本和两台服务端程序哈希。
+
+本次采样 vntc RSS：ARM64 6992/6780KiB，ARMv7 7196/7120KiB；服务端 RSS 为 7996/7416KiB。网关 helper 无新增常驻进程，样本受测试后缓存和运行负载影响，不能据此承诺实机总内存。原 Windows 正式客户端与业务网络不作替换。
+
+当前 A LAN 为 192.168.50.0/24、B LAN 为 192.168.60.0/24；虚拟 IP 分别为 10.26.0.2/3。测试映射为 18081→HTTP 18090、18554→RTSP 8554、UDP 18082→18092；六个管理页面地址保持前文所列。用户可通过 Windows 临时版确认虚拟端口访问；模拟 LAN 地址只在各自 guest 的终端命名空间内使用，不向宿主物理 LAN 桥接。物理摄像头、ONVIF 广播发现、动态 RTP/UDP 端口、公网 P2P、满载及长时间运行未计入本次验收。
+
+任务实现与本地部署全部完成，保留 VM 和 Windows 临时版运行。使用说明和无凭据清单见交付目录；最终结果为两份 report.json、两份 lifecycle.json、Windows report.json、manifest.json。仅作本地独立索引提交，不推送 GitHub。后续真机部署需要实际机型、CPU/ABI、LAN 网段与摄像头服务参数。
+
+## x86_64 网关完整验收补齐（2026-11-02，已完成）
+
+用户追问 x86_64 是否也完成。此前该架构只有构建、29 项测试和包校验，不能当作完整网关 VM 通过；现在补齐与 ARM 相同的数据面、边界、重启、卸载/重装和 Windows 播放验收，不重复已通过的 ARM 阶段。
+
+`provision_x86_gateway.py` 已在 WSL 创建两台新的官方 OpenWrt 24.10.5 x86_64 VM，TCG/qemu64、单 vCPU、256MiB，IDE/e1000，镜像与同内核 TUN 均核对官方 SHA-256。独立端口 23500/23501（SSH）、23510/23511（vntc）、23520（中继）、23521（VNTs），不覆盖之前的 x86 或 ARM 演示。运行目录和 PID 记录在忽略的 `dist/openwrt-gateway/live/x86_64-runtime.json`；凭据单独在 x86_64-access.json。
+
+新客户端使用已生成的 4.8.40-2 包；x86_64 VNTs 2.0.0-1 静态包已构建并实际安装，管理登录通过。辅助视频和 UDP/HTTP 工具已原生编译为 x86_64，不会装进正式插件。
+
+Windows 临时版新增两个独立 x86 档案，ID 保存在 runtime.json；专用 UDP 转接使用 WSL 地址端口 23620→23520。已有四个 ARM 档案、正式 Windows 客户端和业务网卡保留。更新后的 Start/Stop.cmd 已实际停止/重启，三组专用 UDP 转接均恢复；随后 Windows 完成 x86 TCP/QUIC 访问并保持 x86 TCP 连接，两个对端在线。
+
+最终 x86_64 通过相同的 8 组主验证和 3 组生命周期验证：
+
+| 通道 | 实际阶段时间 | 双向文件 | 视频流 | UDP 回显 | 1300 字节 ping |
+| --- | ---: | --- | --- | --- | --- |
+| TCP | 97.437 秒 | 3MiB、12 次 SHA-256 一致 | 4 次 RTSP 内容一致 | 240 次零丢失/损坏 | 160 包零丢失 |
+| QUIC | 104.453 秒 | 3MiB、12 次 SHA-256 一致 | 4 次 RTSP 内容一致 | 240 次零丢失/损坏 | 160 包零丢失 |
+
+Windows 另通过两协议访问 A/B 映射服务，4 个文件 SHA-256 一致；从 A 虚拟 IP 的 RTSP 端口实际解码 200 帧，逐帧 SHA-256 与参考片一致。配置冲突/非法映射拒绝、网关关闭与恢复、已有路由保护、IPK/离线卸载重装、配置和非受管规则保留均通过。B 节点最终为离线安装，由 procd 管理。
+
+本机嵌套 TCG 的初期常规复位曾停在内核解压或清理内存阶段，监控出现 REP 写入进展缓慢及 RCU stall；仅增加内存或更换引导入口没有解决。最终使用官方内核原始 ELF 的 PVH 入口、max CPU、512MiB、单线程 TCG、8MiB 翻译缓存、可靠 TSC/键盘复位配置。A 保留初始 256MiB 环境，B 使用此稳定配置；真实资源和恢复历史记录在 runtime.json。该设置仅属于测试虚拟硬件，不改变交付插件或实际路由器内核。
+
+验证器已修正两处恢复判断：SSH 恢复时必须核对新 boot_id，防止误连尚未关闭的旧系统；Paramiko 的 exec 请求 ACK 本身没有接收超时，需要单独加截止时间，避免重启边界的旧连接永久等待。稳定配置下重新执行两协议数据面及常规 reboot，在同一 QEMU PID 内确认 boot_id 改变，自动恢复 VNT、输入路由、网关规则及远端文件 SHA-256。最终通过的是常规 reboot；前期冷启动恢复、kexec 和固件失败记录均不计为该通过项。
+
+collect_gateway.py 已扩展为三架构实装核对；x86_64 客户端/服务端 IPK、离线包及 guest 实装机器码和脚本一致。结果为 validation/x86_64/report.json、lifecycle.json、validation/windows-x86_64/report.json；原 ARM 报告保留。当前 x86 客户端 A/B：http://127.0.0.1:23510/ 和 http://127.0.0.1:23511/；VNTs：http://127.0.0.1:23521/。登录凭据仅保存在忽略的 live/x86_64访问说明.md。
+
+三种架构的网关与服务传输验收现均已完成，保持六台 VM 及 Windows 临时验证端运行。仍限定为受控负载与合成视频，不包含物理摄像头、满带宽、公网 P2P 或长期压力验证。源码仅作本地独立索引提交，不推送。
+
+## 最新源码与任务文档同步（2026-11-02）
+
+用户现已明确授权“推送最新源代码和任务文档”，此前各阶段“仅本地、不推送”的描述保留为历史记录。本次以 `codex/windows-system-service` 汇总 Windows 系统服务与 OpenWrt 三架构网关成果，并保留 `codex/openwrt-arm` 的独立开发历史；远程仓库为 `luojiang419/VNTC2.0-APP`。
+
+当前任务记录为本文及 `VntcApp1.0/系统级自启动开发任务.md`，均随源码纳入版本控制。旧进度快照继续按既有规则保留在本地，不批量导入历史资料。`KEY/`、`KEY2/`、运行配置、带凭据报告、构建缓存和发行产物不进入提交。
+
+本次推送检查执行 Python 源码语法解析、Git diff 格式检查及提交内容检查；前文构建、VM、Windows 和视频结果为已记录的既有验收，不表示本次重新执行。推送后以远程分支提交哈希与本地一致为完成条件；本次不合并 main、不创建新版本或 Release。后续开发从汇总分支接续，实机验收边界仍见前文。

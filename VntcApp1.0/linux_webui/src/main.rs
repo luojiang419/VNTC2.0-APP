@@ -47,7 +47,10 @@ async fn run_server(config: AppConfig, config_path: PathBuf) -> Result<()> {
     let listen_address = (config.web.listen, config.web.port);
     let auto_start = config.auto_start;
     let state = Arc::new(ApiState::new(config, config_path)?);
-    state.logs.push("info", "Linux WebUI 控制面已初始化").await;
+    state
+        .logs
+        .push("info", format!("{} 控制面已初始化", product_name()))
+        .await;
     let listener = TcpListener::bind(listen_address)
         .await
         .with_context(|| format!("监听 {}:{} 失败", listen_address.0, listen_address.1))?;
@@ -57,8 +60,10 @@ async fn run_server(config: AppConfig, config_path: PathBuf) -> Result<()> {
     }
 
     println!(
-        "VNTC Linux WebUI 已启动：http://{}:{}",
-        listen_address.0, listen_address.1
+        "{} 已启动：http://{}:{}",
+        product_name(),
+        listen_address.0,
+        listen_address.1
     );
     axum::serve(listener, router(state.clone()))
         .with_graceful_shutdown(shutdown_signal(state))
@@ -120,6 +125,14 @@ fn print_help() {
         "vntc-linux-webui {}\n\n用法：\n  vntc-linux-webui --config <路径>\n  vntc-linux-webui --config <路径> --check-config\n\n参数：\n  -c, --config <路径>  JSON 配置文件，默认 config.json\n      --check-config    校验配置后退出\n  -h, --help            显示帮助",
         app_version()
     );
+}
+
+fn product_name() -> &'static str {
+    if cfg!(windows) {
+        "VNTC Windows WebUI"
+    } else {
+        "VNTC Linux WebUI"
+    }
 }
 
 fn app_version() -> &'static str {

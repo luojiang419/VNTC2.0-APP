@@ -65,3 +65,40 @@ python3 VntcApp1.0/openwrt/verify_vm.py \
 验证安装、鉴权、真实 TUN、双节点虚拟 IP 双向 ping、大包通信、流量计数、停止释放 TUN、重连、进程崩溃恢复、服务端重启恢复、虚拟机重启自启、重新安装/卸载保留配置，以及便携安装。任何断言失败均返回非零并保留串口日志、命令记录及 JSON 报告。默认结束时关闭本次启动的虚拟机和测试服务端；加 `--keep-running` 保留供人工检查。
 
 既有 `verify_vm.py` 用于 x86_64；ARM64/ARMv7 使用独立验证器。MIPS、真实硬件、特定 LAN 防火墙拓扑需针对目标设备另行验收。
+
+## 两地 LAN 互访与监控端口转发
+
+网关功能默认关闭，不新增常驻进程。需要 firewall4、IPv4 转发，且两地 LAN 与虚拟网段不能重叠。以下例子中 A 是现场路由器，LAN 为 `192.168.50.0/24`、虚拟 IP `10.26.0.2`；B 是访问端，LAN 为 `192.168.60.0/24`、虚拟 IP `10.26.0.3`。普通 LAN 设备以所在路由器为默认网关，无需安装 VNT；路由器若只是旁路由，需要在主网关或终端添加指向旁路由的目标网段路由。
+
+在两端 WebUI 配置页面固定虚拟 IP，启用“禁用内置 NAT”，使用 OpenWrt 内核转发。A 输入路由填 `192.168.60.0/24=10.26.0.3`，输出路由填 `192.168.50.0/24`；B 输入路由填 `192.168.50.0/24=10.26.0.2`，输出路由填 `192.168.60.0/24`。保存并连接。OpenWrt 客户端自动添加输入网段的内核路由，断开时清理；遇到已有同前缀路由会报错，不覆盖默认路由或虚拟网段。
+
+A 端执行（B 端交换两个 LAN 网段）：
+
+```sh
+uci set vntc_gateway.main.enabled='1'
+uci set vntc_gateway.main.lan_zone='lan'
+uci set vntc_gateway.main.lan_cidr='192.168.50.0/24'
+uci set vntc_gateway.main.overlay_cidr='10.26.0.0/24'
+uci -q delete vntc_gateway.main.remote_cidr || true
+uci add_list vntc_gateway.main.remote_cidr='192.168.60.0/24'
+uci commit vntc_gateway
+/usr/libexec/vntc-gateway apply
+```
+
+此时 B 下电脑既能访问 B 本地地址，也能访问 A 的虚拟 IP 上开放的服务，以及 A 的 `192.168.50.x` 设备；反向同理。插件生成限定来源与目标网段的 LAN/VNT 放行及双向源地址转换，因此终端不需要额外回程路由；远端服务看到的是路由器地址。默认不增加 WAN 入口，不转发两端的普通上网流量。
+
+如现场摄像头为 `192.168.50.100:80`，需要用 `10.26.0.2:18081` 访问，在 A 增加：
+
+```sh
+uci set vntc_gateway.camera='service'
+uci set vntc_gateway.camera.proto='tcp'
+uci set vntc_gateway.camera.listen_port='18081'
+uci set vntc_gateway.camera.dest_ip='192.168.50.100'
+uci set vntc_gateway.camera.dest_port='80'
+uci commit vntc_gateway
+/usr/libexec/vntc-gateway apply
+```
+
+RTSP 同样可映射 TCP 端口（如 18554 → 554），播放器使用 `rtsp://10.26.0.2:18554/实际流路径` 并选择 RTP over TCP；UDP 服务使用独立的 `proto='udp'` 服务节。RTSP 的动态 RTP/RTCP UDP 端口还需按设备配置单独处理。Web 页面若返回绝对地址或额外服务端口，优先通过远端 LAN IP 直接访问。组网不会自动代理 ONVIF/广播发现，已知 IP 的访问不受此限制。
+
+修改配置后执行 apply，服务重启和开机会重新应用；规则使用独立的 `vntcg_` 节及所有权记录，校验失败恢复原防火墙配置。关闭使用 `uci set vntc_gateway.main.enabled='0'; uci commit vntc_gateway; /usr/libexec/vntc-gateway apply`。卸载只清理受管规则，默认保留 `/etc/config/vntc_gateway` 和业务配置，sysupgrade 备份包含二者。不要手动改写受管防火墙节，应修改网关配置后重新应用。

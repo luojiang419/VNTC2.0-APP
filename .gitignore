@@ -90,6 +90,8 @@ VntcApp1.0/output.zip
 VntcApp1.0/config/config.json
 
 # 本地基础设施凭据文档（禁止提交）
+/KEY/
+/KEY2/
 云服务器.md
 **/云服务器.md
 **/*云服务器*.md

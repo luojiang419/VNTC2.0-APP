@@ -188,6 +188,8 @@ impl VntController {
 }
 
 struct RunningVnt {
+    #[cfg(feature = "openwrt")]
+    _input_routes: Option<crate::openwrt_routes::InputRoutes>,
     _network_manager: NetworkManager,
     _task_guard: TaskGroupGuard,
     api: VntApi,
@@ -323,6 +325,12 @@ impl RunningVnt {
 }
 
 async fn start_attempt(config: CoreConfig) -> Result<RunningVnt> {
+    #[cfg(feature = "openwrt")]
+    let input_routes = config
+        .input
+        .iter()
+        .map(|route| route.net.trunc())
+        .collect::<Vec<_>>();
     let task_manager = TaskGroupManager::new();
     let (task_group, task_guard) = task_manager.create_task()?;
     let mut network_manager = NetworkManager::create_network(Box::new(config), task_group)
@@ -343,7 +351,36 @@ async fn start_attempt(config: CoreConfig) -> Result<RunningVnt> {
             .context("配置 Linux TUN 地址失败")?;
     }
     let api = network_manager.vnt_api();
+    #[cfg(feature = "openwrt")]
+    let routes = if network_manager.is_no_tun() || input_routes.is_empty() {
+        None
+    } else {
+        let tun = network_manager.tun_if_index().await?;
+        // 从内核索引查名称，支持实际设备名与请求名称不同的情况。
+        let name = std::fs::read_dir("/sys/class/net")?
+            .filter_map(std::result::Result::ok)
+            .find(|entry| {
+                std::fs::read_to_string(entry.path().join("ifindex"))
+                    .ok()
+                    .and_then(|s| s.trim().parse::<u32>().ok())
+                    == Some(tun)
+            })
+            .context("找不到 VNT TUN 设备")?
+            .file_name()
+            .to_string_lossy()
+            .into_owned();
+        let overlay = Ipv4Net::new(network.ip, network.prefix_len)?.trunc();
+        Some(
+            tokio::task::spawn_blocking(move || {
+                crate::openwrt_routes::InputRoutes::install(name, input_routes, overlay)
+            })
+            .await
+            .context("输入路由任务失败")??,
+        )
+    };
     Ok(RunningVnt {
+        #[cfg(feature = "openwrt")]
+        _input_routes: routes,
         _network_manager: network_manager,
         _task_guard: task_guard,
         api,

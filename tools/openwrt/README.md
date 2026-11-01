@@ -1,4 +1,4 @@
-# OpenWrt ARM 构建与验证工具
+# OpenWrt 构建与验证工具
 
 服务端和客户端共用静态 ELF/ABI 校验与交叉构建入口。ARM64 使用 `aarch64-unknown-linux-musl`；ARMv7 使用 `armv7-unknown-linux-musleabihf`（ARMv7 + VFPv3，hard-float）。不涵盖 ARMv6、MIPS、无 VFP 的 ZX279128S 或其他 soft-float 平台。
 
@@ -39,6 +39,46 @@ ARMv7 固定 `virt,virtualization=on / cortex-a15`，本机 TCG 重启后的 SSH
 
 两份报告均成功后，运行 `python3 tools/openwrt/collect.py --report /path/to/aarch64/report.json --report /path/to/armv7/report.json`，会检查包哈希与报告、IPK ELF 与元数据、离线包内层校验和及二者机器码一致性，汇总到 `dist/openwrt-arm/`。
 
+## 持续传输与保留管理页面
+
+`live_validate.py --run /path/to/run --output /path/to/live --duration 300 --rounds 30` 复用已通过基础验收的磁盘，从交付目录重新部署同哈希 IPK。每种架构分别执行 TCP 和 QUIC 中继，每协议每方向传输 30 次 1MiB 随机文件，逐次 SHA-256 验证；同时每方向发送 150 个 1300 字节 ICMP 包，要求零丢失，并比较服务进程 PID。
+
+临时 HTTP 数据源由 `transfer_http.c` 静态交叉编译，仅用于隔离 VM 验收，不装进插件。传输结束移除临时进程和 guest /tmp 测试数据，成功后保留 VNTs/vntc 及 VM 运行；失败则写入错误报告并停止本轮 VM。部署时仍使用既有的随机密码和管理令牌，配置保留。
+
+报告保存为 `{architecture}-live-report.json`；登录凭据单独写入 `{architecture}-access.json`，仅放在被忽略的本地交付目录，不能提交 Git。不要对已经运行的同一 VM 目录重复执行启动命令。
+
 HTTP 和嵌入资源检查不代表浏览器视觉验收；QEMU 测试不代表具体路由器的 Wi-Fi、Flash 分区、满带宽、硬件加速或长期稳定性。无指定机型时交付通用 CPU/ABI 版本，后续仍需核对设备 `uname -m`、`opkg print-architecture`、剩余存储以及匹配内核的 kmod-tun。
 
 任务结果与产物入口见 `VntcApp1.0/openwrt/ARM适配与验证.md`。
+
+## 本机 Windows 与 ARM 互通
+
+`windows_interop.py` 在 Windows 宿主运行，复用本机已经部署的 `dist/windows-arm-interop/`、四台 ARM VM 与对应 SSH 密钥。它依次连接 ARM64/ARMv7 的 TCP/QUIC 档案，验证真实 Wintun 虚拟 IP 双向文件 SHA-256 和大包 ping。该脚本的 VM 路径和端口对应当前部署，其他机器需要调整；依赖 Python paramiko、管理员权限，不是通用 VM 启动器。
+
+`windows_temp.py start|stop|status [--deployment 路径]` 管理隔离的 Windows 临时版，保留配置。启动会重新读取 WSL NAT 地址并重建专用 UDP 转接，默认连接 ARM64 TCP；停止仅操作经路径核对的临时 EXE、命令行核对的转接及精确防火墙组。`udp_relay.py` 只转接本地 WSL NAT 测试所需的 UDP 加密报文，限制来源，不用于公网通用中继。运行这些入口前须保持既有 ARM VM 在线，脚本不会重建 VM。
+
+当前 Windows 控制台：http://127.0.0.1:18083/。本机交付目录有 Start/Stop/Status.cmd、`访问说明.md`、配置和报告，不加入 Git。临时版使用原生 Windows VNT Core + WebUI，与原正式 Flutter 客户端隔离运行。
+
+## 两地 LAN、监控和网关生命周期验收
+
+网关配置与实际安装命令见 `VntcApp1.0/openwrt/README.md`。新构建默认包修订号为 2，正式应用版本不变；可通过 VNTC_PACKAGE_REVISION 覆盖。当前网关产物使用 `dist/openwrt-gateway/`，不覆盖旧验收包。
+
+`verify_gateway.py --arch aarch64|armv7` 在 Windows 宿主复用上述固定端口、VM 目录和 SSH 密钥，需要先在测试 guest 安装同内核的 `ip-full kmod-veth`。这些仅用于验收，不是物理路由器插件的新运行依赖。测试给 A/B 分别创建 192.168.50.0/24、192.168.60.0/24 的独立网络命名空间，命名空间中没有 VNT，使用本地路由器作为默认网关。验证双向本地访问、虚拟 IP 端口、远端 LAN IP、HTTP SHA-256、UDP、RTSP/RTP H.264、规则关闭/冲突、路由冲突及真实客户机重启。成功后保留配置和演示服务。
+
+先用 `python tools/openwrt/prepare_gateway_video.py --ffmpeg /path/to/ffmpeg` 生成规范 Annex B 测试片（已存在时不会覆盖）。在 WSL 用 Zig 将 `gateway_probe.c`、`transfer_http.c` 分别编译为 `dist/openwrt-gateway/{arch}/gateway-probe`、`gateway-http`：`zig cc -target aarch64-linux-musl -static -Os -Wall -Wextra -Werror 源文件 -o 目标文件`；ARMv7 替换为 `arm-linux-musleabihf`。
+
+测试文件源每台约 64KiB/s；文件阶段后分别测试两种双向视频通路，同时持续 UDP 回显与大包。首轮未限速的拥塞/丢包记录保留，不作为通过。`--skip-deploy` 仅重测已部署环境；只有两组数据面已成功且包 SHA-256 未变，才允许 `--finish-only` 续测边界与重启，保留原通过结果。
+
+数据面成功后运行 `verify_gateway_lifecycle.py --arch ...`，验证同名非受管规则不被覆盖、IPK/离线卸载与离线重装、配置保留和路由恢复。最后运行 `verify_gateway_windows.py --ffmpeg 本机FFmpeg路径`，由原生 Windows 临时客户端依次访问两套架构的 TCP/QUIC 端口映射，并对实际 RTSP 流解码的 200 帧逐帧比较 SHA-256。所有凭据、测试视频、报告、辅助二进制仅保存在忽略目录。
+
+最后执行 `python tools/openwrt/collect_gateway.py`，核对当前包与报告 SHA-256、离线内部文件、IPK/离线内容和实际 guest 安装文件；附上未改变的 ARM 服务端包，生成 manifest.json 和各架构 SHA256SUMS。x86_64 的验证范围单独标记，不将编译校验当作本轮网关 VM 验收。
+
+## x86_64 完整网关环境
+
+WSL 内运行 `python3 tools/openwrt/provision_x86_gateway.py`，新建独立 x86 VM、核对官方镜像、安装两客户端和一个服务端，记录 dist/openwrt-gateway/live/x86_64-runtime.json。已有记录时拒绝覆盖。端口为 23500/23501、23510/23511、23520、23521；不复用旧 x86/ARM 演示。构建包放在 dist/openwrt-gateway/x86_64/；辅助工具目标使用 x86_64-linux-musl。
+
+当前 WSL 嵌套 TCG 采用官方内核解压后的原始 ELF/PVH 入口和受限翻译缓存，具体参数在 provision_x86_gateway.py；属于测试硬件配置，不是实际路由器内核要求。测试先前在 256MiB 完成数据面，最终 B 的稳定复位配置为 512MiB。
+
+Windows 宿主依次运行 `verify_gateway.py --arch x86_64`、`verify_gateway_lifecycle.py --arch x86_64`。若保留已通过的数据面接力，--finish-only 强制核对包哈希不变。重启就绪以新 boot_id、同一 QEMU PID、VNT 和数据面恢复为准；SSH exec 请求 ACK 有独立截止时间。
+
+connect_windows_x86_gateway.py 为既有隔离 Windows 临时版新增两个 x86 档案及专用 UDP 转接（23620→23520），保留旧档案。随后运行 `verify_gateway_windows.py --arch x86_64 --leave-connected --ffmpeg 本机路径`，输出独立 windows-x86_64/report.json，保留 ARM 报告。最后运行 collect_gateway.py，三架构均须完成主验证、生命周期、Windows 文件及视频校验后才能汇总。

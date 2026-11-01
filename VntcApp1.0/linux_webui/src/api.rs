@@ -157,6 +157,13 @@ async fn index_page() -> Response {
         });
         *page.body_mut() = Body::from(html.as_str());
         page
+    } else if cfg!(windows) {
+        let mut page = page;
+        static WINDOWS_PAGE: std::sync::OnceLock<String> = std::sync::OnceLock::new();
+        let html = WINDOWS_PAGE
+            .get_or_init(|| include_str!("../web/index.html").replace("Linux", "Windows"));
+        *page.body_mut() = Body::from(html.as_str());
+        page
     } else {
         page
     }
@@ -737,6 +744,8 @@ async fn about() -> Json<AboutInfo> {
     Json(AboutInfo {
         product: if cfg!(feature = "openwrt") {
             "VNTC OpenWrt"
+        } else if cfg!(windows) {
+            "VNTC Windows 临时验证版"
         } else {
             "VNTC Linux WebUI"
         },
@@ -753,6 +762,8 @@ async fn about() -> Json<AboutInfo> {
         ),
         run_mode: if cfg!(feature = "openwrt") {
             "OpenWrt / procd"
+        } else if cfg!(windows) {
+            "Windows 原生进程"
         } else if PathBuf::from("/.dockerenv").exists() {
             "Docker 容器"
         } else {
@@ -908,6 +919,8 @@ mod tests {
         let html = String::from_utf8_lossy(&body);
         assert!(html.contains(if cfg!(feature = "openwrt") {
             "VNTC OpenWrt"
+        } else if cfg!(windows) {
+            "VNTC Windows"
         } else {
             "VNTC Linux"
         }));
