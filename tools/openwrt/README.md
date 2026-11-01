@@ -39,6 +39,14 @@ ARMv7 固定 `virt,virtualization=on / cortex-a15`，本机 TCG 重启后的 SSH
 
 两份报告均成功后，运行 `python3 tools/openwrt/collect.py --report /path/to/aarch64/report.json --report /path/to/armv7/report.json`，会检查包哈希与报告、IPK ELF 与元数据、离线包内层校验和及二者机器码一致性，汇总到 `dist/openwrt-arm/`。
 
+## 持续传输与保留管理页面
+
+`live_validate.py --run /path/to/run --output /path/to/live --duration 300 --rounds 30` 复用已通过基础验收的磁盘，从交付目录重新部署同哈希 IPK。每种架构分别执行 TCP 和 QUIC 中继，每协议每方向传输 30 次 1MiB 随机文件，逐次 SHA-256 验证；同时每方向发送 150 个 1300 字节 ICMP 包，要求零丢失，并比较服务进程 PID。
+
+临时 HTTP 数据源由 `transfer_http.c` 静态交叉编译，仅用于隔离 VM 验收，不装进插件。传输结束移除临时进程和 guest /tmp 测试数据，成功后保留 VNTs/vntc 及 VM 运行；失败则写入错误报告并停止本轮 VM。部署时仍使用既有的随机密码和管理令牌，配置保留。
+
+报告保存为 `{architecture}-live-report.json`；登录凭据单独写入 `{architecture}-access.json`，仅放在被忽略的本地交付目录，不能提交 Git。不要对已经运行的同一 VM 目录重复执行启动命令。
+
 HTTP 和嵌入资源检查不代表浏览器视觉验收；QEMU 测试不代表具体路由器的 Wi-Fi、Flash 分区、满带宽、硬件加速或长期稳定性。无指定机型时交付通用 CPU/ABI 版本，后续仍需核对设备 `uname -m`、`opkg print-architecture`、剩余存储以及匹配内核的 kmod-tun。
 
 任务结果与产物入口见 `VntcApp1.0/openwrt/ARM适配与验证.md`。
