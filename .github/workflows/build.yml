@@ -1154,11 +1154,18 @@ jobs:
       - validate-release-signing
       - test-server
     if: needs.meta.outputs.release_scope == 'suite'
-    runs-on: ubuntu-22.04
+    runs-on: ${{ matrix.runner }}
     strategy:
       fail-fast: false
       matrix:
-        arch: [x86_64, aarch64, armv7]
+        include:
+          # Rust 1.88 的 musl 目标在 Ubuntu 22.04 旧 musl-gcc 环境启动崩溃。
+          - arch: x86_64
+            runner: ubuntu-24.04
+          - arch: aarch64
+            runner: ubuntu-22.04
+          - arch: armv7
+            runner: ubuntu-22.04
     env:
       CARGO_TARGET_DIR: ${{ github.workspace }}/.openwrt-target
     steps:
@@ -1189,7 +1196,7 @@ jobs:
             ~/.cargo/registry
             ~/.cache/cargo-zigbuild
             .openwrt-target
-          key: openwrt-${{ matrix.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('VntcApp1.0/linux_webui/Cargo.lock', 'vnts2.0服务端开发包/official-vnts-source-2.0.0/Cargo.lock') }}
+          key: openwrt-${{ matrix.runner }}-${{ matrix.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('VntcApp1.0/linux_webui/Cargo.lock', 'vnts2.0服务端开发包/official-vnts-source-2.0.0/Cargo.lock') }}
 
       - name: 构建并校验两种产品
         shell: bash
