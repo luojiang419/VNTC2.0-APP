@@ -1115,7 +1115,8 @@ jobs:
       - validate-release-signing
       - test-client
       - test-server
-    runs-on: ubuntu-latest
+    # 与已部署 Ubuntu 22.04/glibc 2.35 保持兼容。
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
 
@@ -1144,6 +1145,66 @@ jobs:
             vnts2.0服务端开发包/dist/vnts2-${{ needs.meta.outputs.server_version }}-linux-x86_64.tar.gz.sha256
           if-no-files-found: error
 
+  build-openwrt:
+    name: OpenWrt 服务端与客户端 (${{ matrix.arch }})
+    needs:
+      - meta
+      - validate-release-signing
+      - test-server
+    if: needs.meta.outputs.release_scope == 'suite'
+    runs-on: ubuntu-22.04
+    strategy:
+      fail-fast: false
+      matrix:
+        arch: [x86_64, aarch64, armv7]
+    env:
+      CARGO_TARGET_DIR: ${{ github.workspace }}/.openwrt-target
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 设置静态交叉编译环境
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo apt-get update
+          sudo apt-get install -y musl-tools qemu-user-static
+          rustup set auto-self-update disable
+          rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt
+          python3 -m pip install 'ziglang==0.13.0' 'cargo-zigbuild==0.20.1'
+          zig version
+          cargo zigbuild --help >/dev/null
+
+      - name: 恢复交叉编译缓存
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cache/cargo-zigbuild
+            .openwrt-target
+          key: openwrt-${{ matrix.arch }}-${{ env.RUST_VERSION }}-${{ hashFiles('VntcApp1.0/linux_webui/Cargo.lock', 'vnts2.0服务端开发包/official-vnts-source-2.0.0/Cargo.lock') }}
+
+      - name: 构建并校验两种产品
+        shell: bash
+        run: |
+          set -euo pipefail
+          arch='${{ matrix.arch }}'
+          version='${{ needs.meta.outputs.release_version }}'
+          export RUSTUP_TOOLCHAIN="$RUST_VERSION"
+          bash VntcApp1.0/openwrt/build.sh "$version" "$RUNNER_TEMP/openwrt-client" "$arch"
+          bash "${SERVER_PACKAGE_DIR}/openwrt/build.sh" "$version" "$RUNNER_TEMP/openwrt-server" "$arch"
+          python3 tools/openwrt/verify_release.py --version "$version" --arch "$arch" \
+            --client "$RUNNER_TEMP/openwrt-client" --server "$RUNNER_TEMP/openwrt-server" \
+            --output openwrt-release
+
+      - name: 上传 OpenWrt 发布包
+        uses: actions/upload-artifact@v4
+        with:
+          name: openwrt-${{ matrix.arch }}
+          path: openwrt-release/*
+          if-no-files-found: error
+
   deploy:
     name: 发布 GitHub Release
     if: >-
@@ -1160,7 +1221,8 @@ jobs:
           (
             needs.build-server-windows-light.result == 'success' &&
             needs.build-server-windows-console.result == 'success' &&
-            needs.build-server-linux.result == 'success'
+            needs.build-server-linux.result == 'success' &&
+            needs.build-openwrt.result == 'success'
           )
         )
       }}
@@ -1174,6 +1236,7 @@ jobs:
       - build-server-windows-light
       - build-server-windows-console
       - build-server-linux
+      - build-openwrt
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -1208,6 +1271,8 @@ jobs:
 
           def platform_for(name: str) -> str:
               lower = name.lower()
+              if "openwrt" in lower:
+                  return "openwrt"
               if lower.endswith(".apk"):
                   return "android"
               if lower.endswith(".dmg"):
@@ -1273,6 +1338,8 @@ jobs:
             - macOS 客户端
             - Android 客户端
             - Linux WebUI 客户端
+            - Windows 服务端轻量版、增强版和 Linux 服务端（suite）
+            - OpenWrt x86_64、ARM64、ARMv7 服务端与客户端 IPK / 离线包（suite）
 
             `client` 范围只上传客户端资产；`suite` 范围才包含服务端与增强控制台资产。最终资产清单以 `latest.json` 和 `SHA256SUMS.txt` 为准。
           files: release-assets/*
