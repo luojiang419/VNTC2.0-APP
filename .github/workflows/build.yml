@@ -1175,6 +1175,10 @@ jobs:
           rustup set auto-self-update disable
           rustup toolchain install "${RUST_VERSION}" --profile minimal --component rustfmt
           python3 -m pip install 'ziglang==0.13.0' 'cargo-zigbuild==0.20.1'
+          zig_bin="$(python3 -c 'import pathlib, ziglang; print(pathlib.Path(ziglang.__file__).parent)')"
+          export PATH="$zig_bin:$HOME/.local/bin:$PATH"
+          echo "$zig_bin" >> "$GITHUB_PATH"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
           zig version
           cargo zigbuild --help >/dev/null
 
