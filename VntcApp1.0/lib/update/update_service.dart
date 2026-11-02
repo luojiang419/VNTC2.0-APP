@@ -1432,9 +1432,26 @@ AppUpdateAsset? selectBestUpdateAsset(
     return null;
   }
 
-  final installableAssets = assets
-      .where((asset) => !isChecksumAssetName(asset.name))
-      .toList(growable: false);
+  final installableAssets =
+      assets.where((asset) => !isChecksumAssetName(asset.name)).where((asset) {
+    if (platform != AppUpdatePlatform.linux) {
+      return true;
+    }
+    final name = asset.name.toLowerCase();
+    return !name.contains('openwrt') && !name.startsWith('vnts2-');
+  }).toList(growable: false);
+
+  if (platform == AppUpdatePlatform.linux && version != null) {
+    final normalizedVersion = normalizeVersionString(version);
+    final expectedName =
+        'VNTC_Linux_WebUI_${normalizedVersion}_ubuntu24.04_x86_64.tar.gz'
+            .toLowerCase();
+    for (final asset in installableAssets) {
+      if (asset.name.toLowerCase() == expectedName) {
+        return asset;
+      }
+    }
+  }
 
   if (platform == AppUpdatePlatform.windows && version != null) {
     final normalizedVersion = normalizeVersionString(version);

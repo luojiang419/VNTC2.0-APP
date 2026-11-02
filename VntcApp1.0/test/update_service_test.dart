@@ -81,6 +81,37 @@ void main() {
       );
     });
 
+    test('selects Linux client from a full suite in any asset order', () {
+      final otherProducts = [
+        _asset('VNTS_OpenWrt_4.8.41_aarch64.tar.gz'),
+        _asset('VNTC_OpenWrt_4.8.41_x86_64.tar.gz'),
+        _asset('vnts2-4.8.41-linux-x86_64.tar.gz'),
+      ];
+      final client =
+          _asset('VNTC_Linux_WebUI_4.8.41_ubuntu24.04_x86_64.tar.gz');
+      for (final assets in [
+        [...otherProducts, client],
+        [client, ...otherProducts.reversed],
+      ]) {
+        expect(
+          selectBestUpdateAsset(
+            assets,
+            AppUpdatePlatform.linux,
+            version: 'v4.8.41',
+          )?.name,
+          client.name,
+        );
+      }
+      expect(
+        selectBestUpdateAsset(
+          otherProducts,
+          AppUpdatePlatform.linux,
+          version: 'v4.8.41',
+        ),
+        isNull,
+      );
+    });
+
     test('attaches checksum asset to matching installer asset', () {
       final installer = _asset('VNT_App_2.0.1_Windows_Setup.exe');
       final checksum = _asset('VNT_App_2.0.1_Windows_Setup.sha256');

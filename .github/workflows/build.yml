@@ -454,6 +454,8 @@ jobs:
             VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.exe
             VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.sha256
             VntcApp1.0/release/installer/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.signature.json
+            VntcApp1.0/release/portable/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Portable.zip
+            VntcApp1.0/release/portable/VNT_App_${{ needs.meta.outputs.client_version }}_Windows_SHA256.txt
             VntcApp1.0/third_party/vntcrustdesk/windows/dist/vntcrustdesk.msi
             VntcApp1.0/third_party/vntcrustdesk/windows/vntcrustdesk.msi.sha256
           if-no-files-found: error
