@@ -19,6 +19,7 @@ import 'package:vnt_app/data_persistence.dart';
 import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/window_restore_guard.dart';
+import 'package:vnt_app/utils/desktop_window_constraints.dart';
 import 'package:vnt_app/utils/log_utils.dart';
 import 'package:vnt_app/utils/runtime_storage_paths.dart';
 import 'package:vnt_app/utils/silent_start_policy.dart';
@@ -307,7 +308,7 @@ Future<void> main(List<String> args) async {
           await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
         }
 
-        await windowManager.setMinimumSize(minimumWindowSize);
+        await DesktopWindowConstraints.setMinimumSize(minimumWindowSize);
 
         final savedWindowSize = await dataPersistence.loadSavedWindowSize();
         final savedWindowPosition =

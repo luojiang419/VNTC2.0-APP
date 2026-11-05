@@ -26,6 +26,7 @@ import 'package:vnt_app/vnt/vnt_manager.dart';
 import 'package:vnt_app/utils/toast_utils.dart';
 import 'package:vnt_app/utils/responsive_utils.dart';
 import 'package:vnt_app/utils/dashboard_window_sizing.dart';
+import 'package:vnt_app/utils/desktop_window_constraints.dart';
 import 'dart:isolate';
 import 'package:vnt_app/src/rust/api/vnt_api.dart';
 import 'package:vnt_app/widgets/custom_title_bar.dart';
@@ -226,7 +227,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
 
     try {
       if (mode.isProfessional) {
-        await windowManager.setMinimumSize(
+        await DesktopWindowConstraints.setMinimumSize(
           DashboardWindowSizing.professionalMinimumSize,
         );
         final currentSize = await windowManager.getSize();
@@ -243,7 +244,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         return;
       }
 
-      await windowManager.setMinimumSize(
+      await DesktopWindowConstraints.setMinimumSize(
         DashboardWindowSizing.regularMinimumSize,
       );
       if (resizeRegular) {
@@ -268,7 +269,7 @@ class _MainNavigationShellState extends State<MainNavigationShell> {
         display.size,
         scaleFactor: display.scaleFactor,
       );
-      await windowManager.setMinimumSize(
+      await DesktopWindowConstraints.setMinimumSize(
         DashboardWindowSizing.regularMinimumSize,
       );
       await _setWindowSizeOnDisplay(targetSize, display);
