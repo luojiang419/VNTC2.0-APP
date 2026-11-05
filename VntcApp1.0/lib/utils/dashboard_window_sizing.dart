@@ -4,8 +4,10 @@ import 'dart:ui';
 class DashboardWindowSizing {
   const DashboardWindowSizing._();
 
-  static const Size regularMinimumSize = Size(610, 450);
-  static const Size regularFullHdSize = Size(610, 450);
+  // 为标题栏、仪表盘操作区、连接状态、三张统计卡和底部导航保留空间。
+  // 使用逻辑像素，窗口管理器会根据显示器 DPI 应用实际拖拽下限。
+  static const Size regularMinimumSize = Size(720, 540);
+  static const Size regularFullHdSize = regularMinimumSize;
   static const Size regularUltraHdSize = Size(760, 560);
   static const Size professionalMinimumSize = Size(800, 600);
   static const Size professionalPreferredSize = Size(1000, 700);

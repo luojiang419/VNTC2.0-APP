@@ -5,18 +5,18 @@ import 'package:vnt_app/utils/dashboard_window_sizing.dart';
 
 void main() {
   group('DashboardWindowSizing', () {
-    test('1080p 和 2K 屏幕使用 610x450', () {
+    test('1080p 和 2K 屏幕使用可完整展示仪表盘的 720x540', () {
       expect(
         DashboardWindowSizing.regularSizeForDisplay(
           const Size(1920, 1080),
         ),
-        const Size(610, 450),
+        const Size(720, 540),
       );
       expect(
         DashboardWindowSizing.regularSizeForDisplay(
           const Size(2560, 1440),
         ),
-        const Size(610, 450),
+        const Size(720, 540),
       );
     });
 
@@ -51,7 +51,7 @@ void main() {
           const Size(2560, 1440),
           scaleFactor: 0,
         ),
-        const Size(610, 450),
+        const Size(720, 540),
       );
     });
   });
