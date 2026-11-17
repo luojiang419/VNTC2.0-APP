@@ -420,7 +420,6 @@ Name: "{group}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{a
 Name: "{autodesktop}\{#MyAppName}"; Filename: "{app}\{#MyAppExeName}"; WorkingDir: "{app}"; IconFilename: "{app}\{#MyAppExeName}"; Tasks: desktopicon
 
 [Run]
-Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\install_vnt_service.ps1"" -AppDir ""{app}"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\bootstrap_vntcrustdesk.ps1"" -AppDir ""{app}"" -MsiPath ""{app}\remote_assist\artifacts\vntcrustdesk.msi"""; Flags: runhidden waituntilterminated; Check: not IsBrandValidationMode
 Filename: "{app}\{#MyAppExeName}"; Description: "$launchAfterInstallDescription"; Flags: nowait postinstall skipifsilent
 
@@ -476,6 +475,7 @@ end;
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ServiceStopResult: Integer;
+  ServiceInstallResult: Integer;
 begin
   // [Run] entries execute before ssPostInstall. Extract the payload during
   // ssInstall so the bundled vntcrustdesk bootstrap script and MSI exist
@@ -501,6 +501,19 @@ begin
       True,
       nil
     );
+    if not IsBrandValidationMode then
+    begin
+      if not Exec(
+        ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe'),
+        '-NoProfile -NonInteractive -ExecutionPolicy Bypass -File "' +
+          ExpandConstant('{app}\scripts\install_vnt_service.ps1') +
+          '" -AppDir "' + ExpandConstant('{app}') + '"',
+        '', SW_HIDE, ewWaitUntilTerminated, ServiceInstallResult
+      ) then
+        RaiseException('无法启动 VNT 核心服务安装脚本');
+      if ServiceInstallResult <> 0 then
+        RaiseException(Format('VNT 核心服务安装失败，退出码 %d', [ServiceInstallResult]));
+    end;
   end;
 end;
 "@

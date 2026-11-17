@@ -33,6 +33,10 @@ void main() {
     expect(installScript, contains("\$serviceName = 'VntCoreService'"));
     expect(installScript, contains('-StartupType Automatic'));
     expect(installScript, contains('sc.exe failure'));
+    expect(installScript, contains('Invoke-CimMethod'));
+    expect(installScript, isNot(contains('sc.exe config')));
+    expect(installer, contains('ServiceInstallResult <> 0'));
+    expect(installer, contains('ewWaitUntilTerminated, ServiceInstallResult'));
     expect(uninstallScript, contains('sc.exe delete'));
     expect(uninstallScript, contains('machine configuration preserved'));
   });

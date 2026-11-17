@@ -451,6 +451,12 @@ jobs:
           } | ConvertTo-Json | Set-Content -LiteralPath $reportPath -Encoding UTF8
           Write-Host "[OK] Windows signature policy: $status"
 
+      - name: 验收含空格路径的新装与覆盖升级核心服务
+        shell: pwsh
+        working-directory: VntcApp1.0
+        run: |
+          .\scripts\test_windows_installer_service.ps1 -SetupPath '.\release\installer\VNT_App_${{ needs.meta.outputs.client_version }}_Windows_Setup.exe'
+
       - name: 上传 Windows 客户端产物
         uses: actions/upload-artifact@v4
         with:

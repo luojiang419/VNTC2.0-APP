@@ -1,4 +1,4 @@
-param(
+﻿param(
     [Parameter(Mandatory = $true)][string]$AppDir
 )
 
@@ -40,9 +40,18 @@ if ($null -eq $existing) {
         Stop-Service -Name $serviceName -Force -ErrorAction SilentlyContinue
     } catch {
     }
-    & sc.exe config $serviceName binPath= ('"{0}"' -f $executablePath) start= auto DisplayName= $displayName | Out-Null
-    if ($LASTEXITCODE -ne 0) {
-        throw "Failed to update Windows service: $serviceName"
+    # PowerShell 5.1 调用 sc.exe 会剥离嵌套引号，含空格路径可能触发 SCM 193。
+    # 使用结构化 CIM 参数，确保 ImagePath 中的引号原样写入。
+    $configured = Invoke-CimMethod `
+        -InputObject (Get-CimInstance Win32_Service -Filter "Name='$serviceName'") `
+        -MethodName Change `
+        -Arguments @{
+            PathName = ('"{0}"' -f $executablePath)
+            StartMode = 'Automatic'
+            DisplayName = $displayName
+        }
+    if ($configured.ReturnValue -ne 0) {
+        throw "Failed to update Windows service: $serviceName (CIM $($configured.ReturnValue))"
     }
 }
 
