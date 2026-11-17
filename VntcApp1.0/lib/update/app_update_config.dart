@@ -13,15 +13,17 @@ class AppUpdateConfig {
     defaultValue: '',
   );
 
+  static const modelScopeRepository = 'jiangjiang419/vntc-app-updates';
+
   static const latestReleaseApiUrl = String.fromEnvironment(
     'APP_UPDATE_API_URL',
     defaultValue:
-        'https://api.github.com/repos/luojiang419/VNTC2.0-APP/releases/latest',
+        'https://modelscope.cn/models/jiangjiang419/vntc-app-updates/resolve/master/latest.json',
   );
 
   static const releasePageUrl = String.fromEnvironment(
     'APP_UPDATE_RELEASE_PAGE_URL',
-    defaultValue: 'https://github.com/luojiang419/VNTC2.0-APP/releases/latest',
+    defaultValue: 'https://modelscope.cn/models/jiangjiang419/vntc-app-updates',
   );
 
   static const runUpdateSessionArg = 'run-update-session';

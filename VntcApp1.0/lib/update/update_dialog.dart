@@ -52,7 +52,7 @@ Future<void> showUpdateCheckDialog(
               child: CircularProgressIndicator(strokeWidth: 2.5),
             ),
             SizedBox(width: 16),
-            Expanded(child: Text('正在检查 GitHub 最新版本...')),
+            Expanded(child: Text('正在检查魔搭最新版本...')),
           ],
         ),
       ),

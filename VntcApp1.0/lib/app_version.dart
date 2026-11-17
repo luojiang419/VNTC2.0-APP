@@ -40,7 +40,7 @@ class AppVersion {
   );
   static const String buildVersion = String.fromEnvironment(
     'APP_BUILD_VERSION',
-    defaultValue: '4.8.41',
+    defaultValue: '4.8.42',
   );
   static const String explicitDisplayVersion = String.fromEnvironment(
     'APP_DISPLAY_VERSION',

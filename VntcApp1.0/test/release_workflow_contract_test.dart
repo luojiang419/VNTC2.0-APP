@@ -13,9 +13,21 @@ void main() {
     expect(workflow, contains('permissions:\n  contents: read'));
     expect(
       workflow,
-      contains('deploy:\n    name: 发布 GitHub Release'),
+      contains('deploy:\n    name: 发布魔搭更新（GitHub 仅限过渡版）'),
     );
     expect(workflow, contains('    permissions:\n      contents: write'));
+  });
+
+  test('后续只发布魔搭，GitHub 仅允许显式的固定过渡版本', () {
+    expect(workflow, contains('publish_modelscope.py'));
+    expect(workflow, contains('MODELSCOPE_TOKEN:'));
+    expect(
+        workflow,
+        contains(
+            "inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42'"));
+    expect(workflow.indexOf('上传魔搭并验收全部公开下载'),
+        lessThan(workflow.indexOf('创建草稿 Release 并上传资产')));
+    expect(workflow, contains('github_transition:'));
   });
 
   test('客户端测试通过后才允许构建和发布', () {

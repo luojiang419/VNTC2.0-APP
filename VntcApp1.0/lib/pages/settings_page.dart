@@ -825,7 +825,7 @@ class _SettingsPageState extends State<SettingsPage> {
               icon: Icons.refresh,
               title: '立即检查更新',
               subtitle: _updateMode.checksForUpdates
-                  ? '立即检查 GitHub Releases 最新版本'
+                  ? '立即检查魔搭更新源最新版本'
                   : '更新检测已关闭，请先选择其他更新方式',
               onTap: _updateMode.checksForUpdates
                   ? () => showUpdateCheckDialog(context)

@@ -167,7 +167,7 @@ class AppUpdateService {
     final resolvedCurrentVersion =
         currentVersion ?? await _resolveCurrentVersion();
     final resolvedPlatform = platform ?? resolveCurrentUpdatePlatform();
-    return parseGitHubRelease(
+    return parseModelScopeRelease(
       release,
       currentVersion: resolvedCurrentVersion,
       platform: resolvedPlatform,
@@ -397,11 +397,11 @@ class AppUpdateService {
     final bytes = await _readUri(
       uri,
       proxy: proxy,
-      accept: 'application/vnd.github+json',
+      accept: 'application/json',
     );
     final decoded = jsonDecode(utf8.decode(bytes));
     if (decoded is! Map<String, dynamic>) {
-      throw const FormatException('GitHub 返回数据格式不正确');
+      throw const FormatException('更新源返回数据格式不正确');
     }
     return decoded;
   }
@@ -442,7 +442,7 @@ class AppUpdateService {
             // 下面抛出首个 curl 错误和 Dart 错误，方便定位。
           }
         }
-        throw StateError('GitHub 请求失败：$dartError；curl 兜底错误：$firstError');
+        throw StateError('更新源请求失败：$dartError；curl 兜底错误：$firstError');
       }
     }
 
@@ -1380,6 +1380,70 @@ AppUpdatePlatform resolveCurrentUpdatePlatform() {
 bool supportsStartupUpdateCheck(AppUpdatePlatform platform) {
   return platform == AppUpdatePlatform.windows ||
       platform == AppUpdatePlatform.android;
+}
+
+/// 魔搭使用固定仓库的公开清单，所有安装包必须声明大小和 SHA-256。
+AppUpdateInfo parseModelScopeRelease(
+  Map<String, dynamic> release, {
+  required String currentVersion,
+  required AppUpdatePlatform platform,
+  String? proxyLabel,
+}) {
+  if (release['schema_version'] != 1 ||
+      release['product'] != 'vntc-app' ||
+      release['channel'] != 'stable' ||
+      release['draft'] == true ||
+      release['prerelease'] == true) {
+    throw const FormatException('魔搭更新清单的产品、协议或渠道无效');
+  }
+  final version = (release['tag_name'] ?? '').toString();
+  if (!RegExp(r'^v\d+\.\d+\.\d+$').hasMatch(version)) {
+    throw const FormatException('魔搭更新清单版本号无效');
+  }
+  final rawAssets = release['assets'];
+  if (rawAssets is! List || rawAssets.isEmpty) {
+    throw const FormatException('魔搭更新清单缺少安装包');
+  }
+  final names = <String>{};
+  for (final raw in rawAssets) {
+    if (raw is! Map<String, dynamic>) {
+      throw const FormatException('魔搭更新资产格式无效');
+    }
+    final asset = AppUpdateAsset.fromGitHubJson(raw);
+    if (asset == null ||
+        !names.add(asset.name) ||
+        asset.size <= 0 ||
+        asset.sha256 == null ||
+        asset.name.contains('/') ||
+        asset.name.contains(r'\') ||
+        asset.downloadUrl.scheme != 'https' ||
+        !const ['modelscope.cn', 'www.modelscope.cn']
+            .contains(asset.downloadUrl.host) ||
+        asset.downloadUrl.userInfo.isNotEmpty ||
+        asset.downloadUrl.hasQuery ||
+        asset.downloadUrl.hasFragment ||
+        asset.downloadUrl.path !=
+            '/models/${AppUpdateConfig.modelScopeRepository}/resolve/master/releases/$version/${asset.name}') {
+      throw const FormatException('魔搭更新资产的名称、地址、大小或摘要无效');
+    }
+  }
+  final info = parseGitHubRelease(release,
+      currentVersion: currentVersion,
+      platform: platform,
+      proxyLabel: proxyLabel);
+  final number = normalizeVersionString(version);
+  final expectedName = switch (platform) {
+    AppUpdatePlatform.windows => 'VNT_App_${number}_Windows_Setup.exe',
+    AppUpdatePlatform.android => 'VNT_App_${number}_Android_arm64.apk',
+    AppUpdatePlatform.macos => 'VNT_App_${number}_macOS.dmg',
+    AppUpdatePlatform.linux =>
+      'VNTC_Linux_WebUI_${number}_ubuntu24.04_x86_64.tar.gz',
+    _ => '',
+  };
+  if (info.asset != null && info.asset!.name != expectedName) {
+    throw const FormatException('魔搭更新清单缺少当前平台和版本的精确安装包');
+  }
+  return info;
 }
 
 AppUpdateInfo parseGitHubRelease(

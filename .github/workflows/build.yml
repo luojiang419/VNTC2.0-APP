@@ -13,6 +13,11 @@ on:
         description: "手动指定版本号，例如 2.0.1"
         required: false
         type: string
+      github_transition:
+        description: "仅 4.8.42 过渡版同时发布 GitHub（之后仅魔搭）"
+        required: false
+        default: false
+        type: boolean
       release_scope:
         description: "发布范围：suite 发布全套，client 只发布客户端"
         required: false
@@ -105,9 +110,9 @@ jobs:
               exit 1
             fi
 
-            latest_release_json="$(gh api "repos/${GITHUB_REPOSITORY}/releases/latest" 2>/dev/null || true)"
+            latest_release_json="$(curl --fail --location --silent --show-error https://modelscope.cn/models/jiangjiang419/vntc-app-updates/resolve/master/latest.json 2>/dev/null || true)"
             latest_tag="$(jq -r '.tag_name // empty' <<< "${latest_release_json}" 2>/dev/null || true)"
-            latest_target="$(jq -r '.target_commitish // empty' <<< "${latest_release_json}" 2>/dev/null || true)"
+            latest_target="$(jq -r '.source_commit // empty' <<< "${latest_release_json}" 2>/dev/null || true)"
             latest_release_version="${latest_tag#v}"
 
             if [[ "${latest_target}" == "${GITHUB_SHA}" && "${latest_release_version}" =~ ${semver_pattern} ]]; then
@@ -1223,7 +1228,7 @@ jobs:
           if-no-files-found: error
 
   deploy:
-    name: 发布 GitHub Release
+    name: 发布魔搭更新（GitHub 仅限过渡版）
     if: >-
       ${{
         always() &&
@@ -1258,6 +1263,8 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: 下载全部产物
         uses: actions/download-artifact@v4
         with:
@@ -1337,7 +1344,27 @@ jobs:
           SIGNING_MODE: ${{ needs.meta.outputs.signing_mode }}
           RELEASE_SCOPE: ${{ needs.meta.outputs.release_scope }}
 
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装魔搭发布工具
+        run: python -m pip install modelscope==1.36.3 requests
+
+      - name: 验证魔搭发布脚本
+        run: python -m unittest discover -s VntcApp1.0/scripts -p test_publish_modelscope.py
+
+      - name: 上传魔搭并验收全部公开下载，最后切换最新清单
+        env:
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: >-
+          python VntcApp1.0/scripts/publish_modelscope.py
+          --directory release-assets
+          --version ${{ needs.meta.outputs.release_version }}
+          --source-commit ${{ github.sha }}
+
       - name: 创建草稿 Release 并上传资产
+        if: ${{ inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42' }}
         id: create_draft_release
         uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2
         with:
@@ -1345,6 +1372,11 @@ jobs:
           target_commitish: ${{ github.sha }}
           name: VNT ${{ needs.meta.outputs.release_scope == 'client' && 'Client' || 'Suite' }} v${{ needs.meta.outputs.release_version }}
           body: |
+            这是最后一个 GitHub 过渡版本。安装后，后续自动更新仅使用魔搭：
+            https://modelscope.cn/models/jiangjiang419/vntc-app-updates
+
+            修复 Windows 系统服务模式显示已连接却看不到其他在线用户的问题。
+
             自动构建发布：
 
             发布范围：`${{ needs.meta.outputs.release_scope }}`。
@@ -1365,6 +1397,7 @@ jobs:
           fail_on_unmatched_files: true
 
       - name: 远端复核草稿 Release 资产
+        if: ${{ inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42' }}
         id: verify_draft_release
         shell: bash
         env:
@@ -1431,6 +1464,7 @@ jobs:
           PY
 
       - name: 将已验收草稿转为正式 Release
+        if: ${{ inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1443,6 +1477,7 @@ jobs:
             -F prerelease=false >/dev/null
 
       - name: 验收 Latest Release、标签与校验文件
+        if: ${{ inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
@@ -1513,7 +1548,7 @@ jobs:
           echo "[OK] Latest Release、标签和远端 SHA256SUMS.txt 验收通过"
 
       - name: 清理当前运行创建的失败草稿
-        if: failure()
+        if: ${{ failure() && inputs.github_transition == true && needs.meta.outputs.release_version == '4.8.42' }}
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
