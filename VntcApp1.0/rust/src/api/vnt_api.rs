@@ -1198,7 +1198,8 @@ pub struct RustDeviceConfig {
     pub external_route: Vec<(String, String)>,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustPeerClientInfo {
     pub virtual_ip: String,
     pub name: String,
@@ -1225,7 +1226,8 @@ pub enum RustErrorType {
     Unknown,
 }
 
-#[derive(Debug)]
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustRoute {
     pub protocol: String,
     pub addr: String,
@@ -1233,7 +1235,8 @@ pub struct RustRoute {
     pub rt: i64,
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustP2pDiagnostics {
     pub state: String,
     pub reason: String,
@@ -1258,7 +1261,8 @@ impl RustP2pDiagnostics {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustNatInfo {
     pub public_ips: Vec<String>,
     pub nat_type: String,
@@ -1395,7 +1399,8 @@ mod tests {
     }
 }
 
-#[derive(Debug, Default)]
+#[derive(Debug, Default, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RustCurrentDeviceInfo {
     pub virtual_ip: String,
     pub virtual_netmask: String,

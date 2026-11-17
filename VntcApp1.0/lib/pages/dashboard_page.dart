@@ -2112,7 +2112,7 @@ class _DashboardPageState extends State<DashboardPage> {
     for (var entry in allVnts.entries) {
       final vntBox = entry.value;
       if (!vntBox.isClosed()) {
-        deviceTrafficList = vntBox.vntApi.streamAll();
+        deviceTrafficList = vntBox.streamAll();
         for (final device in vntBox.peerDeviceList()) {
           final name = device.name.trim();
           if (name.isNotEmpty) {

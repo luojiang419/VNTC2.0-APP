@@ -28,6 +28,7 @@ use super::runtime::{ServiceSignals, ServiceStatusStore};
 pub const PIPE_NAME: &str = r"\\.\pipe\VntCoreService.v1";
 const PROTOCOL_VERSION: u32 = 1;
 const MAX_FRAME_SIZE: usize = 64 * 1024;
+const MAX_RESPONSE_SIZE: usize = 4 * 1024 * 1024;
 const PIPE_BUFFER_SIZE: u32 = MAX_FRAME_SIZE as u32;
 const PIPE_SDDL: &str = "D:P(A;;GA;;;SY)(A;;GA;;;BA)(A;;GRGW;;;AU)";
 
@@ -158,13 +159,17 @@ fn handle_client(pipe: HANDLE, root: &Path, signals: &ServiceSignals, status: &S
     }
     buffer.truncate(bytes_read as usize);
     let response = process_request(&buffer, root, signals, status);
-    let encoded = serde_json::to_vec(&response).unwrap_or_else(|_| {
+    let mut encoded = serde_json::to_vec(&response).unwrap_or_else(|_| {
         r#"{"version":1,"id":"","ok":false,"error":"响应序列化失败"}"#
             .as_bytes()
             .to_vec()
     });
-    if encoded.len() > MAX_FRAME_SIZE {
-        return;
+    if encoded.len() > MAX_RESPONSE_SIZE {
+        encoded = serde_json::to_vec(&failure(
+            &response.id,
+            "服务网络快照超过 4 MiB 响应上限".to_string(),
+        ))
+        .unwrap();
     }
     let mut bytes_written = 0_u32;
     unsafe {

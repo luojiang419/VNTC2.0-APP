@@ -7,7 +7,7 @@ import '../utils/responsive_utils.dart';
 import 'legend_widget.dart';
 
 class StatisticsChart extends StatefulWidget {
-  final VntBox vntBox;
+  final VntConnection vntBox;
 
   const StatisticsChart({
     super.key,
@@ -48,7 +48,7 @@ class StatisticsChartState extends State<StatisticsChart> {
   }
 
   void _updateBarChart() {
-    barChartDataList = widget.vntBox.vntApi.streamAll();
+    barChartDataList = widget.vntBox.streamAll();
     uploadTotal = widget.vntBox.upStream();
     downloadTotal = widget.vntBox.downStream();
     for (var item in barChartDataList) {
@@ -81,10 +81,10 @@ class StatisticsChartState extends State<StatisticsChart> {
 
   void _chartBData(int index) {
     ip = barChartDataList[index].$1;
-    upList = widget.vntBox.vntApi.upStreamLine(ip: ip);
-    downList = widget.vntBox.vntApi.downStreamLine(ip: ip);
-    ipUpload = widget.vntBox.vntApi.ipUpStreamTotal(ip: ip);
-    ipDownload = widget.vntBox.vntApi.ipDownStreamTotal(ip: ip);
+    upList = widget.vntBox.upStreamLine(ip: ip);
+    downList = widget.vntBox.downStreamLine(ip: ip);
+    ipUpload = widget.vntBox.ipUpStreamTotal(ip: ip);
+    ipDownload = widget.vntBox.ipDownStreamTotal(ip: ip);
     var lineMaxTmp = 0.0;
     for (var item in upList) {
       var tmp = item.toDouble();
@@ -133,19 +133,22 @@ class StatisticsChartState extends State<StatisticsChart> {
                         Text(
                           'IP: $ip',
                           style: TextStyle(
-                              color: const Color(0xff77839a), fontSize: context.fontMedium),
+                              color: const Color(0xff77839a),
+                              fontSize: context.fontMedium),
                         ),
                       ],
                     ),
                     Text(
                       '总上传: $ipUpload',
                       style: TextStyle(
-                          color: const Color(0xff77839a), fontSize: context.fontMedium),
+                          color: const Color(0xff77839a),
+                          fontSize: context.fontMedium),
                     ),
                     Text(
                       '总下载: $ipDownload',
                       style: TextStyle(
-                          color: const Color(0xff77839a), fontSize: context.fontMedium),
+                          color: const Color(0xff77839a),
+                          fontSize: context.fontMedium),
                     ),
                     const SizedBox(
                       height: 38,
@@ -202,11 +205,13 @@ class StatisticsChartState extends State<StatisticsChart> {
         ),
         Text(
           '总上传: $uploadTotal',
-          style: TextStyle(color: const Color(0xff77839a), fontSize: context.fontMedium),
+          style: TextStyle(
+              color: const Color(0xff77839a), fontSize: context.fontMedium),
         ),
         Text(
           '总下载: $downloadTotal',
-          style: TextStyle(color: const Color(0xff77839a), fontSize: context.fontMedium),
+          style: TextStyle(
+              color: const Color(0xff77839a), fontSize: context.fontMedium),
         ),
         const SizedBox(
           height: 38,

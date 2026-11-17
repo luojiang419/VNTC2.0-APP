@@ -10,6 +10,7 @@ import 'package:vnt_app/network_config.dart';
 const String vntServicePipeName = r'\\.\pipe\VntCoreService.v1';
 const int _protocolVersion = 1;
 const int _maximumFrameSize = 64 * 1024;
+const int _maximumResponseSize = 4 * 1024 * 1024;
 
 class VntServiceException implements Exception {
   const VntServiceException(this.message, {this.windowsError});
@@ -25,6 +26,7 @@ class VntServiceException implements Exception {
 
 class VntServiceStatus {
   const VntServiceStatus({
+    this.network = const <String, dynamic>{},
     required this.serviceState,
     required this.connectionState,
     required this.configKey,
@@ -35,6 +37,7 @@ class VntServiceStatus {
     required this.updatedAtUnixMs,
   });
 
+  final Map<String, dynamic> network;
   final String serviceState;
   final String connectionState;
   final String configKey;
@@ -48,6 +51,9 @@ class VntServiceStatus {
 
   factory VntServiceStatus.fromJson(Map<String, dynamic> json) {
     return VntServiceStatus(
+      network: json['network'] is Map
+          ? Map<String, dynamic>.from(json['network'] as Map)
+          : const <String, dynamic>{},
       serviceState: (json['serviceState'] ?? '').toString(),
       connectionState: (json['connectionState'] ?? '').toString(),
       configKey: (json['configKey'] ?? '').toString(),
@@ -192,7 +198,7 @@ Map<String, dynamic> _sendPipeRequestSync(
     final mode = calloc<Uint32>()..value = _pipeReadModeMessage;
     final requestBuffer = calloc<Uint8>(requestBytes.length);
     final bytesWritten = calloc<Uint32>();
-    final responseBuffer = calloc<Uint8>(_maximumFrameSize);
+    final responseBuffer = calloc<Uint8>(_maximumResponseSize);
     final bytesRead = calloc<Uint32>();
     try {
       if (_setNamedPipeHandleState(handle, mode, nullptr, nullptr) == 0) {
@@ -221,7 +227,7 @@ Map<String, dynamic> _sendPipeRequestSync(
       if (_readFile(
             handle,
             responseBuffer,
-            _maximumFrameSize,
+            _maximumResponseSize,
             bytesRead,
             nullptr,
           ) ==
@@ -231,7 +237,7 @@ Map<String, dynamic> _sendPipeRequestSync(
           windowsError: _getLastError(),
         );
       }
-      if (bytesRead.value == 0 || bytesRead.value > _maximumFrameSize) {
+      if (bytesRead.value == 0 || bytesRead.value > _maximumResponseSize) {
         throw const VntServiceException('VNT 系统服务返回了无效响应长度');
       }
       final decoded = jsonDecode(

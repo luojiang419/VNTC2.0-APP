@@ -1,8 +1,12 @@
 import 'dart:async';
+import 'vnt_connection.dart';
+import 'vnt_service_connection.dart';
+export 'vnt_connection.dart';
 import 'dart:collection';
 import 'dart:io';
 import 'dart:isolate';
-import 'dart:typed_data';
+import 'dart:typed_data' hide Uint64List;
+import 'package:flutter_rust_bridge/flutter_rust_bridge.dart' show Uint64List;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -125,9 +129,10 @@ end tell
 
 final VntManager vntManager = VntManager();
 
-class VntBox {
+class VntBox extends VntConnection {
   final VntApi vntApi;
   final VntConfig vntConfig;
+  @override
   final NetworkConfig networkConfig;
   VntBox({
     required this.vntApi,
@@ -218,6 +223,7 @@ class VntBox {
     return VntBox(vntApi: vntApi, vntConfig: vntConfig, networkConfig: config);
   }
 
+  @override
   Future<void> close() async {
     vntApi.stop();
     if (Platform.isAndroid) {
@@ -225,14 +231,17 @@ class VntBox {
     }
   }
 
+  @override
   bool isClosed() {
     return vntApi.isStopped();
   }
 
+  @override
   NetworkConfig? getNetConfig() {
     return networkConfig;
   }
 
+  @override
   Map<String, dynamic> currentDevice() {
     var currentDevice = vntApi.currentDevice();
 
@@ -253,6 +262,7 @@ class VntBox {
     };
   }
 
+  @override
   Map<String, dynamic> p2pDiagnostics() {
     final diagnostics = vntApi.p2PDiagnostics();
     return {
@@ -269,29 +279,49 @@ class VntBox {
     };
   }
 
+  @override
   List<RustPeerClientInfo> peerDeviceList() {
     return vntApi.deviceList();
   }
 
+  @override
   List<(String, List<RustRoute>)> routeList() {
     return vntApi.routeList();
   }
 
+  @override
   RustRoute? route(String ip) {
     return vntApi.route(ip: ip);
   }
 
+  @override
   RustNatInfo? peerNatInfo(String ip) {
     return vntApi.peerNatInfo(ip: ip);
   }
 
+  @override
   String downStream() {
     return vntApi.downStream();
   }
 
+  @override
   String upStream() {
     return vntApi.upStream();
   }
+
+  @override
+  List<(String, BigInt, BigInt)> streamAll() => vntApi.streamAll();
+  @override
+  Uint64List upStreamLine({required String ip}) => vntApi.upStreamLine(ip: ip);
+  @override
+  Uint64List downStreamLine({required String ip}) =>
+      vntApi.downStreamLine(ip: ip);
+  @override
+  String ipUpStreamTotal({required String ip}) =>
+      vntApi.ipUpStreamTotal(ip: ip);
+  @override
+  String ipDownStreamTotal({required String ip}) =>
+      vntApi.ipDownStreamTotal(ip: ip);
 }
 
 typedef VntBoxFactory = Future<VntBox> Function(
@@ -339,10 +369,11 @@ class VntConnectionGate {
 }
 
 class VntManager {
-  VntManager({VntBoxFactory? boxFactory})
-      : _boxFactory = boxFactory ?? VntBox.create;
+  VntManager({VntBoxFactory? boxFactory, VntServiceClient? serviceClient})
+      : _boxFactory = boxFactory ?? VntBox.create,
+        _serviceClient = serviceClient ?? VntServiceClient();
 
-  HashMap<String, VntBox> map = HashMap();
+  HashMap<String, VntConnection> map = HashMap();
   bool connecting = false;
   final VntBoxFactory _boxFactory;
   final Map<String, Future<VntBox>> _pendingCreates =
@@ -351,7 +382,8 @@ class VntManager {
   // 记录主动断开连接的配置key，避免显示"服务已停止"提示
   final Set<String> _manualDisconnecting = {};
   final List<VoidCallback> _connectionListeners = <VoidCallback>[];
-  final VntServiceClient _serviceClient = VntServiceClient();
+  final VntServiceClient _serviceClient;
+  bool _serviceRefreshInProgress = false;
   Timer? _servicePollTimer;
   VntServiceStatus? _serviceStatus;
   bool _systemServiceModeActive = false;
@@ -373,22 +405,51 @@ class VntManager {
   }
 
   Future<void> refreshSystemServiceStatus() async {
-    if (!_systemServiceModeActive) {
+    if (!_systemServiceModeActive || _serviceRefreshInProgress) {
       return;
     }
+    _serviceRefreshInProgress = true;
     try {
       final next = await _serviceClient.getStatus();
-      final previous = _serviceStatus;
-      _serviceStatus = next;
-      if (previous?.connectionState != next.connectionState ||
-          previous?.configKey != next.configKey ||
-          previous?.virtualIp != next.virtualIp ||
-          previous?.lastError != next.lastError) {
-        _notifyConnectionsChanged();
-      }
+      final configs = await DataPersistence().loadData();
+      applySystemServiceStatus(next, configs);
     } catch (error) {
       debugPrint('读取 VNT 系统服务状态失败: $error');
+    } finally {
+      _serviceRefreshInProgress = false;
     }
+  }
+
+  /// 保留对象身份，节点上下线只更新快照，避免重置聊天和流量历史。
+  @visibleForTesting
+  void applySystemServiceStatus(
+      VntServiceStatus status, List<NetworkConfig> configs) {
+    _systemServiceModeActive = true;
+    _serviceStatus = status;
+    map.removeWhere((key, value) {
+      if (value is VntServiceConnection &&
+          (!status.isConnected ||
+              key != status.configKey ||
+              !configs.any((c) => c.itemKey == key))) {
+        value.detach();
+        return true;
+      }
+      return false;
+    });
+    if (status.isConnected) {
+      final config =
+          configs.where((c) => c.itemKey == status.configKey).firstOrNull;
+      if (config != null) {
+        final existing = map[status.configKey];
+        if (existing is VntServiceConnection) {
+          existing.update(status, config);
+        } else {
+          map[status.configKey] = VntServiceConnection(
+              status, config, () => remove(status.configKey));
+        }
+      }
+    }
+    _notifyConnectionsChanged();
   }
 
   Future<void> connectWithSystemService(NetworkConfig config) async {
@@ -458,7 +519,7 @@ class VntManager {
     var key = config.itemKey;
     final existing = get(key);
     if (existing != null) {
-      return Future.value(existing);
+      return Future.value(existing as VntBox);
     }
     final pending = _pendingCreates[key];
     if (pending != null) {
@@ -509,7 +570,7 @@ class VntManager {
     try {
       final existing = get(key);
       if (existing != null) {
-        return existing;
+        return existing as VntBox;
       }
 
       final vntBox = await _createBox(config, uiCall);
@@ -521,7 +582,7 @@ class VntManager {
       final active = get(key);
       if (active != null) {
         await vntBox.close();
-        return active;
+        return active as VntBox;
       }
 
       map[key] = vntBox;
@@ -558,7 +619,7 @@ class VntManager {
     connecting = _connectionGate.isCreating;
   }
 
-  VntBox? get(String key) {
+  VntConnection? get(String key) {
     var vntBox = map[key];
     if (vntBox != null && !vntBox.isClosed()) {
       return vntBox;
@@ -687,7 +748,7 @@ class VntManager {
     return true;
   }
 
-  VntBox? getOne() {
+  VntConnection? getOne() {
     if (map.isEmpty) {
       return null;
     }

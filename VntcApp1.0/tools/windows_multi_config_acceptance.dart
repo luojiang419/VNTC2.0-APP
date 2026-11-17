@@ -251,7 +251,7 @@ Future<Map<String, dynamic>?> _waitForAdapter(
   return _adapterState(adapterName);
 }
 
-Map<String, dynamic> _runtimeSummary(VntBox? box) {
+Map<String, dynamic> _runtimeSummary(VntConnection? box) {
   if (box == null) {
     return const {'available': false};
   }

@@ -39,11 +39,13 @@ struct ServiceRuntimeState {
     connect_target: String,
     last_error: String,
     updated_at_unix_ms: u128,
+    network: Option<serde_json::Value>,
 }
 
 impl ServiceRuntimeState {
     fn initial() -> Self {
         Self {
+            network: None,
             schema_version: 1,
             service_state: "running".to_string(),
             connection_state: "idle".to_string(),
@@ -68,6 +70,9 @@ impl ServiceStatusStore {
     fn update(&self, mutate: impl FnOnce(&mut ServiceRuntimeState)) {
         if let Ok(mut state) = self.state.lock() {
             mutate(&mut state);
+            if state.connection_state != "connected" {
+                state.network = None;
+            }
             state.updated_at_unix_ms = now_unix_ms();
             let _ = write_json_atomically(&self.state_path, &*state);
         }
@@ -231,6 +236,7 @@ pub fn run_worker(
             Ok(api) => {
                 retry_delay = Duration::from_secs(2);
                 while !signals.stopping.load(Ordering::SeqCst) {
+                    publish_network(&sink, &api);
                     thread::sleep(CONFIG_POLL_INTERVAL);
                     if signals.reload_requested.swap(false, Ordering::SeqCst) {
                         break;
@@ -265,6 +271,31 @@ pub fn run_worker(
         state.connection_state = "stopped".to_string();
     });
     Ok(())
+}
+
+// 只发布运行状态，不携带网络口令等配置秘密。
+fn publish_network(sink: &ServiceEventSink, api: &VntApi) {
+    let peers = api.device_list();
+    let peer_nat: serde_json::Map<String, serde_json::Value> = peers
+        .iter()
+        .filter_map(|peer| {
+            api.peer_nat_info(&peer.virtual_ip)
+                .map(|nat| (peer.virtual_ip.clone(), serde_json::json!(nat)))
+        })
+        .collect();
+    let current = api.current_device();
+    let network = serde_json::json!({
+        "currentDevice": current, "peers": peers, "routes": api.route_list(),
+        "natInfo": api.nat_info(), "peerNat": peer_nat,
+        "diagnostics": api.p2p_diagnostics(),
+        "upStream": api.up_stream(), "downStream": api.down_stream(),
+        "traffic": api.stream_all().into_iter().map(|(ip, tx, rx)|
+            (ip, tx.to_string(), rx.to_string())).collect::<Vec<_>>()
+    });
+    sink.update(|state| {
+        state.virtual_ip = current.virtual_ip;
+        state.network = Some(network);
+    });
 }
 
 fn configuration_revision(root: &Path) -> Option<String> {
@@ -304,4 +335,32 @@ fn now_unix_ms() -> u128 {
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
         .as_millis()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::api::vnt_api::{RustPeerClientInfo, RustRoute};
+
+    #[test]
+    fn service_network_snapshot_uses_gui_field_names_and_clears_on_disconnect() {
+        let path = std::env::temp_dir().join(format!("vnt-peer-test-{}.json", now_unix_ms()));
+        let store = ServiceStatusStore::new(path.clone());
+        store.update(|state| {
+            state.connection_state = "connected".to_string();
+            state.network = Some(serde_json::json!({
+                "peers": [RustPeerClientInfo { virtual_ip: "10.0.0.3".into(),
+                    name: "peer".into(), status: "Online".into(), client_secret: false }],
+                "routes": [["10.0.0.3", [RustRoute { protocol: "P2P".into(),
+                    addr: "127.0.0.1:1".into(), metric: 1, rt: 23 }]]]
+            }));
+        });
+        let json = store.snapshot_json();
+        assert_eq!(json["network"]["peers"][0]["virtualIp"], "10.0.0.3");
+        assert_eq!(json["network"]["peers"][0]["status"], "Online");
+        assert_eq!(json["network"]["routes"][0][1][0]["rt"], 23);
+        store.update(|state| state.connection_state = "reloading".into());
+        assert!(store.snapshot_json()["network"].is_null());
+        let _ = std::fs::remove_file(path);
+    }
 }
