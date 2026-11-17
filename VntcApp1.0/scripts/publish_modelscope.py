@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import re
 import tempfile
+import shutil
 from urllib.parse import quote
 
 import requests
@@ -58,10 +59,36 @@ def verify_asset(asset):
 
 
 def publish(directory, version, source_commit, notes):
+    # 魔搭普通文本提交会将 CRLF 转为 LF，先生成独立规范化副本及其总校验。
+    with tempfile.TemporaryDirectory(prefix="vnt-modelscope-stage-") as temp:
+        stage = Path(temp)
+        for file in directory.iterdir():
+            if not file.is_file() or file.name == "latest.json" or file.name.startswith('.'):
+                continue
+            data = file.read_bytes()
+            if file.suffix in {'.json', '.txt', '.sha256'}:
+                data = data.replace(b'\r\n', b'\n')
+            (stage / file.name).write_bytes(data)
+        sums = stage / 'SHA256SUMS.txt'
+        if sums.exists():
+            sums.write_bytes(('\n'.join(
+                hashlib.sha256(p.read_bytes()).hexdigest() + '  ' + p.name
+                for p in sorted(stage.iterdir()) if p.name != sums.name
+            ) + '\n').encode())
+        _publish_stage(stage, version, source_commit, notes)
+
+
+def _publish_stage(directory, version, source_commit, notes):
     from concurrent.futures import ThreadPoolExecutor
     from modelscope.hub.api import HubApi
     api = HubApi(token=os.environ.get("MODELSCOPE_TOKEN"))
     manifest = manifest_for(directory, version, source_commit, notes)
+    try:
+        current = public_json(f"{BASE}/resolve/master/latest.json")
+    except requests.HTTPError as error:
+        if error.response.status_code != 404:
+            raise
+        current = None
     # 同版本内容不可覆盖；失败重跑只允许复用同一组产物。
     existing = api.get_model_files(REPOSITORY, recursive=True)
     by_path = {entry["Path"]: entry for entry in existing}
@@ -69,13 +96,9 @@ def publish(directory, version, source_commit, notes):
         remote = by_path.get(f"releases/v{version}/{asset['name']}")
         if remote and (remote.get("Sha256") != asset["sha256"] or
                        remote.get("Size") != asset["size"]):
-            raise ValueError(f"拒绝覆盖已发布的不同内容: {asset['name']}")
-    try:
-        current = public_json(f"{BASE}/resolve/master/latest.json")
-    except requests.HTTPError as error:
-        if error.response.status_code != 404:
-            raise
-        current = None
+            # 尚未启用 latest 的初次发布允许修复被平台转换的文本索引。
+            if current is not None or Path(asset['name']).suffix not in {'.json', '.txt', '.sha256'}:
+                raise ValueError(f"拒绝覆盖已发布的不同内容: {asset['name']}")
     if current:
         current_version = tuple(map(int, current["tag_name"].lstrip("v").split(".")))
         if tuple(map(int, version.split("."))) < current_version:

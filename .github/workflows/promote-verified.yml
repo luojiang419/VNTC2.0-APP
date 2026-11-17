@@ -1,0 +1,32 @@
+name: Promote verified VNT transition
+on:
+  workflow_dispatch:
+    inputs:
+      source_run_id:
+        description: 已通过全部客户端构建的 build.yml 运行 ID
+        required: true
+        type: string
+permissions:
+  contents: read
+concurrency:
+  group: VNT Multi Platform Build-production-release
+  cancel-in-progress: false
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install modelscope==1.36.3 requests
+      - run: python -m unittest discover -s VntcApp1.0/scripts -p test_publish_modelscope.py
+      - name: 发布已验证的四平台产物
+        env:
+          SOURCE_RUN_ID: ${{ inputs.source_run_id }}
+          GH_TOKEN: ${{ github.token }}
+          MODELSCOPE_TOKEN: ${{ secrets.MODELSCOPE_TOKEN }}
+        run: python VntcApp1.0/scripts/promote_verified_release.py

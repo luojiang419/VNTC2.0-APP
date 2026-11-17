@@ -47,6 +47,20 @@ class ManifestTests(unittest.TestCase):
                 publish(root, '4.8.42', 'sha', '')
             self.assertEqual(events, ['assets', 'verified', 'latest'])
 
+    def test_normalizes_text_without_changing_original_artifacts(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            (root / 'VNT_App_4.8.42_Windows_Setup.exe').write_bytes(b'installer')
+            original = b'abc  installer.exe\r\n'
+            (root / 'test.sha256').write_bytes(original)
+            (root / 'SHA256SUMS.txt').write_bytes(b'old\r\n')
+            def inspect(stage, *args):
+                self.assertEqual((stage / 'test.sha256').read_bytes(), original.replace(b'\r\n', b'\n'))
+                self.assertNotIn(b'\r', (stage / 'SHA256SUMS.txt').read_bytes())
+            with patch('publish_modelscope._publish_stage', side_effect=inspect):
+                publish(root, '4.8.42', 'sha', '')
+            self.assertEqual((root / 'test.sha256').read_bytes(), original)
+
     def test_missing_installer_or_invalid_version_is_rejected(self):
         with tempfile.TemporaryDirectory() as temp:
             for version in ['4.8.42', '4.8', '../v1']:
