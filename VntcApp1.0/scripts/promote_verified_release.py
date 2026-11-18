@@ -34,10 +34,10 @@ def main():
         existing=subprocess.run(['gh','release','view',tag,'--repo',REPO],capture_output=True)
         if existing.returncode:
             gh('release','create',tag,'--repo',REPO,'--target',source,'--title','VNT Client '+tag,'--draft','--notes-file',str(notes))
-        release=api('releases/tags/'+tag)
+        release=next(r for r in api('releases?per_page=100') if r['tag_name']==tag)
         assert release['draft'] and release['target_commitish']==source
         gh('release','upload',tag,'--repo',REPO,*[str(f) for f in stage.iterdir()],'--clobber')
-        release=api('releases/tags/'+tag);assets={a['name']:a for a in release['assets']}
+        release=next(r for r in api('releases?per_page=100') if r['tag_name']==tag);assets={a['name']:a for a in release['assets']}
         assert set(assets)=={f.name for f in stage.iterdir()}
         for f in stage.iterdir():
             a=assets[f.name];assert a['state']=='uploaded' and a['size']==f.stat().st_size
